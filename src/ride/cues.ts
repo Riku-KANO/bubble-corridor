@@ -1,6 +1,6 @@
 // キューシート（時刻 → 出来事）と、出来事の配信。
 // 時刻は config の小節から計算する（見どころはすべて小節の頭。誘導だけは見どころの3秒前で小節の頭に乗らない）。
-import { CELESTIAL_BLACKOUT_SEC, DEWFALL_AFTER_BLOOM_BARS, LURE_LEAD_SEC, MOMENT_BARS, RIDE_BARS, SEC_PER_BAR, SECTIONS, SHOTS } from '../config';
+import { BRANCH_DECIDE_AFTER_DOORS_BARS, CELESTIAL_BLACKOUT_SEC, DEWFALL_AFTER_BLOOM_BARS, LURE_LEAD_SEC, MOMENT_BARS, RIDE_BARS, SEC_PER_BAR, SECTIONS, SHOTS } from '../config';
 import type { Cue, CueName, EventBus } from '../contracts/events';
 import type { SectionId } from '../contracts/ids';
 
@@ -27,7 +27,7 @@ const CELESTIAL_START_BAR = startBarOf('celestial');
 const DEPARTURE_START_BAR = startBarOf('departure');
 
 /** 分岐の扉を確定する小節。扉が現れた後（5:50）で、万華鏡の膜（6:00）の手前 */
-const BRANCH_DECIDE_BAR = MOMENT_BARS.rainDoors + 2;
+const BRANCH_DECIDE_BAR = MOMENT_BARS.rainDoors + BRANCH_DECIDE_AFTER_DOORS_BARS;
 
 /** キューシートを作る（時刻は config の小節から計算する）。時刻の昇順で、同じ時刻は作った順 */
 export function buildCueSheet(): Cue[] {

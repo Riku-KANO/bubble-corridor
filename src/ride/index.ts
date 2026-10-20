@@ -5,12 +5,15 @@
 //   comfort.ts 動きの上限の検査
 //   cues.ts    キューシートと出来事の配信
 //   stream.ts  部屋の先読み
+//   validate.ts 外から来る rail.json の検査
 export { createWallClock } from './clock';
 export { describeDesign, generateRideData } from './design';
-export type { DesignInfo, LegInfo } from './design';
+export type { DesignInfo, HighlightName, Landmark, LegInfo } from './design';
 export { createRide } from './rail';
 export { analyzeComfort, comfortPeaks } from './comfort';
 export type { ComfortPeaks } from './comfort';
 export { buildCueSheet, createCueDispatcher } from './cues';
 export type { CueDispatcher } from './cues';
 export { streamingPlan } from './stream';
+export type { StreamingPlan } from './stream';
+export { validateRideData } from './validate';

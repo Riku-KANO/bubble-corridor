@@ -1,6 +1,6 @@
 // 動きの上限の検査（RIDE-2、RIDE-4）。poseAt と同じ式で時刻を細かく進めて測る。
-// 標準は config の MOTION のとおり。穏やかは上下と向きの回転の上限を MOTION.gentleFactor 倍にする
-// （高さは poseAt('gentle') が gentleY を使うので、gentleY があればそれで測ったことになる）。
+// 標準は config の MOTION のとおり。穏やかは上下と向きの回転の上限を MOTION.gentleFactor 倍にして測る。
+// レールは1本（ADR-0008）なので、穏やかの検査は「標準の動きが穏やかの上限以内に収まっている」ことの確認になる。
 import { MOTION } from '../config';
 import type { ComfortMode } from '../contracts/ids';
 import type { ComfortViolation, RideData, RidePose } from '../contracts/ride';

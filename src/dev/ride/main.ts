@@ -1,7 +1,7 @@
 // ride 確認ページ（dev/ride.html）。レールの地図・速度と高さのグラフ・時刻のスライダー。本番のビルドには含まれない。
-//   ?t=秒 で開く時刻、?mode=gentle で穏やかモード。
+//   ?t=秒 で開く時刻。レールは1本（ADR-0008）なので標準も穏やかも同じ道筋で、穏やかの上限（上下 0.3 m/s、回転 7.5°/s）以内に設計してある。
 import { MOMENT_BARS, MOTION, RIDE_DURATION, SEC_PER_BAR, SECTIONS } from '../../config';
-import type { ComfortMode, SectionId } from '../../contracts/ids';
+import type { SectionId } from '../../contracts/ids';
 import type { RidePose } from '../../contracts/ride';
 import { analyzeComfort, comfortPeaks, createRide, describeDesign, generateRideData } from '../../ride';
 
@@ -56,18 +56,27 @@ const fmtSec = (t: number) => {
 const deg = (rad: number) => (rad * 180) / Math.PI;
 
 const params = new URLSearchParams(location.search);
-let mode: ComfortMode = params.get('mode') === 'gentle' ? 'gentle' : 'standard';
 let t = Math.min(RIDE_DURATION, Math.max(0, Number(params.get('t')) || 0));
 let playing = false;
 
 // ── 地図 ──
 const mapCtx = ctx2d('map');
-const MAP = { w: 640, h: 640, pad: 36 };
+const MAP = { w: 640, h: 640, pad: 44 };
 const pts = data.rail.points;
+// 地図の範囲: レールと、目安の円（ホール、天球の入口までの半径）が入るように
 const bounds = pts.reduce(
   (b, p) => ({ x0: Math.min(b.x0, p[0]), x1: Math.max(b.x1, p[0]), z0: Math.min(b.z0, p[2]), z1: Math.max(b.z1, p[2]) }),
   { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity },
 );
+for (const c of [
+  { x: design.hall.x, z: design.hall.z, r: design.hall.radius },
+  { x: design.celestial.center.x, z: design.celestial.center.z, r: design.celestial.entryRadius },
+]) {
+  bounds.x0 = Math.min(bounds.x0, c.x - c.r);
+  bounds.x1 = Math.max(bounds.x1, c.x + c.r);
+  bounds.z0 = Math.min(bounds.z0, c.z - c.r);
+  bounds.z1 = Math.max(bounds.z1, c.z + c.r);
+}
 const scale = Math.min((MAP.w - MAP.pad * 2) / (bounds.x1 - bounds.x0), (MAP.h - MAP.pad * 2) / (bounds.z1 - bounds.z0));
 const mx = (x: number) => MAP.pad + (x - bounds.x0) * scale;
 const my = (z: number) => MAP.pad + (z - bounds.z0) * scale;
@@ -96,6 +105,22 @@ function drawMap(): void {
     c.stroke();
     c.fillText(`${z}`, 4, my(z) - 2);
   }
+  // 部屋の目安の円: 乗り場のホール、天球（中心から出口の膜までの半径と、入口の膜までの半径）
+  const circle = (x: number, z: number, r: number, color: string, dash: number[], label: string) => {
+    c.strokeStyle = color;
+    c.lineWidth = 1.5;
+    c.setLineDash(dash);
+    c.beginPath();
+    c.arc(mx(x), my(z), r * scale, 0, Math.PI * 2);
+    c.stroke();
+    c.setLineDash([]);
+    c.fillStyle = color;
+    c.font = '10px sans-serif';
+    c.fillText(label, mx(x) - 14, my(z) - r * scale - 4);
+  };
+  circle(design.hall.x, design.hall.z, design.hall.radius, '#7db4e655', [], 'ホール');
+  circle(design.celestial.center.x, design.celestial.center.z, design.celestial.exitRadius, '#9d82f055', [], '天球（出口まで）');
+  circle(design.celestial.center.x, design.celestial.center.z, design.celestial.entryRadius, '#9d82f044', [4, 4], '入口まで');
   // 区間ごとの色
   c.lineWidth = 5;
   c.lineCap = 'round';
@@ -175,22 +200,16 @@ function drawMap(): void {
   c.fillStyle = '#8b97ab';
   c.fillText('30m', MAP.pad + 30 * scale + 6, MAP.pad - 10);
 
-  // いまの位置と向き（標準は白、穏やかは橙）
+  // いまの位置と向き
   ride.poseAt(t, 'standard', pose);
-  const std = pose.yaw;
-  ride.poseAt(t, mode, pose);
   const px = mx(pose.x);
   const py = my(pose.z);
-  const arrow = (yaw: number, color: string, len: number) => {
-    c.strokeStyle = color;
-    c.lineWidth = 3;
-    c.beginPath();
-    c.moveTo(px, py);
-    c.lineTo(px + -Math.sin(yaw) * len, py + -Math.cos(yaw) * len);
-    c.stroke();
-  };
-  arrow(std, '#ffffff', 22);
-  if (mode === 'gentle') arrow(pose.yaw, '#ff9f4a', 30);
+  c.strokeStyle = '#ffffff';
+  c.lineWidth = 3;
+  c.beginPath();
+  c.moveTo(px, py);
+  c.lineTo(px + -Math.sin(pose.yaw) * 22, py + -Math.cos(pose.yaw) * 22);
+  c.stroke();
   c.fillStyle = '#ffffff';
   c.beginPath();
   c.arc(px, py, 6, 0, Math.PI * 2);
@@ -201,20 +220,17 @@ function drawMap(): void {
 interface Series {
   t: Float64Array;
   speed: Float64Array;
-  yStd: Float64Array;
-  yGentle: Float64Array;
+  y: Float64Array;
 }
 const series: Series = (() => {
   const n = Math.round(RIDE_DURATION / 0.25) + 1;
-  const s: Series = { t: new Float64Array(n), speed: new Float64Array(n), yStd: new Float64Array(n), yGentle: new Float64Array(n) };
+  const s: Series = { t: new Float64Array(n), speed: new Float64Array(n), y: new Float64Array(n) };
   for (let i = 0; i < n; i++) {
     const tt = i * 0.25;
     s.t[i] = tt;
     ride.poseAt(tt, 'standard', pose);
     s.speed[i] = pose.speed;
-    s.yStd[i] = pose.y;
-    ride.poseAt(tt, 'gentle', pose);
-    s.yGentle[i] = pose.y;
+    s.y[i] = pose.y;
   }
   return s;
 })();
@@ -289,16 +305,19 @@ function drawCursor(b: ChartBox): void {
 
 function drawSpeed(): void {
   const b = speedBox;
-  const yy = drawChartFrame(b, 0, 2.2, [0, 0.5, 1, 1.5, 2]);
-  b.c.fillStyle = '#7fe0a822';
-  b.c.fillRect(b.l, yy(MOTION.cruiseMax), b.w - b.l - b.r, yy(MOTION.cruiseMin) - yy(MOTION.cruiseMax));
-  b.c.strokeStyle = '#ffd479';
-  b.c.setLineDash([4, 4]);
-  b.c.beginPath();
-  b.c.moveTo(b.l, yy(MOTION.highlightSpeed));
-  b.c.lineTo(b.w - b.r, yy(MOTION.highlightSpeed));
-  b.c.stroke();
-  b.c.setLineDash([]);
+  const yy = drawChartFrame(b, 0, 1.6, [0, 0.5, 1, 1.5]);
+  const guide = (v: number, color: string) => {
+    b.c.strokeStyle = color;
+    b.c.setLineDash([4, 4]);
+    b.c.beginPath();
+    b.c.moveTo(b.l, yy(v));
+    b.c.lineTo(b.w - b.r, yy(v));
+    b.c.stroke();
+    b.c.setLineDash([]);
+  };
+  guide(MOTION.highlightSpeed, '#ffd479'); // 見どころ
+  guide(MOTION.driftMax, '#7fe0a8'); // 普段の速さの上限
+  guide(MOTION.afterHighlightMax, '#7fe0a855'); // 見どころの後の上限
   b.c.strokeStyle = '#ffffff';
   b.c.lineWidth = 2;
   b.c.beginPath();
@@ -313,27 +332,20 @@ function drawSpeed(): void {
 
 function drawHeight(): void {
   const b = heightBox;
-  const all = [...series.yStd, ...series.yGentle];
-  const lo = Math.floor(Math.min(...all));
-  const hi = Math.ceil(Math.max(...all));
+  const lo = Math.floor(Math.min(...series.y));
+  const hi = Math.ceil(Math.max(...series.y));
   const ticks: number[] = [];
   for (let v = lo; v <= hi; v += 2) ticks.push(v);
   const yy = drawChartFrame(b, lo, hi, ticks);
-  const line = (arr: Float64Array, color: string, dash: number[]) => {
-    b.c.strokeStyle = color;
-    b.c.lineWidth = 2;
-    b.c.setLineDash(dash);
-    b.c.beginPath();
-    for (let i = 0; i < series.t.length; i++) {
-      const x = tx(b, series.t[i]);
-      if (i === 0) b.c.moveTo(x, yy(arr[i]));
-      else b.c.lineTo(x, yy(arr[i]));
-    }
-    b.c.stroke();
-    b.c.setLineDash([]);
-  };
-  line(series.yStd, '#ffffff', []);
-  line(series.yGentle, '#ff9f4a', [4, 3]);
+  b.c.strokeStyle = '#ffffff';
+  b.c.lineWidth = 2;
+  b.c.beginPath();
+  for (let i = 0; i < series.t.length; i++) {
+    const x = tx(b, series.t[i]);
+    if (i === 0) b.c.moveTo(x, yy(series.y[i]));
+    else b.c.lineTo(x, yy(series.y[i]));
+  }
+  b.c.stroke();
   drawCursor(b);
 }
 
@@ -356,7 +368,7 @@ function setRows(table: HTMLElement, rows: readonly (readonly (string | { text: 
 }
 
 function updateNow(): void {
-  ride.poseAt(t, mode, pose);
+  ride.poseAt(t, 'standard', pose);
   const ok = pose.speed <= MOTION.speedMax;
   setRows($('now'), [
     ['時刻', fmtTime(t)],
@@ -393,10 +405,26 @@ function fillStatic(): void {
       `${fmtSec(l.t0)}–${fmtSec(l.t1)}`,
       `${len.toFixed(0)} m`,
       `平均 ${(len / (l.t1 - l.t0)).toFixed(2)}`,
-      l.cruise === null ? '' : `普段 ${l.cruise.toFixed(2)} m/s`,
+      `最大 ${l.maxSpeed.toFixed(2)}`,
+      `高さ ${l.yMin.toFixed(1)}〜${l.yMax.toFixed(1)} m`,
     ];
   });
   setRows($('legs'), legRows);
+  // 目印（部屋の担当が物を置く基準）
+  const lm = (name: string, p: { t: number; s: number; x: number; y: number; z: number; yaw: number }) => [
+    { text: name, cls: '' },
+    fmtSec(p.t),
+    `(${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`,
+    `yaw ${deg(p.yaw).toFixed(0)}°`,
+  ];
+  setRows($('landmarks'), [
+    lm('乗り場の始点', design.dock),
+    ...design.membranes.map((m) => lm(`膜 → ${LABEL[m.to]}`, m)),
+    ...Object.entries(design.highlights).map(([name, p]) => lm(name, p)),
+    [{ text: '天球の中心', cls: '' }, '9:50', `(${design.celestial.center.x.toFixed(1)}, ${design.celestial.center.y.toFixed(1)}, ${design.celestial.center.z.toFixed(1)})`, `入口まで ${design.celestial.entryRadius.toFixed(0)} m / 出口まで ${design.celestial.exitRadius.toFixed(0)} m`],
+    [{ text: 'ホール', cls: '' }, '', `中心 (${design.hall.x.toFixed(1)}, ${design.hall.z.toFixed(1)})`, `半径 ${design.hall.radius.toFixed(1)} m`],
+  ]);
+  setRows($('floors'), [[{ text: '床・水面の高さ', cls: '' }, `乗り場の水面 ${design.floors.platformWater}`, `温室の床 ${design.floors.greenhouseFloor}`, `回廊の床 ${design.floors.rainFloor}`, `岸の水面 ${design.floors.dawnWater}`]]);
 }
 
 function redraw(): void {
@@ -410,12 +438,6 @@ function redraw(): void {
 const slider = $<HTMLInputElement>('time');
 slider.addEventListener('input', () => {
   t = Number(slider.value);
-  redraw();
-});
-const modeSel = $<HTMLSelectElement>('mode');
-modeSel.value = mode;
-modeSel.addEventListener('change', () => {
-  mode = modeSel.value === 'gentle' ? 'gentle' : 'standard';
   redraw();
 });
 const rateSel = $<HTMLSelectElement>('rate');
