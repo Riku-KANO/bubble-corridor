@@ -1,17 +1,47 @@
 // 部屋の契約テストの道具（統合担当。部屋の担当は変更しない）。各部屋の room.test.ts から使う。
 // 部屋を本物のレールと偽のイベントで読み込み、設計書の決まり（物との最短距離、見どころが前にある、
 // 隠れた泡、描画の予算、部屋の空気）を部屋の実装に頼らずに確かめる。
+import { existsSync, readFileSync } from 'node:fs';
 import * as THREE from 'three/webgpu';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { expect } from 'vitest';
 import type { Cue, EventBus, RideEvents, Vec3Tuple } from '../contracts/events';
 import type { ComfortMode, DoorChoice, SectionId } from '../contracts/ids';
-import type { RidePose } from '../contracts/ride';
-import type { RoomContext, RoomFactory, RoomFrame, RoomModule } from '../contracts/room';
+import type { RideData, RidePose } from '../contracts/ride';
+import type { AssetLoader, RoomContext, RoomFactory, RoomFrame, RoomModule } from '../contracts/room';
 import { GONDOLA_DIAMETER, MOTION } from '../config';
 import { presetFor, type QualityTier } from '../core/quality';
 import { buildCueSheet, createRide, generateRideData } from '../ride';
 
-export const ride = createRide(generateRideData());
+const ASSETS = new URL('../../public/assets/', import.meta.url);
+
+/** 出荷するレール（public/assets/rail.json。Blender から書き出したもの）。なければ生成器 */
+function shippedRideData(): RideData {
+  const file = new URL('rail.json', ASSETS);
+  if (existsSync(file)) {
+    const data = JSON.parse(readFileSync(file, 'utf8')) as RideData;
+    if (data?.version === 1) return data;
+  }
+  return generateRideData();
+}
+
+export const ride = createRide(shippedRideData());
+
+/** node でアセットを読む（glb は画像を埋め込まない決まり。テクスチャは中身のない 1×1 を返す） */
+export const nodeAssets: AssetLoader = {
+  async gltf(path) {
+    const buf = readFileSync(new URL(path, ASSETS));
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    const g = await new GLTFLoader().parseAsync(ab, '');
+    return { scene: g.scene, animations: g.animations };
+  },
+  async texture(path) {
+    if (!existsSync(new URL(path, ASSETS))) throw new Error(`テクスチャがない: ${path}`);
+    const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    t.needsUpdate = true;
+    return t;
+  },
+};
 export const cues = buildCueSheet();
 
 export interface RoomHarness {
@@ -37,6 +67,7 @@ export async function loadRoom(
   };
   const ctx: RoomContext = {
     ride,
+    assets: nodeAssets,
     events: bus,
     quality: presetFor(opts.tier ?? 'high', { isMobile: false, isXR: false }),
     comfort: () => opts.comfort ?? 'standard',
@@ -211,4 +242,69 @@ export async function expectRoomContract(factory: RoomFactory, sections: readonl
   });
   room.dispose();
   expect(spies.every((s) => s()), '形をすべて解放する').toBe(true);
+}
+
+/** userData.role で物を探す（部屋の担当は、テストが探す物に role を付ける: membrane / shell / stars / pattern / lamp / ticket / arch / rim） */
+export function findByRole(root: THREE.Object3D, role: string): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (o.userData.role === role) out.push(o);
+  });
+  return out;
+}
+
+/** 世界座標の中心 */
+export function worldCenter(o: THREE.Object3D): THREE.Vector3 {
+  const box = new THREE.Box3().setFromObject(o);
+  return box.isEmpty() ? o.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
+}
+
+/**
+ * TRN-1 部屋の境目はすべて膜。膜はその部屋を出る側の部屋が持つ（近づくあいだ見えるので）。
+ * 部屋の最後の区間の終わりのレールの点から 3m 以内に role=membrane の物があり、clearanceExempt であること。
+ */
+export function expectExitMembrane(room: RoomModule, section: SectionId): void {
+  const { s1 } = ride.sectionSpan(section);
+  const p = ride.pointAt(s1);
+  const at = new THREE.Vector3(p.x, p.y, p.z);
+  const membranes = findByRole(room.root, 'membrane');
+  expect(membranes.length, `${room.id} の出口の膜`).toBeGreaterThan(0);
+  const nearest = Math.min(...membranes.map((m) => new THREE.Box3().setFromObject(m).distanceToPoint(at)));
+  expect(nearest, `${room.id} の膜とレールの終わりの距離`).toBeLessThanOrEqual(3);
+  for (const m of membranes) {
+    let exempt = false;
+    for (let o: THREE.Object3D | null = m; o; o = o.parent) if (o.userData.clearanceExempt) exempt = true;
+    expect(exempt, '膜は通り抜けるので clearanceExempt').toBe(true);
+  }
+}
+
+/** INT-6 隠れた小さな泡: ちょうど1つ、小さく（半径 0.25m 以下）、触れると hiddenFound を出す */
+export async function expectHiddenBubble(factory: RoomFactory, section: SectionId): Promise<void> {
+  const h = await loadRoom(factory);
+  const hidden = h.room.touchables.filter((t) => t.kind === 'hidden-bubble');
+  expect(hidden, '隠れた泡の数').toHaveLength(1);
+  expect(hidden[0].radius).toBeLessThanOrEqual(0.25);
+  expect(hidden[0].section).toBe(section);
+  hidden[0].onTouch({ t: ride.sectionTime(section).t0 + 10, source: 'pointer', point: [0, 0, 0] });
+  expect(h.emitted.filter((e) => e.type === 'hiddenFound').map((e) => e.payload)).toEqual([{ section }]);
+}
+
+/** 触れられる物のうち、区間のどこかでレールから dist 以内に来るものの割合（手が届く・縁が光る） */
+export function reachableFraction(room: RoomModule, kind: string, sections: readonly SectionId[], dist: number): number {
+  const list = room.touchables.filter((t) => t.kind === kind);
+  if (list.length === 0) return 0;
+  const samples: THREE.Vector3[] = [];
+  for (const id of sections) {
+    const { s0, s1 } = ride.sectionSpan(id);
+    for (let s = s0; s <= s1; s += 1) {
+      const p = ride.pointAt(s);
+      samples.push(new THREE.Vector3(p.x, p.y, p.z));
+    }
+  }
+  let ok = 0;
+  for (const t of list) {
+    const c = t.object.getWorldPosition(new THREE.Vector3());
+    if (samples.some((p) => p.distanceTo(c) <= dist)) ok++;
+  }
+  return ok / list.length;
 }
