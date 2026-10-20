@@ -1,5 +1,5 @@
 // 部屋（セット）の契約。各部屋の担当は src/rooms/<部屋>/ で RoomModule を実装する。
-import type { Camera, ColorRepresentation, Object3D, Texture } from 'three';
+import type { AnimationClip, Camera, ColorRepresentation, Group, Object3D, Texture } from 'three';
 import type { QualityPreset } from '../core/quality';
 import type { Cue, EventBus, Vec3Tuple } from './events';
 import type { ComfortMode, DoorChoice, RoomId, SectionId, TouchKind, TouchSource } from './ids';
@@ -45,8 +45,20 @@ export interface Atmosphere {
   readonly environment?: Texture | null;
 }
 
+/**
+ * アセットの読み込み口（Blender で作って書き出した glb とライトマップ）。パスは public/assets/ からの相対。
+ * 本番はブラウザの GLTFLoader、テストは node でファイルを読む（src/rooms/testing.ts）。
+ * glb には画像を埋め込まない（ライトマップは別の PNG / WebP。texture() で読む）。
+ */
+export interface AssetLoader {
+  gltf(path: string): Promise<{ readonly scene: Group; readonly animations: readonly AnimationClip[] }>;
+  /** 色空間は呼び出し側で決める（ライトマップは線形のまま） */
+  texture(path: string): Promise<Texture>;
+}
+
 export interface RoomContext {
   readonly ride: Ride;
+  readonly assets: AssetLoader;
   readonly events: EventBus;
   readonly quality: QualityPreset;
   /** 現在の快適モード（穏やかでは万華鏡の模様の回転を止める） */

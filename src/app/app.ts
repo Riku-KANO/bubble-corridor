@@ -31,6 +31,7 @@ import { buildCueSheet, createCueDispatcher, createRide, createWallClock, genera
 import { ROOM_FACTORIES } from '../rooms';
 import { loadProgress as readProgress, loadSettings, mountUi, saveProgress, saveSettings } from '../ui';
 import { createXRSystem } from '../xr';
+import { createAssetLoader } from './assets';
 import { createDebugOverlay } from './debug';
 import { INITIAL_FLOW, reduceFlow, type FlowAction, type FlowState } from './flow';
 import { parseParams } from './params';
@@ -113,6 +114,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // ── 部屋 ──
   const roomCtx: RoomContext = {
     ride,
+    assets: createAssetLoader(),
     events: bus,
     quality,
     comfort: () => settings.comfort,

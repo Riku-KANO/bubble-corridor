@@ -1,17 +1,47 @@
 // 部屋の契約テストの道具（統合担当。部屋の担当は変更しない）。各部屋の room.test.ts から使う。
 // 部屋を本物のレールと偽のイベントで読み込み、設計書の決まり（物との最短距離、見どころが前にある、
 // 隠れた泡、描画の予算、部屋の空気）を部屋の実装に頼らずに確かめる。
+import { existsSync, readFileSync } from 'node:fs';
 import * as THREE from 'three/webgpu';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { expect } from 'vitest';
 import type { Cue, EventBus, RideEvents, Vec3Tuple } from '../contracts/events';
 import type { ComfortMode, DoorChoice, SectionId } from '../contracts/ids';
-import type { RidePose } from '../contracts/ride';
-import type { RoomContext, RoomFactory, RoomFrame, RoomModule } from '../contracts/room';
+import type { RideData, RidePose } from '../contracts/ride';
+import type { AssetLoader, RoomContext, RoomFactory, RoomFrame, RoomModule } from '../contracts/room';
 import { GONDOLA_DIAMETER, MOTION } from '../config';
 import { presetFor, type QualityTier } from '../core/quality';
 import { buildCueSheet, createRide, generateRideData } from '../ride';
 
-export const ride = createRide(generateRideData());
+const ASSETS = new URL('../../public/assets/', import.meta.url);
+
+/** 出荷するレール（public/assets/rail.json。Blender から書き出したもの）。なければ生成器 */
+function shippedRideData(): RideData {
+  const file = new URL('rail.json', ASSETS);
+  if (existsSync(file)) {
+    const data = JSON.parse(readFileSync(file, 'utf8')) as RideData;
+    if (data?.version === 1) return data;
+  }
+  return generateRideData();
+}
+
+export const ride = createRide(shippedRideData());
+
+/** node でアセットを読む（glb は画像を埋め込まない決まり。テクスチャは中身のない 1×1 を返す） */
+export const nodeAssets: AssetLoader = {
+  async gltf(path) {
+    const buf = readFileSync(new URL(path, ASSETS));
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    const g = await new GLTFLoader().parseAsync(ab, '');
+    return { scene: g.scene, animations: g.animations };
+  },
+  async texture(path) {
+    if (!existsSync(new URL(path, ASSETS))) throw new Error(`テクスチャがない: ${path}`);
+    const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    t.needsUpdate = true;
+    return t;
+  },
+};
 export const cues = buildCueSheet();
 
 export interface RoomHarness {
@@ -37,6 +67,7 @@ export async function loadRoom(
   };
   const ctx: RoomContext = {
     ride,
+    assets: nodeAssets,
     events: bus,
     quality: presetFor(opts.tier ?? 'high', { isMobile: false, isXR: false }),
     comfort: () => opts.comfort ?? 'standard',
