@@ -22,8 +22,6 @@ import * as THREE from 'three/webgpu';
 import {
   cameraViewMatrix,
   cos,
-  densityFogFactor,
-  diffuseColor,
   dot,
   exp,
   float,
@@ -32,27 +30,23 @@ import {
   materialEmissive,
   materialOpacity,
   max,
-  metalness,
   mix,
   mx_noise_float,
   normalView,
   normalWorld,
+  output,
   positionLocal,
   positionView,
   positionViewDirection,
   positionWorld,
   pow,
-  rangeFogFactor,
-  reference,
   reflectVector,
-  renderGroup,
   saturate,
   select,
   sin,
   smoothstep,
   specularColor,
   specularColorBlended,
-  specularF90,
   step,
   uniform,
   vec3,
@@ -87,6 +81,8 @@ export interface GlassParams {
   /**
    * 正面（真正面から見たところ）の虹色の強さ（0〜1）。既定は 0.01（縁だけで見せる。泡の内側から見ても視界の中央は澄んだまま）。
    * 虹色の膜の板（部屋の境目の膜）のように、面全体に色を出したいときだけ上げる。
+   * 両面（doubleSided）の物は、カメラがその境界球の内側に入ると「殻の内側」として扱い、視界の外周だけにかすかに虹色を出す
+   * （正面は無色、時刻で全体の色が回らない、光のハイライトはほぼ消す）。両面で面全体の色を保ちたい膜は face を上げる（上げた分だけ内側扱いにならない）。
    */
   readonly face?: number;
 }
@@ -251,25 +247,33 @@ class GlassNodeMaterial extends THREE.MeshStandardNodeMaterial {
    */
   centerSpecular = 1;
 
+  // three r186 の MeshStandardNodeMaterial.setupSpecular: specularColor=0.04、specularColorBlended=mix(0.04, 拡散色, 金属度)、F90=1。
+  // 自前で組み直さず、標準の結果に倍率を掛けるだけにする（three の版が変わっても標準の変更に追従する）。
   override setupSpecular() {
-    const f0 = vec3(0.04 * this.centerSpecular);
-    specularColor.assign(f0);
-    specularColorBlended.assign(mix(f0, diffuseColor.rgb, metalness));
-    specularF90.assign(1.0);
+    super.setupSpecular();
+    if (this.centerSpecular !== 1) {
+      specularColor.assign(specularColor.mul(this.centerSpecular));
+      specularColorBlended.assign(specularColorBlended.mul(this.centerSpecular));
+    }
   }
 
+  /**
+   * three r186 の NodeMaterial.setupFog は、`builder.fogNode`（scene.fog から作られる、または scene.fogNode）を
+   * output（vec4）に当てて F(x) = mix(x.rgb, 霧の色, f) を得る。ガラスの色は premultiplied（rgb は A を掛けた後）なので、
+   * 欲しいのは G = rgb × (1-f) + 霧の色 × f × A。F は x.rgb について線形なので、A で割った色に当てて A を掛け直す:
+   *   G = F(rgb / A) × A
+   * 霧の中身（Fog・FogExp2・独自の fogNode）には依らない。fogNode は 1 回だけ評価する
+   * （同じノードを2回使うと、three はその計算を一時変数にまとめて使い回すので、2回目に output を変えても値が変わらない）。
+   */
   override setupFog(builder: Parameters<THREE.MeshStandardNodeMaterial['setupFog']>[0], outputNode: Parameters<THREE.MeshStandardNodeMaterial['setupFog']>[1]) {
-    const fog = (builder as unknown as { scene?: { fog?: { isFog?: boolean; isFogExp2?: boolean } | null } }).scene?.fog;
-    if (!fog || !(fog.isFog || fog.isFogExp2)) return super.setupFog(builder, outputNode);
-    // three 本体と同じ作り（scene.fog の値を参照するノード。型定義に setGroup がないので広げて呼ぶ）
-    const ref = <T extends 'color' | 'float'>(name: string, type: T) =>
-      (reference(name, type, fog) as unknown as { setGroup(g: unknown): THREE.Node<T extends 'color' ? 'vec3' : 'float'> }).setGroup(renderGroup);
-    const color = ref('color', 'color');
-    const factor = fog.isFogExp2 ? densityFogFactor(ref('density', 'float')) : rangeFogFactor(ref('near', 'float'), ref('far', 'float'));
+    const fogNode = (builder as unknown as { fogNode?: THREE.Node<'vec4'> | null }).fogNode;
+    if (!fogNode) return outputNode;
     const out = outputNode as THREE.Node<'vec4'>;
-    const rgb = out.rgb;
-    const a = out.a;
-    return vec4(mix(rgb, color.mul(a), factor), a);
+    // A が 0 に近い所（縁の反射だけの所）でも割り算が壊れないよう下限を置く（掛け直すので結果はほぼ変わらない）
+    const a = out.a.max(1e-3);
+    output.assign(vec4(out.rgb.div(a), out.a));
+    const fogged = fogNode.toVar();
+    return vec4(fogged.rgb.mul(a), out.a);
   }
 }
 
@@ -345,6 +349,21 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
   if (spec.edgeFade > 0) alpha = alpha.mul(mix(float(1), nv.mul(0.45).add(0.55), spec.edgeFade));
   alpha = alpha.add(uHighlight.mul(fres).mul(0.12));
 
+  // ── カメラと物の位置関係（波紋と、殻の内側の見え方で使う。どれも 0 で割らない） ──
+  const radius = uBounds.w.max(1e-4);
+  const centerView = cameraViewMatrix.mul(vec4(uBounds.xyz, 1)).xyz;
+  const centerZ = centerView.z.negate(); // 中心の奥行き（前が正）
+  const camDist = length(centerView);
+  /** 視線の正面からの角度の正弦（0 = 画面の中央、視野の端で 0.6〜0.9）。画面上の半径の代わり */
+  const gazeR = length(positionView.xy).div(length(positionView).max(1e-4));
+  const cameraOutside = step(radius.mul(1.05), camDist).mul(step(radius.mul(0.25), centerZ));
+  /**
+   * カメラが殻の内側にいる度合い（0〜1。境界球の少し内外で滑らかに）。両面の殻（ゴンドラ、天球）だけが対象。
+   * 内側では視界のどこでも nv ≈ 1（縁がない）ので、縁の虹色・光のハイライトを nv ではなく画面上の半径で測る。
+   * face を上げた物（膜の板）は内側扱いにしない。
+   */
+  const insideW: THREE.Node<'float'> = params.doubleSided ? float(1).sub(smoothstep(radius.mul(0.9), radius.mul(1.1), camDist)).mul(1 - face) : float(0);
+
   // ── 反射（視線の反射方向だけで描く。照明は setGlassLighting の共有 uniform） ──
   const refl = reflectVector;
   const rimTint = mix(uGround, uSky, smoothstep(-0.45, 0.55, refl.y));
@@ -355,13 +374,15 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
   const reflection = rimTint
     .mul(fres)
     .mul(rimStrength * 1.25)
-    .add(uKeyColor.mul(keyBroad.add(keySharp)).mul(uKeyIntensity).mul(0.35 + rimStrength))
+    // 殻の内側では、反射方向が「視線の真後ろ」になり、広いハイライトが視界の下などに大きな白い塊として出る。ほぼ消す
+    .add(uKeyColor.mul(keyBroad.add(keySharp)).mul(uKeyIntensity).mul(0.35 + rimStrength).mul(mix(float(1), float(0.1), insideW)))
     .mul(fakeScale);
 
   // ── 薄膜干渉の虹色 ──
   let film: THREE.Node<'vec3'> = vec3(0);
   if (filmStrength > 0.001) {
-    const thick = path.sub(1).clamp(0, 2.6);
+    // 厚み（光が通る道のり）: 外から見るときは視線と法線の角度から。殻の内側では画面上の半径から（視界の外周ほど厚く見える）
+    const thick = mix(path.sub(1).clamp(0, 2.6), gazeR.mul(1.6), insideW);
     // 膜の厚みのむら: 渦のように流れる。low はノイズを使わずサイン波だけ
     const drift = vec3(0, uTime.mul(-0.045), uTime.mul(0.03));
     let swirl: THREE.Node<'float'>;
@@ -374,13 +395,17 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
     } else {
       swirl = mx_noise_float(positionLocal.mul(2.1).add(drift)).mul(0.65).add(mx_noise_float(positionLocal.mul(4.7).add(drift.mul(1.8))).mul(0.35));
     }
-    const phase = thick.mul(0.5).add(swirl.mul(0.34)).add(uTime.mul(0.02));
+    // 時刻で全体の色が回る項は、外から見るときだけ（殻の内側では視界の全体がほぼ一様なので、全体の色が時間で移ってしまう）
+    const phase = thick.mul(0.5).add(swirl.mul(0.34)).add(uTime.mul(0.02).mul(float(1).sub(insideW)));
     const wave = vec3(0, 0.33, 0.67).add(phase);
     const rainbow = vec3(0.5).add(vec3(0.5).mul(cos(wave.mul(6.28318))));
     // 色がきつすぎないよう白へ寄せる
     const pastel = mix(vec3(0.72), rainbow, 0.78);
-    // 縁ほど強く、正面は face だけ（視界の中央を澄んだままにする）
-    const amount = float(face).add(edge.mul(1.2 * (1 - face)));
+    // 縁ほど強く、正面は face だけ（視界の中央を澄んだままにする）。
+    // 殻の内側では、視界の外周（中央から約 27° の外）だけにかすかに出し、中央は 0
+    const amountOut = float(face).add(edge.mul(1.2 * (1 - face)));
+    const amountIn = smoothstep(0.5, 0.9, gazeR).mul(0.012);
+    const amount = mix(amountOut, amountIn, insideW);
     film = pastel.mul(filmStrength).mul(amount);
     alpha = alpha.add(amount.mul(0.05 * filmStrength));
   }
@@ -401,20 +426,17 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
   //  ・触れた点があれば世界座標でそこから
   //  ・なければ、カメラが物の外にあるとき（中心が前にあるとき）は見えている面の中心から（画面の上で測る）
   //  ・カメラが球殻の内側にいる、または中心がカメラの横・後ろのときは、視線の正面から外へ
-  const radius = uBounds.w.max(1e-4);
-  const centerView = cameraViewMatrix.mul(vec4(uBounds.xyz, 1)).xyz;
-  const centerZ = centerView.z.negate(); // 中心の奥行き（前が正）
   const centerZSafe = centerZ.max(1e-3);
   const fragZSafe = positionView.z.negate().max(1e-4);
   const projected = length(positionView.xy.div(fragZSafe).sub(centerView.xy.div(centerZSafe))).div(radius.div(centerZSafe));
-  const gaze = length(positionView.xy).div(length(positionView).max(1e-4)).mul(1.5);
-  const cameraOutside = step(radius.mul(1.05), length(centerView)).mul(step(radius.mul(0.25), centerZ));
+  const gaze = gazeR.mul(1.5);
   const dSurface = mix(gaze, projected, cameraOutside);
   const dWorld = length(positionWorld.sub(uPulseOrigin.xyz)).div(radius.mul(1.1));
   const d = mix(dSurface, dWorld, uPulseOrigin.w);
   // 広がり方は最初が速く、だんだんゆっくり（水面の波紋）。縁を越えて抜けきる
-  const front = float(1).sub(float(1).sub(p).pow(2)).mul(1.7);
-  const ring = exp(d.sub(front).div(0.11).pow(2).negate());
+  const front = float(1).sub(float(1).sub(p).mul(float(1).sub(p))).mul(1.7);
+  const q = d.sub(front).div(0.11); // 負になりうる。pow の底に負を渡すと未定義なので、2乗は掛け算で
+  const ring = exp(q.mul(q).negate());
   const trail = float(1).sub(smoothstep(front.sub(0.55), front, d)).mul(0.07);
   const fade = float(1).sub(p).pow(1.4);
   const pulseTint = mix(vec3(1.0, 0.95, 0.86), mix(vec3(0.72), vec3(0.5).add(vec3(0.5).mul(cos(vec3(0, 0.33, 0.67).add(d.mul(0.7)).mul(6.28318)))), 0.7), filmStrength);

@@ -6,7 +6,7 @@ import '@fontsource/noto-sans-jp/400.css';
 import '../../styles/base.css';
 import './dev.css';
 import * as THREE from 'three/webgpu';
-import { float, length, mix, screenSize, screenUV, smoothstep, vec2, vec3 } from 'three/tsl';
+import { color as colorNode, float, fog as fogNode, length, mix, rangeFogFactor, screenSize, screenUV, smoothstep, vec2, vec3 } from 'three/tsl';
 import { createCondensation, type Condensation } from '../../core/fog/condensation';
 import {
   createBrass,
@@ -167,14 +167,16 @@ function applyLighting(name: string): void {
 }
 applyLighting(lightParam);
 
-// ── 霧: ?mist=近,遠（例 ?mist=5,26）。ガラスが霧に溶けるかを確かめる ──
+// ── 霧: ?mist=近,遠（例 ?mist=5,26、?fognode で scene.fogNode）。ガラスが霧に溶けるかを確かめる ──
 const mistParam = params.get('mist');
 if (mistParam) {
   const [near, far] = mistParam.split(',').map(Number);
   const color = new THREE.Color(0xdfe9d8); // 温室の霧の色
   scene.backgroundNode = null;
   scene.background = color;
-  scene.fog = new THREE.Fog(color, near || 5, far || 26);
+  // ?fognode を付けると scene.fog ではなく scene.fogNode（TSL の霧）で同じ霧を作る（どちらでもガラスが霧に溶けること）
+  if (params.has('fognode')) scene.fogNode = fogNode(colorNode(color), rangeFogFactor(near || 5, far || 26));
+  else scene.fog = new THREE.Fog(color, near || 5, far || 26);
 }
 
 // ── ガラスの並び: 球（上段）・板（中段）・泡（下段）。真鍮の枠付き ──

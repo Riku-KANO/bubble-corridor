@@ -339,8 +339,10 @@ export function createCondensation(opts: CondensationOptions): Condensation {
   let radialSprite: HTMLCanvasElement | null = null; // 広がりの縁の形（一度だけ作る）
   let rampSprite: HTMLCanvasElement | null = null; // 書き進みの先端のぼかし（一度だけ作る）
   const hasCtx = ctx !== null;
-  /** 拭き取りの形を作り直さなくてよいか調べる鍵（書き進み・残り・配置が同じなら前のまま） */
-  let wipeKey = '';
+  /** 拭き取りの形を作り直さなくてよいか調べるための、前に作ったときの値（書き進み・残り・配置が同じなら前のまま。数で比べる） */
+  let wipeVersion = -1;
+  let wipeProgress = -1;
+  let wipeAmount = -1;
   let layoutVersion = 0;
 
   let density = 0;
@@ -369,7 +371,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     textLayer = makeCanvas(canvas.width, canvas.height);
     maskLayer = makeCanvas(canvas.width, canvas.height);
     wipeLayer = makeCanvas(canvas.width, canvas.height);
-    wipeKey = '';
+    wipeVersion = -1;
   };
 
   const releaseTextLayers = () => {
@@ -380,7 +382,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
       }
     }
     textLayer = maskLayer = wipeLayer = null;
-    wipeKey = '';
+    wipeVersion = -1;
   };
 
   /** 文字を捨てる（拭き取りの跡も、canvas も残さない） */
@@ -456,7 +458,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     g.setTransform(1, 0, 0, 1, 0, 0);
     t.layout = { sizePx: size, lineH: size * lh, fontSpec, lines, spans };
     layoutVersion++;
-    wipeKey = '';
+    wipeVersion = -1;
   };
 
   /** 書き進みの形: 各行を左から、先端をやわらかくぼかして現れさせる */
@@ -524,9 +526,10 @@ export function createCondensation(opts: CondensationOptions): Condensation {
       const wg = context2d(wipeLayer);
       if (!wg) return;
       // 書き進みも残りも配置も変わっていなければ、拭き取りの形は前のまま使う（曇りだけが動く間は作り直さない）
-      const key = `${layoutVersion}|${text.progress.toFixed(4)}|${text.amount.toFixed(4)}`;
-      if (key !== wipeKey) {
-        wipeKey = key;
+      if (wipeVersion !== layoutVersion || wipeProgress !== text.progress || wipeAmount !== text.amount) {
+        wipeVersion = layoutVersion;
+        wipeProgress = text.progress;
+        wipeAmount = text.amount;
         drawMask(text);
         wg.setTransform(1, 0, 0, 1, 0, 0);
         wg.globalCompositeOperation = 'source-over';

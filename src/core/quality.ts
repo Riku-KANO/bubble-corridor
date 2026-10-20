@@ -107,16 +107,24 @@ const SLOW_RATIO = 1.15;
  * そのため「余裕がある」の基準を 1 未満にせず、守れている状態が続けば試しに倍率を上げる。
  */
 const SETTLED_RATIO = 1.05;
+/** 目標のこの倍以下が続くなら、垂直同期の下限ではなく本当に余裕がある（高リフレッシュレートの画面、または場面が軽くなった） */
+const EASY_RATIO = 0.8;
 /** 1回に下げる量（大きく外したときは STEP_BIG）。1回の変化は 0.1 以下 */
 const STEP_DOWN = 0.05;
 const STEP_BIG = 0.1;
 const BIG_RATIO = 1.6;
 const STEP_UP = 0.05;
-/** 戻す（試しに上げる）には、守れている窓がこの回数だけ続く必要がある（下げた直後に戻して行ったり来たりしない） */
+/** 試しに上げるには、守れている窓がこの回数だけ続く必要がある（下げた直後に戻して行ったり来たりしない） */
 const LIGHT_WINDOWS = 4;
-const LIGHT_WINDOWS_MAX = 32;
-/** 上げた直後（この窓の数以内）にまた重くなったら、上げた分だけ戻し、次に上げるまでの待ちを倍にする */
-const FLAP_WINDOWS = 10;
+/** 試しに上げた直後は、この数のフレームだけで判定して、重ければすぐ戻す（0.5秒の窓を待たない） */
+const PROBE_FRAMES = 8;
+/**
+ * 試しに上げて失敗した倍率の手前を「天井」として覚え、この時間は上げない（ms）。
+ * 失敗が続くたびに倍にする（最大 8 倍）。重い部屋に居続けても、試しの上げと戻しが際限なく繰り返されない。
+ * 天井は reset()、守れた試し、または本当に余裕のある窓（EASY_RATIO 以下）が続いたときにも外れる。
+ */
+const CEILING_HOLD_MS = 60_000;
+const CEILING_HOLD_MAX = 8;
 /** 1フレームの時間の上限（ms）。タブを離れた、シェーダのコンパイルなど一度きりの停止で窓の長さを狂わせない */
 const FRAME_CLAMP_MS = 100;
 
@@ -125,20 +133,29 @@ const FRAME_CLAMP_MS = 100;
  * 描画解像度の倍率を上下させる。約0.5秒の窓ごとのフレーム時間の中央値で判断する（毎フレームは変えない）。
  *  ・目標の 1.15 倍を超える窓: すぐ下げる（0.05。1.6 倍超なら 0.1）。
  *  ・目標の 1.05 倍以下の窓が 4 つ続き、倍率が初期値より下: 試しに 0.05 上げる。
- *  ・上げた直後に重くなったら、上げた分だけ戻し、次に上げるまでの待ちを倍にする（最大 32 窓）。
+ *  ・試しに上げた直後は 8 フレームだけで判定し、重ければすぐ戻して、その倍率を「天井」として 60 秒（失敗が続けば倍々）上げない。
+ *  ・試しの判定を通っても、次の窓が重ければ同じく戻して天井にする（試しのときだけの分岐。普通の重さの変化とは区別する）。
  */
 export class DynamicResolution {
   private current: number;
   private readonly frames = new Float32Array(WINDOW_FRAMES);
   private count = 0;
   private sumMs = 0;
+  /** reset() からの時間（ms）。天井の期限の物差し */
+  private elapsedMs = 0;
   /** 守れている窓が連続した数 */
   private light = 0;
-  private lightNeeded = LIGHT_WINDOWS;
-  /** 最後に上げてから経った窓の数 */
-  private sinceUp = Infinity;
-  /** 試しに上げて、まだ結果が出ていない */
+  /** 余裕のある窓が連続した数 */
+  private easy = 0;
+  /** 試しに上げて、まだ結果が出ていない（次の窓まで） */
   private probing = false;
+  /** 試しの判定に使うフレームの残り数と、その記録 */
+  private probeLeft = 0;
+  private readonly probeFrames = new Float32Array(PROBE_FRAMES);
+  /** 試しに失敗した倍率の手前（これを超えて上げない）。null = 制限なし */
+  private ceiling: number | null = null;
+  private ceilingUntil = 0;
+  private failStreak = 0;
 
   constructor(private readonly preset: QualityPreset) {
     this.current = preset.renderScale;
@@ -152,14 +169,23 @@ export class DynamicResolution {
   sample(frameMs: number): number {
     if (!Number.isFinite(frameMs) || frameMs <= 0) return this.current;
     const ms = Math.min(frameMs, FRAME_CLAMP_MS);
+    this.elapsedMs += ms;
+
+    // 試しに上げた直後: 短い窓で判定して、重ければすぐ戻す
+    if (this.probeLeft > 0) {
+      this.probeFrames[PROBE_FRAMES - this.probeLeft] = ms;
+      if (--this.probeLeft === 0 && this.ratioOf(median(this.probeFrames, PROBE_FRAMES)) > SLOW_RATIO) this.failProbe();
+      return this.current;
+    }
+
     this.sumMs += ms;
     this.frames[this.count++] = ms;
     if (this.sumMs < WINDOW_MS && this.count < WINDOW_FRAMES) return this.current;
 
-    const median = this.median();
+    const m = median(this.frames, this.count);
     this.sumMs = 0;
     this.count = 0;
-    this.judge(median);
+    this.judge(this.ratioOf(m));
     return this.current;
   }
 
@@ -167,58 +193,86 @@ export class DynamicResolution {
     this.current = this.preset.renderScale;
     this.sumMs = 0;
     this.count = 0;
+    this.elapsedMs = 0;
     this.light = 0;
-    this.lightNeeded = LIGHT_WINDOWS;
-    this.sinceUp = Infinity;
+    this.easy = 0;
     this.probing = false;
+    this.probeLeft = 0;
+    this.ceiling = null;
+    this.ceilingUntil = 0;
+    this.failStreak = 0;
   }
 
-  /** 窓の中のフレーム時間の中央値（挿入ソート。窓は数十フレームなので十分速く、割り当てもしない） */
-  private median(): number {
-    const f = this.frames;
-    const n = this.count;
-    for (let i = 1; i < n; i++) {
-      const v = f[i];
-      let j = i - 1;
-      while (j >= 0 && f[j] > v) {
-        f[j + 1] = f[j];
-        j--;
-      }
-      f[j + 1] = v;
-    }
-    return n % 2 === 1 ? f[(n - 1) / 2] : (f[n / 2 - 1] + f[n / 2]) / 2;
+  private ratioOf(ms: number): number {
+    return ms / (1000 / this.preset.targetFps);
   }
 
-  private judge(medianMs: number): void {
-    const target = 1000 / this.preset.targetFps;
-    const ratio = medianMs / target;
-    this.sinceUp++;
-    // 試しに上げて、しばらく重くならずに済んだ = 余裕がある。上げるまでの待ちを半分に戻す（重い場面が終わったら、早く回復する）
-    if (this.probing && this.sinceUp > FLAP_WINDOWS && ratio <= SETTLED_RATIO) {
+  /** 試しに上げたのが重かった: 上げた分を戻し、その倍率を天井にする */
+  private failProbe(): void {
+    this.probing = false;
+    this.probeLeft = 0;
+    this.light = 0;
+    this.sumMs = 0;
+    this.count = 0;
+    this.current = Math.max(this.preset.minRenderScale, this.current - STEP_UP);
+    this.ceiling = this.current;
+    this.failStreak = Math.min(this.failStreak + 1, Math.log2(CEILING_HOLD_MAX) + 1);
+    this.ceilingUntil = this.elapsedMs + CEILING_HOLD_MS * 2 ** (this.failStreak - 1);
+  }
+
+  private judge(ratio: number): void {
+    // 試しに上げて最初の窓: 重ければ戻して天井にする。重くなければ試しは成功（天井を外す）
+    if (this.probing) {
       this.probing = false;
-      this.lightNeeded = Math.max(LIGHT_WINDOWS, Math.floor(this.lightNeeded / 2));
+      if (ratio > SLOW_RATIO) {
+        this.failProbe();
+        return;
+      }
+      this.ceiling = null;
+      this.failStreak = 0;
     }
+
+    // 本当に余裕がある窓が続いたら、天井も外す
+    if (ratio <= EASY_RATIO) {
+      if (++this.easy >= LIGHT_WINDOWS) {
+        this.ceiling = null;
+        this.failStreak = 0;
+      }
+    } else {
+      this.easy = 0;
+    }
+    if (this.ceiling !== null && this.elapsedMs >= this.ceilingUntil) this.ceiling = null;
 
     if (ratio > SLOW_RATIO) {
       this.light = 0;
-      if (this.sinceUp <= FLAP_WINDOWS) {
-        // 上げた直後にまた重くなった = 境目にいる。試しに上げた分だけ戻し、次からは上げるのを慎重にする
-        this.probing = false;
-        this.lightNeeded = Math.min(this.lightNeeded * 2, LIGHT_WINDOWS_MAX);
-        this.current = Math.max(this.preset.minRenderScale, this.current - STEP_UP);
-      } else {
-        this.current = Math.max(this.preset.minRenderScale, this.current - (ratio > BIG_RATIO ? STEP_BIG : STEP_DOWN));
-      }
+      this.current = Math.max(this.preset.minRenderScale, this.current - (ratio > BIG_RATIO ? STEP_BIG : STEP_DOWN));
     } else if (ratio <= SETTLED_RATIO && this.current < this.preset.renderScale) {
-      if (++this.light >= this.lightNeeded) {
+      const next = Math.min(this.preset.renderScale, this.current + STEP_UP);
+      if (this.ceiling !== null && next > this.ceiling + 1e-9) {
+        this.light = 0; // 天井まで来ている。期限が来るまで上げない
+      } else if (++this.light >= LIGHT_WINDOWS) {
         this.light = 0;
-        this.sinceUp = 0;
+        this.current = next;
         this.probing = true;
-        this.current = Math.min(this.preset.renderScale, this.current + STEP_UP);
+        this.probeLeft = PROBE_FRAMES;
       }
     } else {
       // 目標付近（1.05〜1.15 倍）、または初期の倍率のまま。どちらにも動かさず、連続の数え直し
       this.light = 0;
     }
   }
+}
+
+/** フレーム時間の中央値（挿入ソート。窓は数十フレームなので十分速く、割り当てもしない。buf の並びは壊れる） */
+function median(buf: Float32Array, n: number): number {
+  for (let i = 1; i < n; i++) {
+    const v = buf[i];
+    let j = i - 1;
+    while (j >= 0 && buf[j] > v) {
+      buf[j + 1] = buf[j];
+      j--;
+    }
+    buf[j + 1] = v;
+  }
+  return n % 2 === 1 ? buf[(n - 1) / 2] : (buf[n / 2 - 1] + buf[n / 2]) / 2;
 }
