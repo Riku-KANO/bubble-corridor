@@ -8,6 +8,8 @@ import { smoothstep } from '../core/easing';
 
 /** 殻が閉じ始める乗車の秒（ゴンドラが浮かび上がった後）。閉じる音もこの時刻に鳴らす */
 export const BOARD_START_SEC = 0.5;
+/** 暗転の入りにかける秒（唯一の黒でも、入りは急な明るさの変化にしない。膜を通る瞬間とそろえる短さ） */
+export const BLACKOUT_ENTER_SEC = 0.25;
 /** 暗転のあとの点灯にかける秒。光の点滅を抑えるモードではもっとゆっくり（急な明るさの変化を避ける） */
 export const BLACKOUT_RAMP_SEC = 2.5;
 export const BLACKOUT_RAMP_REDUCED_SEC = 6;
@@ -112,10 +114,11 @@ export function fxAt(
   }
   out.membrane = membrane;
 
-  // 唯一の暗闇（天球の頭の2秒）。点灯が済んだ後は 1 のまま
+  // 唯一の暗闇（天球の頭の2秒）。入りは短くなめらかに、点灯はゆっくり（点滅を抑えるモードではもっと）。点灯が済んだ後は 1 のまま
   const rampSec = options.reducedFlash ? BLACKOUT_RAMP_REDUCED_SEC : BLACKOUT_RAMP_SEC;
   const lit = times.blackout + CELESTIAL_BLACKOUT_SEC;
-  out.brightness = t < times.blackout || t > lit + rampSec ? 1 : smoothstep(lit, lit + rampSec, t);
+  out.brightness =
+    t < times.blackout || t > lit + rampSec ? 1 : 1 - smoothstep(times.blackout, times.blackout + BLACKOUT_ENTER_SEC, t) * (1 - smoothstep(lit, lit + rampSec, t));
 
   // 万華鏡の折り返しは万華鏡の区間だけ（天球の頭に向けて引く）。回転は時刻から決める（穏やかモードでは止める）
   const k0 = times.kaleidoscopeStart;

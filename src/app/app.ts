@@ -4,6 +4,7 @@ import * as THREE from 'three/webgpu';
 import type { Cue, RideEvents, Vec3Tuple } from '../contracts/events';
 import type { DoorChoice, Lang, SectionId, ShotId } from '../contracts/ids';
 import { DEFAULT_DOOR, ROOM_OF_SECTION } from '../contracts/ids';
+import type { ListenerPose } from '../contracts/audio';
 import type { RideClock } from '../contracts/clock';
 import type { RidePose } from '../contracts/ride';
 import type { RoomContext, RoomFrame, RoomModule } from '../contracts/room';
@@ -12,9 +13,10 @@ import type { Progress, QualitySetting, Settings, UiCommands, UiState } from '..
 import { CAMERA, HIDDEN_BUBBLE_SECTIONS, PHOTO, RIDE_DURATION, TRANSITION_SEC, UI } from '../config';
 import { createBus } from '../core/events';
 import { lerp, smoothstep } from '../core/easing';
-import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityPreset } from '../core/quality';
+import { setDefaultGlassTier, setGlassFlashScale } from '../core/materials/glass';
+import { DynamicResolution, detectTier, presetFor, type QualityPreset } from '../core/quality';
 import { createAudioEngine } from '../audio';
-import { createScreenFx } from '../fx';
+import { createScreenFx, REDUCED_FLASH_SCALE } from '../fx';
 import { createGondola } from '../gondola';
 import { createLookControl, createTouchInput } from '../input';
 import { capturePhoto, createPhotoStore, composePhoto, downloadPhoto, photoFileName, sharePhoto, stampText, warmUpCapture } from '../photo';
@@ -23,13 +25,15 @@ import { ROOM_FACTORIES } from '../rooms';
 import { loadProgress as readProgress, loadSettings, mountUi, saveProgress, saveSettings } from '../ui';
 import { createXRSystem } from '../xr';
 import { createAssetLoader } from './assets';
-import { createDebugOverlay } from './debug';
+import { createDebugOverlay, type DebugSample } from './debug';
+import { deviceHints } from './device';
 import { INITIAL_FLOW, reduceFlow, type FlowAction, type FlowState } from './flow';
 import { createIdleChimer } from './idle-chime';
 import { parseParams } from './params';
 import { RoomManager } from './rooms';
 import { loadRideData } from './ride-data';
 import { BOARD_START_SEC, fxAt, type FxTimeline, type FxTimelineOptions } from './timeline';
+import { createXRDarkness } from './xr-darkness';
 
 /** 書き換えて使い回す入れ物（毎フレームの確保を避ける）の型 */
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -56,12 +60,15 @@ export async function startApp(root: HTMLElement): Promise<void> {
   canvas.className = 'stage';
   root.append(canvas);
 
-  const hints: DeviceHints = {
-    isMobile,
-    isXR: false,
+  // 起動時の手がかり。一体型のヘッドセット（Quest・Pico）は最初から VR 向けの低めの品質にする（PC に VR 機器をつないだだけでは変えない）
+  const hints = deviceHints({
+    userAgent: navigator.userAgent,
+    coarsePointer: isMobile,
     hardwareConcurrency: navigator.hardwareConcurrency,
+    deviceMemoryGB: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
     screenPixels: screen.width * screen.height * devicePixelRatio * devicePixelRatio,
-  };
+    xrCapable,
+  });
   // 品質は設定で変わる（即時に反映する）。?quality があればそれを優先する
   const wantedQuality = (): QualitySetting => params.quality ?? settings.quality;
   const presetOf = (setting: QualitySetting): QualityPreset => presetFor(setting === 'auto' ? detectTier(hints) : setting, hints);
@@ -137,6 +144,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // 画面効果を使うか: 品質が許し、VR でないとき。VR は renderer.render で直接描く（速さを優先、カメラを演出で動かさない）
   const applyFxEnabled = () => fx.setEnabled(!xr.active && quality.postFx && !params.nofx);
   applyFxEnabled();
+  // VR は後処理を使わないので、天球の暗転（入りも点灯も）は頭に付けた黒い球で出す。VR でないときは描かない（明るさ 1）
+  const darkness = createXRDarkness();
+  camera.add(darkness.object);
   // 画面 → VR の白い霧。乗車の時計の外の遷移なので壁時計で進める（満ちるのは TRANSITION_SEC.screenToVR）
   const fog = { from: 0, to: 0, startMs: 0 };
   const fogAt = (nowMs: number): number => lerp(fog.from, fog.to, smoothstep(0, TRANSITION_SEC.screenToVR * 1000, nowMs - fog.startMs));
@@ -171,6 +181,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
       dispatch({ type: 'enterHome' });
     },
     ride(mode) {
+      // 入口から直接始めた確認用の経路（?screen=home&t=）では、ここがユーザー操作の最初。音の有効化がまだなら、この操作の中で行う
+      if (!audio.unlocked) void audio.unlock();
       audio.sfx('ticket.punch');
       if (mode === 'vr') {
         audio.sfx('vr.fog');
@@ -284,6 +296,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
     xr.setVignette(settings.vignette);
     document.documentElement.style.setProperty('--text-scale', String(settings.textScale));
     document.documentElement.lang = settings.lang;
+    // ガラスの材質: 品質と、点滅を抑えるモードでの波紋の閃光の弱め（fx の縞とブルームと同じ倍率）。tier は材質を作るときに読まれるので、
+    // 変えたときは次に作る材質（次に読み込む部屋）から効く
+    setGlassFlashScale(settings.reducedFlash ? REDUCED_FLASH_SCALE : 1);
     // 品質の即時反映: 目標・画素比・後処理の有無・動的な解像度を作り直す（アンチエイリアスは描画器の作成時に決まるので次の起動から）
     const wanted = wantedQuality();
     if (wanted !== appliedQuality) {
@@ -294,6 +309,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
       applyFxEnabled();
       onResize();
     }
+    setDefaultGlassTier(quality.tier);
   }
   applySettings();
 
@@ -500,6 +516,12 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const camWorld = new THREE.Vector3();
   const camQuat = new THREE.Quaternion();
   const camEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  // 毎フレーム渡す入れ物（書き換えて使い回す。音と部屋は受け取った場でだけ読む）
+  const listenerPose: Mutable<ListenerPose> = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
+  const roomFrame: Mutable<RoomFrame> = { t: 0, dt: 0, pose, camera, comfort: settings.comfort, reducedFlash: settings.reducedFlash };
+  const debugSample: Mutable<DebugSample> = { frameMs: 0, t: 0, section: '', info: renderer.info, screen: '', scale: 1 };
+  /** キューシートに乗車の終わりがあれば、降車は cue が行う。なければ時刻が尽きたときに終える（起動時に一度だけ調べる） */
+  const hasRideEndCue = cues.some((c) => c.name === 'ride.end');
   let lastNow = performance.now();
   const gondolaPos: [number, number, number] = [0, 0, 0];
   const fxOptions: Mutable<FxTimelineOptions> = { comfort: 'standard', reducedFlash: false, riding: false };
@@ -557,7 +579,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
     if (riding) {
       dispatcher.update(t);
-      if (t >= RIDE_DURATION && flow.screen === 'riding' && !cues.some((c) => c.name === 'ride.end')) void endRide();
+      if (t >= RIDE_DURATION && flow.screen === 'riding' && !hasRideEndCue) void endRide();
     }
 
     // 部屋の先読みと表示
@@ -566,13 +588,12 @@ export async function startApp(root: HTMLElement): Promise<void> {
       touch.setTouchables(rooms.touchables());
       xr.setTouchables(rooms.touchables());
     }
-    const frame: RoomFrame = { t, dt, pose, camera, comfort: settings.comfort, reducedFlash: settings.reducedFlash };
-    rooms.update(frame);
-    if (riding) {
-      if (!xr.active) touch.update(t, dt, camera, gondolaPos);
-      // 触れられないまま近づいた物が一度だけ自分で鳴る（画面でも VR でも）
-      chimer.update(gondolaPos, rooms.touchables());
-    }
+    roomFrame.t = t;
+    roomFrame.dt = dt;
+    roomFrame.comfort = settings.comfort;
+    roomFrame.reducedFlash = settings.reducedFlash;
+    rooms.update(roomFrame);
+    if (riding && !xr.active) touch.update(t, dt, camera, gondolaPos);
 
     // 部屋の空気（膜を通る瞬間に切り替える。部屋が時刻で差し替えたときも反映する）
     const roomId = riding ? ROOM_OF_SECTION[pose.section] : 'lobby';
@@ -597,12 +618,19 @@ export async function startApp(root: HTMLElement): Promise<void> {
     state.kaleidoscopeAngle = fxTimeline.kaleidoscopeAngle;
     state.bloom = fxTimeline.bloom;
     state.whiteFog = fogAt(nowMs);
+    // VR の暗転: VR の間だけ、時刻から決めた明るさを頭の球に渡す（VR でないときは画面効果が暗くする）
+    darkness.set(xr.active ? fxTimeline.brightness : 1);
 
     // 音の聞き手
     camera.getWorldPosition(camWorld);
     camera.getWorldQuaternion(camQuat);
     camEuler.setFromQuaternion(camQuat, 'YXZ');
-    audio.setListener({ x: camWorld.x, y: camWorld.y, z: camWorld.z, yaw: camEuler.y, pitch: camEuler.x });
+    listenerPose.x = camWorld.x;
+    listenerPose.y = camWorld.y;
+    listenerPose.z = camWorld.z;
+    listenerPose.yaw = camEuler.y;
+    listenerPose.pitch = camEuler.x;
+    audio.setListener(listenerPose);
 
     if (xr.active) {
       xrFrames++;
@@ -610,12 +638,23 @@ export async function startApp(root: HTMLElement): Promise<void> {
     }
     else fx.render(scene, camera);
 
+    // 触れられないまま近づいた物が一度だけ自分で鳴る（画面でも VR でも）。描画の後に調べる: 表示し始めたばかりの部屋の物は、
+    // 描画で初めて位置（matrixWorld）が決まる（その前は原点にいる）ので、描画の前に読むと原点の近くにいる乗り場で誤って鳴る
+    if (riding) chimer.update(gondolaPos, rooms.touchables());
+
     // 動的な解像度（VR の描画は描画器の大きさに依らないので調整しない）
     if (!xr.active) {
       const prevScale = dynRes.scale;
       if (dynRes.sample(frameMs) !== prevScale) onResize();
     }
-    debug?.update({ frameMs, t, section: pose.section, info: renderer.info, screen: flow.screen, scale: dynRes.scale });
+    if (debug) {
+      debugSample.frameMs = frameMs;
+      debugSample.t = t;
+      debugSample.section = pose.section;
+      debugSample.screen = flow.screen;
+      debugSample.scale = dynRes.scale;
+      debug.update(debugSample);
+    }
   });
 
   // ポーズ: Esc、雫、画面の長押し
