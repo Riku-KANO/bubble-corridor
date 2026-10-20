@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xr 確認ページ — 泡沫回廊</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0e13;
+        color: #dfe8ff;
+        font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #panel {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: rgba(10, 16, 28, 0.72);
+        max-width: 420px;
+      }
+      #panel button {
+        margin: 2px 4px 2px 0;
+        padding: 6px 10px;
+        border: 1px solid #5d7aa8;
+        border-radius: 6px;
+        background: #16233a;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      #panel button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      #status {
+        margin: 6px 0 0;
+        white-space: pre-wrap;
+        font: 12px/1.4 ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="panel"></div>
+    <script type="module" src="/src/dev/xr/main.ts"></script>
+  </body>
+</html>
