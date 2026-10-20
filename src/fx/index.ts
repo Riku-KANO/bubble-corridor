@@ -7,7 +7,7 @@
 // （黒い画面は天球の暗転にだけ許されているので、暗転が出ないと体験が変わってしまう）。
 import * as THREE from 'three/webgpu';
 import type { ScreenFx, ScreenFxState } from '../contracts/fx';
-import { createComposite, type Composite } from './composite';
+import { createComposite, FX_EPS, WHITE_FOG_RGB, type Composite } from './composite';
 import { blank, hasScreenTint, resolveFx } from './resolve';
 
 export { resolveFx, EDGE_MAX, MEMBRANE_BLOOM, REDUCED_FLASH_SCALE } from './resolve';
@@ -20,8 +20,8 @@ export interface ScreenFxOptions {
   bloomResolution?: number;
 }
 
-/** ブルームを計算し始める強さ（これ未満は0として扱い、5段のぼかしを省く） */
-const BLOOM_MIN = 0.002;
+/** ブルームを計算し始める強さ（これ未満は0として扱い、5段のぼかしを省く）。合成の読む境と同じ値 */
+const BLOOM_MIN = FX_EPS;
 
 /** 暗さと白い霧だけを、描いた絵の上に重ねる全画面の板（後処理を使わないとき用） */
 function createTint() {
@@ -33,20 +33,24 @@ function createTint() {
       const alpha = 1 - (1 - white) * (1 - dark);
       if (alpha <= 0.0005) return;
       const gray = (white * (1 - dark)) / alpha; // 板の色（0 = 黒、1 = 白）。表示の色で混ぜる
-      material.color.setScalar(gray); // 色空間の変換をかけずに書くので、値がそのまま表示の色になる
+      // 色空間の変換をかけずに書くので、値がそのまま表示の色になる。白は合成と同じ色（WHITE_FOG_RGB）
+      material.color.setRGB(WHITE_FOG_RGB[0] * gray, WHITE_FOG_RGB[1] * gray, WHITE_FOG_RGB[2] * gray);
       material.opacity = alpha;
       const autoClear = renderer.autoClear;
       const toneMapping = renderer.toneMapping;
       const outputColorSpace = renderer.outputColorSpace;
-      renderer.autoClear = false; // 直前に描いた絵を消さない
-      // トーンマップも色空間の変換も外す。renderer は、どちらかが有効だと HDR の中間の描画先に描いてから変換するので、
-      // 板がその中で線形の色として混ざり、さらにトーンマップを受けてしまう。外すと、変換済みの絵の上へ表示の色のまま直接混ざる
-      renderer.toneMapping = THREE.NoToneMapping;
-      renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-      quad.render(renderer);
-      renderer.outputColorSpace = outputColorSpace;
-      renderer.toneMapping = toneMapping;
-      renderer.autoClear = autoClear;
+      try {
+        renderer.autoClear = false; // 直前に描いた絵を消さない
+        // トーンマップも色空間の変換も外す。renderer は、どちらかが有効だと HDR の中間の描画先に描いてから変換するので、
+        // 板がその中で線形の色として混ざり、さらにトーンマップを受けてしまう。外すと、変換済みの絵の上へ表示の色のまま直接混ざる
+        renderer.toneMapping = THREE.NoToneMapping;
+        renderer.outputColorSpace = THREE.ColorManagement.workingColorSpace;
+        quad.render(renderer);
+      } finally {
+        renderer.outputColorSpace = outputColorSpace;
+        renderer.toneMapping = toneMapping;
+        renderer.autoClear = autoClear;
+      }
     },
     dispose(): void {
       material.dispose();
@@ -84,7 +88,8 @@ export function createScreenFx(renderer: THREE.WebGPURenderer, options: ScreenFx
   /**
    * renderer が素通しの描画（renderer.render）のために持つ HDR の中間の描画先を解放する。
    * 合成を使う間は素通しで描かないので、残しておくと全画面の HDR の描画先が2組になってしまう。
-   * three の内部（_frameBufferTargets）を見るので、なければ何もしない。解放した描画先は、次に素通しで描くときに作り直される。
+   * three の内部（_frameBufferTargets。r186 で確認）を見るので、なければ何もしない。解放した描画先は、次に素通しで描くときに作り直される。
+   * 通るのは setEnabled の切り替えのときだけ（毎フレームではない）。three を上げたら名前が残っているか確かめる。
    */
   function releaseDirectTargets(): void {
     const targets = (renderer as unknown as { _frameBufferTargets?: Map<unknown, THREE.RenderTarget> })._frameBufferTargets;

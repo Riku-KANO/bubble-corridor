@@ -18,7 +18,7 @@
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import BloomNode from 'three/addons/tsl/display/BloomNode.js';
-import { GONDOLA_DIAMETER } from '../config';
+import { CAMERA, GONDOLA_DIAMETER } from '../config';
 import { EDGE_MAX } from './resolve';
 
 // TSL の型定義は演算ごとに型が細かく分かれて扱いにくいので、このファイルの中だけ緩い形に読み替える。
@@ -85,15 +85,19 @@ const FILM_SATURATION = 0.65;
  */
 const FOLD_WEDGE_CENTER = (20 * Math.PI) / 180;
 /** これ未満の強さは 0 とみなして、その効果の読み出しや計算を省く */
-const EPS = 0.002;
+/** 効果の強さがこれ未満なら0とみなして読み出しを省く（ブルームの計算を省く境と同じ値を使う） */
+export const FX_EPS = 0.002;
+/** 白い霧の色（合成と、後処理なしの板で同じ色にする） */
+export const WHITE_FOG_RGB = [1, 0.99, 0.97] as const;
 
 /**
  * 万華鏡の折り返しの対象にしない距離（m、視点から画素までの距離）。
  * ゴンドラは直径 2.4m の泡で、視点は座席（泡の中心のすぐ上）にある。縁・手すり・座席はすべて泡の半径の内側（≒1.2〜1.4m）に
  * あるので、半径より少し先までを「ゴンドラ」とみなして折り返さず、その先から部屋として折り返す。
  */
-export const FOLD_NEAR = GONDOLA_DIAMETER / 2 + 0.15;
-export const FOLD_FAR = GONDOLA_DIAMETER / 2 + 0.75;
+// 目の高さ（座席は泡の中心より上）の分だけ泡の底が遠いので、それも足す。部屋の物は視点から約2m より遠くに置く
+export const FOLD_NEAR = GONDOLA_DIAMETER / 2 + CAMERA.seatEyeHeight + 0.05;
+export const FOLD_FAR = FOLD_NEAR + 0.6;
 
 /** 毎フレーム更新する値（resolveFx の結果と、カメラの値） */
 export interface CompositeUniforms {
@@ -213,7 +217,7 @@ export function createComposite(renderer: THREE.WebGPURenderer, scene: THREE.Sce
     const tap = (p: N): N => {
       const base = toUv(p).toVar();
       const out = vec3(0).toVar();
-      If(u.aberration.greaterThan(EPS), () => {
+      If(u.aberration.greaterThan(FX_EPS), () => {
         out.assign(vec3(sceneTex.sample(mirror(base.add(off))).r, sceneTex.sample(mirror(base)).g, sceneTex.sample(mirror(base.sub(off))).b));
       }).Else(() => {
         out.assign(sceneTex.sample(mirror(base)).rgb);
@@ -228,7 +232,7 @@ export function createComposite(renderer: THREE.WebGPURenderer, scene: THREE.Sce
     // ゴンドラ（近い画素）は、折り返さず、折り返した先に取り込まない。
     const foldW = float(0).toVar();
     const uvF = vec2(0, 0).toVar();
-    If(u.fold.greaterThan(EPS), () => {
+    If(u.fold.greaterThan(FX_EPS), () => {
       const seg = TAU / FOLD_SEGMENTS;
       const ang = atan(pD.y, pD.x).sub(u.foldAngle);
       const folded = abs(mod(ang, seg * 2).sub(seg)).sub(seg * 0.5).add(FOLD_WEDGE_CENTER); // 楔の中心 ±30度
@@ -262,7 +266,7 @@ export function createComposite(renderer: THREE.WebGPURenderer, scene: THREE.Sce
     });
 
     // ── ブルーム（折り返しと歪みの後の座標で読む。ゼロなら足さない）──
-    If(u.bloom.greaterThan(EPS), () => {
+    If(u.bloom.greaterThan(FX_EPS), () => {
       const glow = bloomTex.sample(mirror(uvA)).rgb.toVar();
       If(foldW.greaterThan(0.001), () => {
         glow.assign(mix(glow, bloomTex.sample(mirror(uvF)).rgb, foldW));
@@ -302,7 +306,7 @@ export function createComposite(renderer: THREE.WebGPURenderer, scene: THREE.Sce
     col = screenBlend(col, rim.mul(edgeShape).mul(litness.mul(0.8).add(0.2)).mul(u.edge.mul(0.8)));
 
     // ── 白い霧（VR への切り替え）と暗さ（天球の暗転）──
-    col = mix(col, vec3(1, 0.99, 0.97), u.white);
+    col = mix(col, vec3(...WHITE_FOG_RGB), u.white);
     col = col.mul(float(1).sub(u.dark));
 
     return vec4(col, 1);
