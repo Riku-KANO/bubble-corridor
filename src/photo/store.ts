@@ -1,7 +1,7 @@
 // 写真の棚の保存（IndexedDB）。1回の乗車 = 1件（id がキー、並びは createdAt の新しい順）。
 // IndexedDB が使えない環境（プライベートウィンドウ、古い端末）や書き込みの失敗（容量超過）では、
 // 例外を出さずにメモリへ退避して、その場の体験を止めない。
-import { PHOTO } from '../config';
+import { HIDDEN_BUBBLE_SECTIONS, PHOTO } from '../config';
 import type { DoorChoice, Lang, ShotId } from '../contracts/ids';
 import type { PhotoMeta, PhotoRecord, PhotoStore } from '../contracts/photo';
 import { num, oneOf, own } from '../core/storage';
@@ -30,19 +30,19 @@ function sanitizeRecord(raw: unknown): PhotoRecord | null {
     date,
     door: oneOf(own(m, 'door'), DOORS, 'lapis'),
     // 額縁を決める数。範囲の外は端に丸める（壊れた値で額縁が崩れないように）
-    hiddenTotal: clampInt(own(m, 'hiddenTotal'), 0, 5, 0),
+    hiddenTotal: clampInt(own(m, 'hiddenTotal'), 0, HIDDEN_BUBBLE_SECTIONS.length, 0),
     constellations: clampInt(own(m, 'constellations'), 0, 10_000, 0),
     lang: oneOf(own(m, 'lang'), LANGS, 'ja'),
   };
 
-  // 場面ごとに 1 枚、最大 3 枚。画像でない Blob（種類が image/ でないもの）は捨てる
+  // 場面ごとに 1 枚、最大 3 枚。画像でない種類が付いた Blob は捨てる（種類が空のものは通す）
   const rawShots = own(raw, 'shots');
   const shots: { shot: ShotId; image: Blob }[] = [];
   if (Array.isArray(rawShots)) {
     for (const s of rawShots) {
       const shot = own(s, 'shot');
       const image = own(s, 'image');
-      if (!(SHOTS as readonly unknown[]).includes(shot) || !(image instanceof Blob) || !image.type.startsWith('image/')) continue;
+      if (!(SHOTS as readonly unknown[]).includes(shot) || !(image instanceof Blob) || (image.type !== '' && !image.type.startsWith('image/'))) continue;
       if (shots.some((x) => x.shot === shot) || shots.length >= SHOTS.length) continue;
       shots.push({ shot: shot as ShotId, image });
     }

@@ -63,13 +63,16 @@ export async function capturePhoto(
     magFilter: THREE.LinearFilter,
   });
 
+  // 読み出した画素は CPU 側の写しなので、並べ直しと書き出し（数フレームにまたがる）の前に
+  // 撮影用の描画先（と three が作る多重標本の領域）をすぐ捨てる
+  let data: Uint8Array;
   try {
     renderOnce(renderer, scene, camera, target, width / height);
-    const data = await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height);
-    return await encode(data as Uint8Array, width, height, layoutOf(renderer, data, width, height));
+    data = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height)) as Uint8Array;
   } finally {
     target.dispose();
   }
+  return encode(data, width, height, layoutOf(renderer, data, width, height));
 }
 
 /**
@@ -213,10 +216,14 @@ async function encode(src: Uint8Array, width: number, height: number, layout: La
   const { surface, ctx } = createSurface(width, height);
   await paintRows(ctx, src, width, height, layout);
   if (webpSupported !== false) {
-    const blob = await toBlob(surface, 'image/webp', WEBP_QUALITY);
-    if (blob.type === 'image/webp') {
-      webpSupported = true;
-      return blob;
+    try {
+      const blob = await toBlob(surface, 'image/webp', WEBP_QUALITY);
+      if (blob.type === 'image/webp') {
+        webpSupported = true;
+        return blob;
+      }
+    } catch {
+      // WebP の書き出しそのものが失敗する環境でも、JPEG に切り替えて撮影は続ける
     }
     webpSupported = false;
   }
