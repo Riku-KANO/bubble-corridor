@@ -138,11 +138,11 @@ slices:
   notes: ''
 - id: S-23
   title: VR（immersive-vr、座る/立つ、指先とコントローラーで触れる、外周の暗さ、曇りガラスのメニュー）と描画経路の検証
-  wave: 2
+  wave: 1
   lane: xr
   milestone: M0
   requirements: [CAM-3, INT-2, REN-1]
-  depends_on: [S-15]
+  depends_on: [S-00]
   paths: [src/xr/**, e2e/xr.spec.ts, e2e/render-paths.spec.ts, dev/xr.html, src/dev/xr/**]
   tests: [src/xr/xr.test.ts]
   status: todo
