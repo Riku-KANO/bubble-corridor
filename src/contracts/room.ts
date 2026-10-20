@@ -76,6 +76,10 @@ export interface RoomModule {
   /** この部屋のすべての物。統合担当がシーンに足し、外す */
   readonly root: Object3D;
   readonly touchables: readonly Touchable[];
+  /**
+   * 部屋の空気。時刻で変えてよい（例: 乗り場のホールは降車で朝の光になる）。
+   * 変えるときは新しいオブジェクトに差し替える（統合担当は参照が変わったら反映する）。
+   */
   readonly atmosphere: Atmosphere;
   /**
    * 形と材質を作る。重い処理はここで行う（前の部屋の途中で呼ばれ、膜に着くまでに終える）。
@@ -86,6 +90,9 @@ export interface RoomModule {
   update(frame: RoomFrame): void;
   /** キューシートの出来事（この部屋の区間のもの、と membrane・photo.capture を含むすべて） */
   onCue(cue: Cue): void;
+  /*
+   * 誘導（lure）の出来事では、見どころの方向へ光の粒を流して視線を誘う（音と正面へ戻すのは統合担当）。
+   */
   /**
    * 見どころの位置（ワールド座標）。誘導の音と光の粒、正面へ戻すカメラの向きに使う。
    * この部屋の見どころでなければ null。
