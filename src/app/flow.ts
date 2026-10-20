@@ -68,9 +68,12 @@ export function reduceFlow(state: FlowState, action: FlowAction, ctx: FlowContex
     case 'back':
       if (!SUB_SCREENS.includes(state.screen)) return state;
       return { ...state, screen: state.returnTo ?? 'home', returnTo: null };
-    case 'xrEnded':
-      // ヘッドセットを外した（セッションが終わった）。乗車中ならポーズにして画面で続けられるようにする
+    case 'xrEnded': {
+      // ヘッドセットを外した（セッションが終わった）。乗車中ならポーズにして画面で続けられるようにする。
+      // 乗車前の案内の途中なら入口へ戻す（画面のない案内に取り残さない）
       if (state.viewMode !== 'vr') return state;
-      return { ...state, viewMode: 'screen', screen: state.screen === 'riding' ? 'pause' : state.screen };
+      const screen = state.screen === 'riding' ? 'pause' : state.screen === 'guide' ? 'home' : state.screen;
+      return { ...state, viewMode: 'screen', screen };
+    }
   }
 }
