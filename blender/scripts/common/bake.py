@@ -4,25 +4,39 @@ Cycles（Metal があれば GPU）で DIFFUSE の DIRECT+INDIRECT（色は含め
 2つ目の UV（名前 Lightmap）へ焼いて PNG に書く。ゲーム側は動く光源を持たず、この画像を
 ライトマップとして掛ける（three.js では lightMap・channel 1）。
 
-- 画像は glb の外に置く。物のカスタムプロパティ `lightmap` に、out_dir からの相対の場所を入れる
-  （glb の extras になる）。
-- 画像は sRGB で保存する（8bit で暗部を細かく残すため。読む側も sRGB として読む）。
+- 焼いた値は線形（float）。高い方の百分位（既定 99.5%）で割って 0〜1 に正規化し、sRGB にして
+  **8bit の PNG（RGB）**で書く。割った倍率を物のカスタムプロパティ `lightmap_scale` に残す
+  （線形の値 = 画像を線形に直した値 × lightmap_scale）。百分位より明るい点は 1.0 で切れる。
+  こうすると光が強い場面でも白く飽和せず、暗い場面でも 8bit を使い切る。
+- 保存後に PNG のビット深度を確かめる（8bit でなければエラー）。画像の向きは glTF の UV（v を反転）と
+  合うよう上下を直して書く。読む側は flipY = false にする（README 参照）。
+- 画像は glb の外に置く。物のカスタムプロパティ `lightmap`（out_dir からの相対の場所）と
+  `lightmap_scale` が glb の extras になる。
 - 材質がない物には材質を作る。焼くための一時の画像ノードは、終わったら材質から外す。
-- メッシュを共有する物（リンク複製）は、物ごとに光が違うので単独のコピーに直す。
+- メッシュを共有する物（インスタンス描画の物など）は、物ごとに光が違うので焼けない。
+  既定では止める（split_shared=True で単独のコピーに直して焼く）。インスタンスとガラスは焼き込みの対象から外す。
 - 重ならない UV は smart project と pack で作る（repack=False で手で作った Lightmap を使う）。
 """
 from __future__ import annotations
 
 import math
 import os
+import struct
 import sys
+import zlib
 from typing import Iterable
 
 import bpy
+import numpy as np
 
 UV_NAME = 'Lightmap'
 PROP = 'lightmap'
+PROP_SCALE = 'lightmap_scale'
 _NODE = 'lightmap.bake'
+#: 計算機の環境変数（CPU / GPU / AUTO）。GPU（Metal など）が使えれば AUTO は GPU
+DEVICE_ENV = 'BLENDER_BAKE_DEVICE'
+#: 正規化に使う百分位（高い方）
+PERCENTILE = 99.5
 
 
 def _select(objs: list, active) -> None:
@@ -89,7 +103,7 @@ def _prepare_uv(objs: list, repack: bool, island_margin: float) -> dict:
 
 def _use_gpu(scene) -> str:
     """Cycles の計算機を選ぶ。Metal などの GPU があれば GPU、なければ CPU。使った名前を返す"""
-    want = os.environ.get('UTAKATA_BAKE_DEVICE', 'AUTO').upper()
+    want = os.environ.get(DEVICE_ENV, 'AUTO').upper()
     scene.cycles.device = 'CPU'
     if want == 'CPU':
         return 'CPU'
@@ -114,31 +128,107 @@ def _use_gpu(scene) -> str:
     return 'CPU'
 
 
+# ── 8bit の PNG ───────────────────────────────────────────────────────────
+def _srgb_encode(lin: np.ndarray) -> np.ndarray:
+    lin = np.clip(lin, 0.0, 1.0)
+    return np.where(lin <= 0.0031308, lin * 12.92, 1.055 * np.power(lin, 1.0 / 2.4) - 0.055)
+
+
+def _png_chunk(kind: bytes, body: bytes) -> bytes:
+    return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+
+def write_png_rgb8(path: str, rgb: np.ndarray) -> None:
+    """RGB 8bit（高さ, 幅, 3 の uint8、先頭の行が上）を PNG に書く。行ごとに上の行との差（Up）にして小さくする"""
+    h, w, _ = rgb.shape
+    raw = np.empty((h, 1 + w * 3), dtype=np.uint8)
+    raw[:, 0] = 2
+    raw[0, 0] = 0
+    flat = rgb.reshape(h, w * 3)
+    raw[0, 1:] = flat[0]
+    raw[1:, 1:] = (flat[1:].astype(np.int16) - flat[:-1].astype(np.int16)).astype(np.uint8)
+    png = (
+        b'\x89PNG\r\n\x1a\n'
+        + _png_chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+        + _png_chunk(b'sRGB', b'\x00')
+        + _png_chunk(b'IDAT', zlib.compress(raw.tobytes(), 9))
+        + _png_chunk(b'IEND', b'')
+    )
+    with open(path, 'wb') as f:
+        f.write(png)
+
+
+def png_info(path: str) -> dict:
+    """PNG の幅・高さ・ビット深度・色の種類（書いた後に確かめる）"""
+    with open(path, 'rb') as f:
+        head = f.read(33)
+    if head[:8] != b'\x89PNG\r\n\x1a\n' or head[12:16] != b'IHDR':
+        raise ValueError(f'PNG ではありません: {path}')
+    w, h, depth, ctype = struct.unpack('>IIBB', head[16:26])
+    return {'width': w, 'height': h, 'depth': depth, 'color_type': ctype}
+
+
+def _save_normalized(img, path: str) -> float:
+    """焼いた float 画像を、高い百分位で割って 8bit の sRGB PNG にし、割った倍率（lightmap_scale）を返す"""
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    lin = px.reshape(h, w, 4)[:, :, :3].astype(np.float64)
+    peak = lin.max(axis=2)
+    lit = peak[peak > 1e-6]  # 焼かれていない余白（真っ黒）は百分位に入れない
+    scale = float(np.percentile(lit, PERCENTILE)) if lit.size else 1.0
+    scale = max(scale, 1e-4)
+    rgb = np.rint(_srgb_encode(lin / scale) * 255.0).astype(np.uint8)
+    write_png_rgb8(path, rgb[::-1])  # Blender の画像は下の行から。PNG は上の行から
+    info = png_info(path)
+    if info['depth'] != 8 or info['color_type'] != 2 or (info['width'], info['height']) != (w, h):
+        raise RuntimeError(f'ライトマップが 8bit の RGB ではありません: {path} {info}')
+    return float(f'{scale:.6g}')
+
+
+def _shared_names(objs: list) -> list[str]:
+    return [f'{o.name}（メッシュ {o.data.name}、{o.data.users} 人が共有）' for o in objs if o.data.users > 1]
+
+
+def _default_name(objs: list) -> str:
+    """物の名前の `<部屋>` が全部同じなら `<部屋>.lightmap`、違えば `lightmap`"""
+    rooms = {o.name.split('.', 1)[0] for o in objs}
+    return f'{rooms.pop()}.lightmap' if len(rooms) == 1 else 'lightmap'
+
+
 def bake_lightmaps(
     objects: Iterable,
     out_dir: str,
     size: int = 1024,
     samples: int = 64,
     *,
-    name: str = 'lightmap',
+    name: str | None = None,
     atlas: bool = True,
     repack: bool = True,
     margin: int | None = None,
+    split_shared: bool = False,
 ) -> list[dict]:
-    """objects の光と影を Lightmap UV に焼き、PNG を out_dir に書く。
+    """objects の光と影を Lightmap UV に焼き、8bit の PNG を out_dir に書く。
 
-    atlas=True なら全部の物で 1 枚（`<name>.png`）、False なら物ごとに 1 枚（`<物の名前>.png`）。
-    戻り値: [{'object': 物の名前, 'image': PNG の絶対パス}, ...]
+    atlas=True なら全部の物で 1 枚（`<name>.png`。name の既定は `<部屋>.lightmap`）、False なら物ごとに 1 枚（`<物の名前>.png`）。
+    メッシュを共有する物があると止まる（split_shared=True で単独のコピーにして焼く）。
+    戻り値: [{'object': 物の名前, 'image': PNG の絶対パス, 'scale': lightmap_scale}, ...]
     """
     objs = [o for o in objects if o.type == 'MESH']
     if not objs:
         return []
+    shared = _shared_names(objs)
+    if shared and not split_shared:
+        raise ValueError(
+            'メッシュを共有する物は、物ごとに光が違うので焼けません。インスタンスやガラスは焼き込みの対象から外すか、'
+            'split_shared=True で単独のコピーにしてください:\n  ' + '\n  '.join(shared)
+        )
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     margin = max(2, size // 128) if margin is None else margin
     island_margin = min(0.05, 2.0 * margin / size)
 
-    groups = [(name, objs)] if atlas else [(o.name, [o]) for o in objs]
+    groups = [(name or _default_name(objs), objs)] if atlas else [(o.name, [o]) for o in objs]
     scene = bpy.context.scene
     keep = {
         'engine': scene.render.engine,
@@ -156,14 +246,13 @@ def bake_lightmaps(
         scene.cycles.use_adaptive_sampling = False
         device = _use_gpu(scene)
         for gname, group in groups:
-            # メッシュを共有する物は、物ごとに光が違うので単独のコピーにする
             for o in group:
-                if o.data.users > 1:
+                if o.data.users > 1:  # split_shared=True のとき
                     o.data = o.data.copy()
             mats = _ensure_materials(group, gname)
             saved_uv = _prepare_uv(group, repack, island_margin)
             img = bpy.data.images.new(f'{gname}.bake', size, size, alpha=False, float_buffer=True)
-            img.colorspace_settings.name = 'sRGB'
+            img.colorspace_settings.name = 'Non-Color'  # 焼いた線形の値をそのまま float に残す（色空間の変換を入れない）
             nodes = []
             for m in mats:
                 node = m.node_tree.nodes.new('ShaderNodeTexImage')
@@ -182,9 +271,7 @@ def bake_lightmaps(
                 device = 'CPU'
                 _bake(margin)
             path = os.path.join(out_dir, f'{gname}.png')
-            img.filepath_raw = path
-            img.file_format = 'PNG'
-            img.save()
+            scale = _save_normalized(img, path)
             for m, node in nodes:
                 m.node_tree.nodes.remove(node)
             bpy.data.images.remove(img)
@@ -193,8 +280,9 @@ def bake_lightmaps(
                 for u in o.data.uv_layers:
                     u.active_render = u.name == saved_uv[o.name]
                 o[PROP] = os.path.relpath(path, out_dir)
-                results.append({'object': o.name, 'image': path})
-            print(f'bake: {gname} {size}px {samples}spp {device} -> {path}')
+                o[PROP_SCALE] = scale
+                results.append({'object': o.name, 'image': path, 'scale': scale})
+            print(f'bake: {gname} {size}px {samples}spp {device} 8bit {os.path.getsize(path)}B scale={scale} -> {path}')
     finally:
         scene.render.engine = keep['engine']
         if keep['samples'] is not None:

@@ -16,8 +16,8 @@ import bpy
 
 from .naming import check_names
 
-#: 部屋の glb の上限（PERF.roomLoadMB）
-MAX_BYTES = 15 * 1024 * 1024
+#: 部屋の glb の上限（config.ts の PERF.roomLoadMB。10進の MB）
+MAX_BYTES = 15 * 1000 * 1000
 
 
 @contextmanager

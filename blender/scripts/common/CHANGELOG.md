@@ -8,6 +8,16 @@
 
 版の付け方: 互換を壊す変更は minor を上げる（0.x の間）。追加・修正は patch。
 
+## 0.2.0 — 2026-10-21（泡沫回廊、S-17 レビュー1巡目）
+
+互換を変える変更を含むので minor を上げる。
+
+- bake: ライトマップを **8bit の sRGB PNG（RGB）** で書く（以前は 16bit で容量が約 4 倍だった）。float で焼いて明るい側の 99.5 百分位で割り、倍率を物のカスタムプロパティ `lightmap_scale` に残す（強い光でも飽和しない）。書いた後に 8bit を確かめる。戻り値に `scale`。
+- bake: メッシュを共有する物があると止まる（以前は黙って単独のコピーにした）。`split_shared=True` で許す。
+- bake: `name` の既定は物の名前の `<部屋>` から作る（`<部屋>.lightmap`）。環境変数は `BLENDER_BAKE_DEVICE`（以前は `UTAKATA_BAKE_DEVICE`）。
+- visibility: 光線を通す物の既定を `default_see_through`（`see_through` があればその値、なければ `glass` を持つ物）にした。判定の関数は `see_through=` で差し替えられる。
+- export: `MAX_BYTES` は 10進の 15MB（`15 * 1000 * 1000`。以前は 2進）。
+
 ## 0.1.0 — 2026-10-21（泡沫回廊）
 
 - 初版。

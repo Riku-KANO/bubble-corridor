@@ -12,14 +12,15 @@
   - 世界座標の三角形で調べ、メッシュのデータ（obj.data）の面を消す。モディファイアは適用済みであること。
   - 同じメッシュを共有する物（リンク複製）は、どれかから見えれば残す。
   - 全部消えた物も物としては残し、report['emptied'] に名前を入れる（消すかどうかは呼ぶ側が決める）。
-  - カスタムプロパティ see_through が真の物（ガラスなど）は光線を通す。その物の面は見えたとして残し、
-    奥にある物も調べる。通さないと、ガラスの向こうに見える物を削ってしまう。
+  - 光線を通す物（ガラス）は、その物の面は見えたとして残し、奥にある物も調べる。通さないと、ガラスの向こうに
+    見える物を削ってしまう。通す物かは see_through の関数で決める。既定は default_see_through:
+    カスタムプロパティ see_through があればその値、なければ glass（ガラスの種類）を持つ物。
 """
 from __future__ import annotations
 
 import math
 import time
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import bmesh
 import bpy
@@ -48,10 +49,16 @@ def resample_rail(points: Sequence[Sequence[float]], spacing: float) -> np.ndarr
     return np.asarray(out)
 
 
+def default_see_through(obj) -> bool:
+    """光線を通す物か: カスタムプロパティ see_through があればその値（明示が優先）、なければ glass を持つ物"""
+    explicit = obj.get('see_through')
+    return bool(obj.get('glass')) if explicit is None else bool(explicit)
+
+
 class _Scene:
     """対象の物の世界座標の三角形と、面（メッシュのデータ単位）への対応"""
 
-    def __init__(self, objects: list):
+    def __init__(self, objects: list, see_through: Callable = default_see_through):
         self.objects = objects
         self.mesh_ids: dict[int, int] = {}  # メッシュのデータのポインタ → 通し番号
         self.meshes: list = []
@@ -94,7 +101,7 @@ class _Scene:
         self.tris = np.concatenate(tris) if tris else np.zeros((0, 3), dtype=np.int32)
         self.tri_poly = np.concatenate(tri_poly) if tri_poly else np.zeros(0, dtype=np.int32)
         self.tri_obj = np.concatenate(tri_obj) if tri_obj else np.zeros(0, dtype=np.int32)
-        self.see_through = [bool(o.get('see_through', False)) for o in objects]
+        self.see_through = [bool(see_through(o)) for o in objects]
 
     def bvh(self) -> BVHTree:
         return BVHTree.FromPolygons([tuple(v) for v in self.verts.tolist()], [tuple(t) for t in self.tris.tolist()], all_triangles=True)
@@ -121,6 +128,7 @@ def cull_hidden(
     spacing: float = 0.5,
     step_deg: float = 15.0,
     targeted_rays: int = 12,
+    see_through: Callable = default_see_through,
 ) -> dict:
     """レールから一度も見えない面を objects から消し、前後の三角形の数などを返す。
 
@@ -130,7 +138,7 @@ def cull_hidden(
     """
     t0 = time.time()
     objs = [o for o in objects if o.type == 'MESH']
-    scene = _Scene(objs)
+    scene = _Scene(objs, see_through)
     before = {o.name: _tri_count(o) for o in objs}
     before_total = sum(before.values())
     visible = np.zeros(scene.n_polys, dtype=bool)

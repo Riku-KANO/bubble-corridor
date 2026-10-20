@@ -54,6 +54,17 @@ SEAT_EYE_HEIGHT = 0.15
 FOV_DEG = 75.0
 GONDOLA_DIAMETER = 2.4
 
+#: 区間ごとの空の色（下書き。一日が過ぎるように: 夜明け前、朝、雨の昼、金の万華鏡、夜の藍、金と桃色の夜明け、朝）
+WORLD_COLOR = {
+    'platform': (0.36, 0.42, 0.52),
+    'greenhouse': (0.62, 0.78, 0.58),
+    'rain': (0.45, 0.50, 0.58),
+    'kaleidoscope': (0.80, 0.60, 0.30),
+    'celestial': (0.02, 0.03, 0.12),
+    'dawn': (0.95, 0.66, 0.50),
+    'departure': (0.70, 0.74, 0.80),
+}
+
 ROOMS = ('platform', 'greenhouse', 'rain', 'kaleidoscope', 'celestial', 'dawn')
 #: 区間 → 部屋（contracts/ids.ts の ROOM_OF_SECTION。降車は乗り場と同じホール）
 ROOM_OF_SECTION = {
@@ -77,6 +88,8 @@ P_SPACING = 'spacing'
 P_GENTLE_Y = 'gentle_y'
 P_SIGNATURE = 'rail_signature'
 P_TIMELINE_DT = 'timeline_dt'
+#: 乗車時間（秒）。書き出しの duration の基準（シーンの frame 範囲ではなくこれ）
+P_DURATION = 'duration'
 #: Sections（空の物体）のカスタムプロパティ: 区間の id → [開始の秒, 終わりの秒]
 
 #: TimelineMarker.name は 64 バイト（終端を含む）
@@ -496,6 +509,7 @@ def build(rail_path: str, cues_path: str, out_path: str, audio: str | None = Non
     previz.objects.link(rail)
     bpy.context.view_layer.update()
     rail[P_SPACING] = spacing
+    rail[P_DURATION] = duration
     rail[P_SIGNATURE] = polyline_signature(evaluated_polyline(rail))
     if ride.get('gentleY') is not None:
         rail[P_GENTLE_Y] = [float(y) for y in ride['gentleY']]
@@ -580,6 +594,8 @@ def build(rail_path: str, cues_path: str, out_path: str, audio: str | None = Non
         rng = random.Random(f'{room}-{span_count[room]}')
         build_room_span(room, span_count[room], pts, room_colls[room], rng)
 
+    key_world_color(sc, {sid: tuple(sec_empty[sid]) for sid in WORLD_COLOR if sid in sec_empty})
+
     # キューシート → タイムラインマーカー（時刻は 1/30 秒の整数倍）
     for cue in cues:
         frame = round(float(cue['t']) * FPS)
@@ -595,11 +611,27 @@ def build(rail_path: str, cues_path: str, out_path: str, audio: str | None = Non
     return {'points': len(rail_b), 'length': total_len, 'keys': len(timeline), 'markers': len(cues), 'frames': sc.frame_end}
 
 
+def key_world_color(sc, spans: dict) -> None:
+    """空の色を区間ごとに変える（各区間の中は一定、区間の境目をまたいで線形に混ざる）"""
+    bg = sc.world.node_tree.nodes.get('Background') if sc.world and sc.world.node_tree else None
+    if bg is None or not spans:
+        return
+    for sid, (t0, t1) in spans.items():
+        hold = min(2.0, (t1 - t0) / 4.0)
+        for t in (t0 + hold, t1 - hold):
+            bg.inputs['Color'].default_value = (*WORLD_COLOR[sid], 1.0)
+            bg.inputs['Color'].keyframe_insert('default_value', frame=t * FPS)
+    for fc in action_fcurves(sc.world.node_tree.animation_data.action):
+        for kp in fc.keyframe_points:
+            kp.interpolation = 'LINEAR'
+
+
 def add_audio(sc, path: str) -> None:
     """仮の楽曲をサウンドのストリップとして frame 0 に置く"""
     seq = sc.sequence_editor_create()
     strips = seq.strips if hasattr(seq, 'strips') else seq.sequences
     strips.new_sound('bgm', os.path.abspath(path), channel=1, frame_start=0)
+    sc.sync_mode = 'AUDIO_SYNC'  # 再生が遅れたらコマを飛ばして音に合わせる（映像と音を見ながら時刻を決める）
 
 
 def main() -> None:
@@ -608,7 +640,11 @@ def main() -> None:
     ap.add_argument('--cues', required=True, help='cues.json（Cue[]）')
     ap.add_argument('--out', required=True, help='書き出す previz.blend')
     ap.add_argument('--audio', help='仮の楽曲（wav など）。あればサウンドのストリップに置く')
+    ap.add_argument('--force', action='store_true', help='既にある --out（人が直した previz.blend）を上書きする')
     args = ap.parse_args(script_args())
+    if os.path.exists(args.out) and not args.force:
+        print(f'ERROR: {args.out} が既にあります（人が直した previz.blend を消さないよう上書きしません）。上書きするなら --force、別の場所なら --out を変えてください')
+        sys.exit(1)
     info = build(args.rail, args.cues, args.out, args.audio)
     print(f'previz: {args.out} 点 {info["points"]}（{info["length"]:.1f}m）、キー {info["keys"]}、マーカー {info["markers"]}、frame 0〜{info["frames"]}')
 
