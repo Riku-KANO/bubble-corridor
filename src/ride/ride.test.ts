@@ -4,7 +4,7 @@ import type { RoomId, SectionId } from '../contracts/ids';
 import { ROOM_OF_SECTION, SECTION_IDS } from '../contracts/ids';
 import type { RidePose } from '../contracts/ride';
 import { MOMENT_BARS, MOTION, RIDE_DURATION, SEC_PER_BAR, SECTIONS } from '../config';
-import { createRide, generateRideData, streamingPlan } from './index';
+import { createRide, generateRideData, streamingPlan, validateRideData } from './index';
 
 const data = generateRideData();
 const ride = createRide(data);
@@ -111,19 +111,39 @@ describe('RIDE-8 レールの形', () => {
     expect(Math.hypot(end.x - start.x, end.z - start.z)).toBeLessThan(15);
   });
 
-  it('温室は高い位置から下降し（4m 以上）、天球は上昇する（6m 以上）。夜明けの岸は水面すれすれで平ら（上下 1m 以内）', () => {
-    const ys = (id: SectionId) => {
-      const { s0, s1 } = ride.sectionSpan(id);
-      const out: number[] = [];
-      for (let s = s0; s <= s1; s += 1) out.push(ride.pointAt(s).y);
-      return out;
-    };
+  const ys = (id: SectionId) => {
+    const { s0, s1 } = ride.sectionSpan(id);
+    const out: number[] = [];
+    for (let s = s0; s <= s1; s += 1) out.push(ride.pointAt(s).y);
+    return out;
+  };
+
+  it('温室は高い位置から全体を見下ろして下降する（6m 以上）', () => {
     const g = ys('greenhouse');
-    expect(g[0] - Math.min(...g)).toBeGreaterThanOrEqual(4);
-    const c = ys('celestial');
-    expect(c[c.length - 1] - c[0]).toBeGreaterThanOrEqual(6);
+    expect(g[0] - Math.min(...g)).toBeGreaterThanOrEqual(6);
+  });
+
+  it('万華鏡は部屋の中心をまっすぐ水平に通り抜ける（上下 0.5m 以内）', () => {
+    const k = ys('kaleidoscope');
+    expect(Math.max(...k) - Math.min(...k)).toBeLessThanOrEqual(0.5);
+  });
+
+  it('天球は入口から中心（9:50）へ殻を抜けながら上昇する（6m 以上）', () => {
+    const at = (t: number) => ride.poseAt(t, 'standard', pose()).y;
+    expect(at(MOMENT_BARS.celestialConstellation * SEC_PER_BAR) - at(secTime('celestial').t0)).toBeGreaterThanOrEqual(6);
+  });
+
+  it('夜明けの岸は水面すれすれで平ら（上下 1m 以内）、乗り場と同じ水面の高さ（±1.5m）', () => {
     const d = ys('dawn');
     expect(Math.max(...d) - Math.min(...d)).toBeLessThanOrEqual(1);
+    const mean = d.reduce((a, b) => a + b, 0) / d.length;
+    expect(Math.abs(mean - ride.pointAt(0).y)).toBeLessThanOrEqual(1.5);
+  });
+
+  it('s は3Dの弧長: 点の3Dの間隔の和が（点の数−1）× spacing と一致する（±0.5m）', () => {
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]);
+    expect(Math.abs(len - (pts.length - 1) * data.rail.spacing)).toBeLessThanOrEqual(0.5);
   });
 
   it('隣り合わない部屋どうしはレールが 30m 以上離れている（部屋の形が重ならない）', () => {
@@ -174,8 +194,30 @@ describe('RIDE-3 速度の決め方', () => {
     for (let t = 776; t <= 780; t += 0.5) expect(at(t).speed, `t=${t}`).toBeLessThanOrEqual(0.3);
   });
 
-  it('前進は最大 3.0 m/s を超えない', () => {
-    for (let t = 0; t <= RIDE_DURATION; t += 0.5) expect(at(t).speed).toBeLessThanOrEqual(MOTION.speedMax + 1e-6);
+  it('前進は最大 3.0 m/s を超えず、漂う速さ（1.4 m/s）に収まる', () => {
+    for (let t = 0; t <= RIDE_DURATION; t += 0.5) {
+      expect(at(t).speed).toBeLessThanOrEqual(MOTION.speedMax + 1e-6);
+      expect(at(t).speed, `t=${t}`).toBeLessThanOrEqual(MOTION.driftMax + 1e-6);
+    }
+  });
+
+  it('狭い雨の回廊は 1.2 m/s 以下（壁が近いと景色の流れが速く見える）', () => {
+    const { t0, t1 } = secTime('rain');
+    for (let t = t0; t <= t1; t += 0.5) expect(at(t).speed, `t=${t}`).toBeLessThanOrEqual(MOTION.corridorMax + 1e-6);
+  });
+
+  it('見どころの後は静かに次の膜へ近づく（見どころの3秒後から膜まで 1.1 m/s 以下）', () => {
+    for (const th of HIGHLIGHT_T) {
+      const next = MEMBRANE_T.find((m) => m > th) ?? RIDE_DURATION;
+      for (let t = th + 3; t < next; t += 0.5) expect(at(t).speed, `見どころ ${th}s の後 t=${t}`).toBeLessThanOrEqual(MOTION.afterHighlightMax + 1e-6);
+    }
+  });
+
+  it('速さはゆっくり変える（0.5秒の窓で測った加速度が 0.12 m/s² 以下）', () => {
+    for (let t = 0.5; t <= RIDE_DURATION; t += 0.25) {
+      const a = Math.abs(at(t).speed - at(t - 0.5).speed) / 0.5;
+      expect(a, `t=${t}`).toBeLessThanOrEqual(0.12);
+    }
   });
 
   it('各部屋の平均速度は 0.8〜2.0 m/s（景色を眺められる速さ）', () => {
@@ -234,9 +276,26 @@ describe('RIDE-7 部屋の先読み', () => {
     }
   });
 
-  it('夜明けの岸では、降車に使う乗り場を先に読み込む', () => {
+  it('夜明けの岸では、降車に使う乗り場を先に読み込み、朝日の誘導（11:47）から遠くに描く', () => {
     expect(streamingPlan(mid('dawn'), ride).keep).toContain('platform');
     expect(streamingPlan(mid('departure'), ride).visible).toContain('platform');
+    expect(streamingPlan(MOMENT_BARS.dawnSunrise * SEC_PER_BAR - 3, ride).visible).toContain('platform');
+  });
+
+  it('次の部屋は膜の15秒前から、前の部屋は膜の10秒後まで描く（膜越しに見え、振り返っても空にならない）', () => {
+    for (const tm of MEMBRANE_T) {
+      const before = ROOM_OF_SECTION[ride.sectionAt(tm - 0.01)];
+      const after = ROOM_OF_SECTION[ride.sectionAt(tm)];
+      if (before === after) continue;
+      expect(streamingPlan(tm - 15, ride).visible, `膜 ${tm}s の15秒前`).toContain(after);
+      expect(streamingPlan(tm + 10, ride).visible, `膜 ${tm}s の10秒後`).toContain(before);
+    }
+  });
+
+  it('返す配列は書き換えられない（毎フレーム使い回すため）', () => {
+    const p = streamingPlan(100, ride);
+    expect(Object.isFrozen(p.visible)).toBe(true);
+    expect(Object.isFrozen(p.keep)).toBe(true);
   });
 
   it('visible は keep に含まれる', () => {
@@ -244,5 +303,20 @@ describe('RIDE-7 部屋の先読み', () => {
       const p = streamingPlan(t, ride);
       for (const v of p.visible) expect(p.keep, `t=${t}`).toContain(v);
     }
+  });
+});
+
+describe('外から来る rail.json の検査', () => {
+  it('生成したデータは問題なし', () => {
+    expect(validateRideData(data)).toEqual([]);
+  });
+
+  it('時刻が増えない・数でない・点が足りない・区間がないものを見つける', () => {
+    const bad = (patch: Record<string, unknown>) => validateRideData({ ...data, ...patch } as unknown);
+    expect(bad({ timeline: [{ t: 0, s: 0 }, { t: 0, s: 1 }] }).length).toBeGreaterThan(0);
+    expect(bad({ timeline: [{ t: 0, s: 0 }, { t: 1, s: Number.NaN }] }).length).toBeGreaterThan(0);
+    expect(bad({ rail: { spacing: 1, points: [[0, 0, 0]] } }).length).toBeGreaterThan(0);
+    expect(bad({ sections: [] }).length).toBeGreaterThan(0);
+    expect(validateRideData(null).length).toBeGreaterThan(0);
   });
 });

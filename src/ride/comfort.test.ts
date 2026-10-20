@@ -74,6 +74,16 @@ describe('RIDE-4 穏やかモード', () => {
     expect(m.maxYawDeg).toBeLessThanOrEqual(MOTION.yawRateMaxDeg * MOTION.gentleFactor * 1.02);
   });
 
+  it('レールは1本: 穏やかでも高さと向きは標準と同じ（ADR-0008）', () => {
+    const p = () => ({ x: 0, y: 0, z: 0, yaw: 0, speed: 0, s: 0, section: 'platform' as const, sectionProgress: 0 });
+    for (let t = 0; t <= RIDE_DURATION; t += 3.7) {
+      const a = ride.poseAt(t, 'standard', p());
+      const b = ride.poseAt(t, 'gentle', p());
+      expect(b.y).toBeCloseTo(a.y, 9);
+      expect(b.yaw).toBeCloseTo(a.yaw, 9);
+    }
+  });
+
   it('向きは進行方向から 40° 以上ずれず、高さは標準から 5m 以上離れない', () => {
     const p = () => ({ x: 0, y: 0, z: 0, yaw: 0, speed: 0, s: 0, section: 'platform' as const, sectionProgress: 0 });
     for (let t = 0; t <= RIDE_DURATION; t += 0.5) {
