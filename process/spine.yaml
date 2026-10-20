@@ -103,36 +103,47 @@ slices:
   tests: [src/fx/fx.test.ts]
   status: red
   notes: '2026-10-20 親がテスト9件を作成。赤の証跡: 9 failed（resolveFx が未実装）。実装 消費 1/3'
+- id: S-17
+  title: Blender のパイプライン基盤（プレビズの組み立てと書き出し、通しの動画、見えない面の削除、焼き込み、命名と glb の書き出し）
+  wave: 1
+  lane: blender
+  milestone: M1
+  requirements: [BLD-1, BLD-2, BLD-3, BLD-4, BLD-5, BLD-6, BLD-7]
+  depends_on: [S-00]
+  paths: [blender/scripts/previz.py, blender/scripts/export_ride.py, blender/scripts/render_previz.py, blender/scripts/common/**, blender/README.md]
+  tests: [scripts/blender.test.ts]
+  status: todo
+  notes: ''
 - id: S-20
-  title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を完成品質で
+  title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を Blender で造形・焼き込みし、完成品質で
   wave: 2
   lane: rooms-a
   milestone: M1
-  requirements: [INT-1, INT-3, INT-4, INT-6, TRN-1, RIDE-8]
-  depends_on: [S-10, S-12]
-  paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**]
+  requirements: [INT-1, INT-3, INT-4, INT-6, TRN-1, RIDE-8, BLD-4, BLD-5, BLD-6, BLD-7]
+  depends_on: [S-10, S-12, S-17]
+  paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**, blender/scripts/rooms/lobby.py, blender/scenes/lobby.blend, public/assets/rooms/lobby*, blender/scripts/rooms/platform.py, blender/scenes/platform.blend, public/assets/rooms/platform*, blender/scripts/rooms/greenhouse.py, blender/scenes/greenhouse.blend, public/assets/rooms/greenhouse*, blender/scripts/rooms/gondola.py, blender/scenes/gondola.blend, public/assets/rooms/gondola*]
   tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts]
   status: todo
   notes: ''
 - id: S-21
-  title: 部屋B（雨の回廊と扉の分岐、万華鏡の間の金と青）
+  title: 部屋B（雨の回廊と扉の分岐、万華鏡の間の金と青）を Blender で造形・焼き込み
   wave: 2
   lane: rooms-b
   milestone: M2
-  requirements: [INT-1, INT-3, INT-6, INT-8, RIDE-8]
-  depends_on: [S-10, S-12]
-  paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**]
+  requirements: [INT-1, INT-3, INT-6, INT-8, RIDE-8, BLD-4, BLD-5, BLD-6, BLD-7]
+  depends_on: [S-10, S-12, S-17]
+  paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**, blender/scripts/rooms/rain.py, blender/scenes/rain.blend, public/assets/rooms/rain*, blender/scripts/rooms/kaleidoscope.py, blender/scenes/kaleidoscope.blend, public/assets/rooms/kaleidoscope*]
   tests: [src/rooms/rain/room.test.ts, src/rooms/kaleidoscope/room.test.ts]
   status: todo
   notes: ''
 - id: S-22
-  title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）
+  title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）を Blender で造形・焼き込み
   wave: 2
   lane: rooms-c
   milestone: M0
-  requirements: [INT-1, INT-3, INT-6, TRN-2, RIDE-8, REN-3]
-  depends_on: [S-10, S-12]
-  paths: [src/rooms/celestial/**, src/rooms/dawn/**, dev/rooms-c.html, src/dev/rooms-c/**]
+  requirements: [INT-1, INT-3, INT-6, TRN-2, RIDE-8, REN-3, BLD-4, BLD-5, BLD-6, BLD-7]
+  depends_on: [S-10, S-12, S-17]
+  paths: [src/rooms/celestial/**, src/rooms/dawn/**, dev/rooms-c.html, src/dev/rooms-c/**, blender/scripts/rooms/celestial.py, blender/scenes/celestial.blend, public/assets/rooms/celestial*, blender/scripts/rooms/dawn.py, blender/scenes/dawn.blend, public/assets/rooms/dawn*]
   tests: [src/rooms/celestial/room.test.ts, src/rooms/dawn/room.test.ts]
   status: todo
   notes: ''

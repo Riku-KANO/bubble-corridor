@@ -24,7 +24,11 @@
     "core:sync": "node --import ./scripts/ts-resolve.mjs scripts/sync-core.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "verify:full": "pnpm verify && pnpm e2e",
-    "ride:data": "node --import ./scripts/ts-resolve.mjs scripts/build-ride-data.ts"
+    "ride:data": "node --import ./scripts/ts-resolve.mjs scripts/build-ride-data.ts",
+    "blender": "node --import ./scripts/ts-resolve.mjs scripts/blender.ts",
+    "previz:build": "node --import ./scripts/ts-resolve.mjs scripts/blender.ts blender/scripts/previz.py -- --rail public/assets/rail.json --cues public/assets/cues.json --out blender/scenes/previz.blend",
+    "previz:export": "node --import ./scripts/ts-resolve.mjs scripts/blender.ts blender/scripts/export_ride.py --blend blender/scenes/previz.blend -- --out-dir public/assets",
+    "previz:render": "node --import ./scripts/ts-resolve.mjs scripts/blender.ts blender/scripts/render_previz.py --blend blender/scenes/previz.blend -- --out .snaps/previz"
   },
   "dependencies": {
     "@fontsource/noto-sans-jp": "^5.3.1",
