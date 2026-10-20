@@ -55,3 +55,11 @@
 - 外殻を85m まで広げると岸の最初の約23秒が殻の内側になり、先読みの窓（膜の10秒後まで）と食い違う。
 - そこで**外殻は中心から約60m 以内**に置き、天球の区間の前半（8:00〜約8:41）は、暗転の後に星が灯る星の海の中で、巨大なガラスの球を**外から見て近づく**導入にする。球を外から見てから中へ入る構図は、設計書の「部屋の入口で最初の一枚絵を設計する」に合う。後半は殻を何枚も抜けながら中心へ上昇し、出るときの最も外の殻が夜明けの岸への膜を兼ねる。
 - 星（光を宿したガラス玉）は球の内側にも外側にも置く。
+
+## ADR-0010 VR の描画経路の検証の結果と、three r186 の回避（2026-10-21、ADR-0001 の補足）
+
+- WebGPURenderer の WebGL2 経路（forceWebGL）で immersive-vr が動くことを、IWER（Meta Quest 3 のエミュレーション）の e2e で確かめた（e2e/xr.spec.ts、5回繰り返して安定）。
+- IWER だけで起きる three r186 の不具合を回避している: IWER の XRWebGLLayer.framebuffer が null を返し、WebGLState.drawBuffers の WeakMap の鍵になって毎フレーム例外になる。`renderer.xr.getBaseLayer().framebuffer === null` のときだけ、内部の WeakMap を null の鍵を許す形に差し替える（src/xr/system.ts の tolerateNullFramebuffer）。実機の投影レイヤーの経路には framebuffer がないので何もしない。
+  - 外す条件: three か IWER が直り、e2e が回避なしで通ること。three を 0.187 以降に上げるときに確かめる。
+- three r186 の setSession は投影レイヤーを作る前に foveation を当てるので、作った後に当て直す。
+- **ADR-0001 は Quest 3 の実機で確かめるまで「仮」のまま**。実機で確かめる項目: 投影レイヤーの経路でエラー 0、天球（`?screen=home&t=588` から VR）で 72fps、MSAA 4/2/0・foveation 0/0.5/1・multiview の比較、座る/立つの高さと reset、指先とコントローラーで触れつまみでは反応しない、ヘッドセットを外すとポーズ、メニューの文字と外周の暗さ。
