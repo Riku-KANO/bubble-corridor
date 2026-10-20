@@ -112,8 +112,8 @@ slices:
   depends_on: [S-00]
   paths: [blender/scripts/previz.py, blender/scripts/export_ride.py, blender/scripts/render_previz.py, blender/scripts/common/**, blender/README.md]
   tests: [scripts/blender.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト12件（scripts/blender.test.ts、合成のらせんのレールとキューで往復・プレビズ・静止画・面の削除・焼き込み・命名と extras）を作成。赤の証跡: vitest run scripts/blender.test.ts → previz.py がなく beforeAll で失敗（12件 skip 扱い）。SKIP_BLENDER=1 で 12 skipped。実装 消費 1/3'
 - id: S-20
   title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を Blender で造形・焼き込みし、完成品質で
   wave: 2
