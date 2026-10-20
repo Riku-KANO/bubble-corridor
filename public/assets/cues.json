@@ -1,1 +1,240 @@
-[]
+[
+ {
+  "id": "ride.start@0",
+  "name": "ride.start",
+  "t": 0,
+  "bar": 0,
+  "section": "platform"
+ },
+ {
+  "id": "hint.touch@6",
+  "name": "hint.touch",
+  "t": 20,
+  "bar": 6,
+  "section": "platform"
+ },
+ {
+  "id": "membrane@18",
+  "name": "membrane",
+  "t": 60,
+  "bar": 18,
+  "section": "greenhouse",
+  "data": {
+   "to": "greenhouse"
+  }
+ },
+ {
+  "id": "lure@47.1",
+  "name": "lure",
+  "t": 157,
+  "bar": 47.1,
+  "section": "greenhouse",
+  "data": {
+   "target": "greenhouse.bloom"
+  }
+ },
+ {
+  "id": "greenhouse.bloom@48",
+  "name": "greenhouse.bloom",
+  "t": 160,
+  "bar": 48,
+  "section": "greenhouse"
+ },
+ {
+  "id": "photo.capture@48",
+  "name": "photo.capture",
+  "t": 160,
+  "bar": 48,
+  "section": "greenhouse",
+  "data": {
+   "shot": "bloom"
+  }
+ },
+ {
+  "id": "greenhouse.dewfall@49",
+  "name": "greenhouse.dewfall",
+  "t": 163.33333333333334,
+  "bar": 49,
+  "section": "greenhouse"
+ },
+ {
+  "id": "membrane@63",
+  "name": "membrane",
+  "t": 210,
+  "bar": 63,
+  "section": "rain",
+  "data": {
+   "to": "rain"
+  }
+ },
+ {
+  "id": "lure@92.1",
+  "name": "lure",
+  "t": 307,
+  "bar": 92.1,
+  "section": "rain",
+  "data": {
+   "target": "rain.freeze"
+  }
+ },
+ {
+  "id": "rain.freeze@93",
+  "name": "rain.freeze",
+  "t": 310,
+  "bar": 93,
+  "section": "rain"
+ },
+ {
+  "id": "photo.capture@93",
+  "name": "photo.capture",
+  "t": 310,
+  "bar": 93,
+  "section": "rain",
+  "data": {
+   "shot": "freeze"
+  }
+ },
+ {
+  "id": "rain.doors@105",
+  "name": "rain.doors",
+  "t": 350,
+  "bar": 105,
+  "section": "rain"
+ },
+ {
+  "id": "branch.decide@107",
+  "name": "branch.decide",
+  "t": 356.6666666666667,
+  "bar": 107,
+  "section": "rain"
+ },
+ {
+  "id": "membrane@108",
+  "name": "membrane",
+  "t": 360,
+  "bar": 108,
+  "section": "kaleidoscope",
+  "data": {
+   "to": "kaleidoscope"
+  }
+ },
+ {
+  "id": "lure@131.1",
+  "name": "lure",
+  "t": 437,
+  "bar": 131.1,
+  "section": "kaleidoscope",
+  "data": {
+   "target": "kaleidoscope.flower"
+  }
+ },
+ {
+  "id": "kaleidoscope.flower@132",
+  "name": "kaleidoscope.flower",
+  "t": 440,
+  "bar": 132,
+  "section": "kaleidoscope"
+ },
+ {
+  "id": "membrane@144",
+  "name": "membrane",
+  "t": 480,
+  "bar": 144,
+  "section": "celestial",
+  "data": {
+   "to": "celestial"
+  }
+ },
+ {
+  "id": "celestial.blackout@144",
+  "name": "celestial.blackout",
+  "t": 480,
+  "bar": 144,
+  "section": "celestial"
+ },
+ {
+  "id": "celestial.stars@144.6",
+  "name": "celestial.stars",
+  "t": 482,
+  "bar": 144.6,
+  "section": "celestial"
+ },
+ {
+  "id": "lure@176.1",
+  "name": "lure",
+  "t": 587,
+  "bar": 176.1,
+  "section": "celestial",
+  "data": {
+   "target": "celestial.constellation"
+  }
+ },
+ {
+  "id": "celestial.constellation@177",
+  "name": "celestial.constellation",
+  "t": 590,
+  "bar": 177,
+  "section": "celestial"
+ },
+ {
+  "id": "photo.capture@177",
+  "name": "photo.capture",
+  "t": 590,
+  "bar": 177,
+  "section": "celestial",
+  "data": {
+   "shot": "constellation"
+  }
+ },
+ {
+  "id": "membrane@198",
+  "name": "membrane",
+  "t": 660,
+  "bar": 198,
+  "section": "dawn",
+  "data": {
+   "to": "dawn"
+  }
+ },
+ {
+  "id": "lure@212.1",
+  "name": "lure",
+  "t": 707,
+  "bar": 212.1,
+  "section": "dawn",
+  "data": {
+   "target": "dawn.sunrise"
+  }
+ },
+ {
+  "id": "dawn.sunrise@213",
+  "name": "dawn.sunrise",
+  "t": 710,
+  "bar": 213,
+  "section": "dawn"
+ },
+ {
+  "id": "membrane@225",
+  "name": "membrane",
+  "t": 750,
+  "bar": 225,
+  "section": "departure",
+  "data": {
+   "to": "departure"
+  }
+ },
+ {
+  "id": "departure.open@225",
+  "name": "departure.open",
+  "t": 750,
+  "bar": 225,
+  "section": "departure"
+ },
+ {
+  "id": "ride.end@234",
+  "name": "ride.end",
+  "t": 780,
+  "bar": 234,
+  "section": "departure"
+ }
+]

@@ -78,9 +78,36 @@ export const MOTION = {
   yawRateMaxDeg: 15,
   /** 物との最短距離（m） */
   clearanceMin: 0.5,
-  /** 穏やかモードで上下の動きと向きの回転にかける倍率 */
+  /** 穏やかモードで上下の動きと向きの回転にかける倍率（ADR-0008: 標準の動きをこの上限以内に設計する） */
   gentleFactor: 0.5,
+  /** 膜の前後の速度（m/s）。部屋の入口で視界が開ける瞬間をゆっくり見せる。仮 */
+  membraneSpeed: 0.85,
+  /** 扉が現れてから確定までの速度（m/s）。選ぶ時間を作る。仮 */
+  doorsSpeed: 0.8,
+  /** 見どころの後の普段の速さの上限（m/s）。「終盤は静かになって次の膜へ近づく」。仮 */
+  afterHighlightMax: 1.1,
+  /** 狭い回廊の普段の速さの上限（m/s）。壁が近いと景色の流れが速く見える。仮 */
+  corridorMax: 1.2,
+  /** 普段の速さの上限（m/s）。漂う心地よさのため cruiseMax より低く抑える。仮 */
+  driftMax: 1.4,
+  /** 速さを変えるのにかける最短の時間（秒）。漂う感じを保つ。仮 */
+  driftRampSec: 16,
+  /** 小さな速さの変化（約0.3 m/s 以下）にかける最短の時間（秒）。仮 */
+  driftRampSmallSec: 12,
+  /** 速度の設計で守る加速度の上限（m/s²。テストの 0.12 に余裕を持たせる）。仮 */
+  driftAccelMax: 0.11,
+  /** 部屋ごとの平均の速さの下限（m/s。景色を眺められる速さ）。仮 */
+  roomAverageMin: 0.8,
 } as const;
+
+/** 部屋の先読みの窓（RIDE-7）。次の部屋は膜のこの秒数前から、前の部屋は膜のこの秒数後まで描く */
+export const STREAMING = {
+  aheadSec: 15,
+  behindSec: 10,
+} as const;
+
+/** 扉が現れてから扉を確定する（branch.decide）までの小節。仮 */
+export const BRANCH_DECIDE_AFTER_DOORS_BARS = 2;
 
 // ── カメラ（PCとスマートフォン、VR） ─────────────────────────────────
 export const CAMERA = {

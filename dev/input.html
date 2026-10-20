@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <title>見回すと触れる — 確認ページ（input）</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #1b2230;
+        color: #e8eef8;
+        font: 13px/1.5 system-ui, 'Hiragino Sans', sans-serif;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #panel {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        max-width: min(340px, calc(100vw - 16px));
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(20, 26, 38, 0.72);
+        backdrop-filter: blur(6px);
+        -webkit-user-select: none;
+        user-select: none;
+        z-index: 2;
+      }
+      #panel label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin: 0 8px 4px 0;
+      }
+      #panel button,
+      #panel select {
+        font: inherit;
+        color: inherit;
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 6px;
+        padding: 2px 8px;
+      }
+      #status {
+        margin: 6px 0 0;
+        white-space: pre-wrap;
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+      }
+      #reticle {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 10px;
+        height: 10px;
+        margin: -5px 0 0 -5px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        pointer-events: none;
+        z-index: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="reticle"></div>
+    <div id="panel"></div>
+    <script type="module" src="/src/dev/input/main.ts"></script>
+  </body>
+</html>

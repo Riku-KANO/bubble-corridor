@@ -17,3 +17,6 @@ test-results/
 .snaps/
 # 開発ループの実行状態（checkout ごと）
 process/.loop-state.json
+
+# Python のキャッシュ（Blender のスクリプト）
+__pycache__/
