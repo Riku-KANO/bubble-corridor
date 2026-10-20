@@ -99,7 +99,7 @@ describe('PHO-3 ブラウザ内の保存（IndexedDB）', () => {
 
 describe('PHO-3 共有', () => {
   it('端末の共有機能でファイルを送れるなら送って true', async () => {
-    const share = vi.fn(async () => {});
+    const share = vi.fn(async (_data?: ShareData) => {});
     vi.stubGlobal('navigator', { share, canShare: () => true });
     const ok = await sharePhoto(new Blob(['x'], { type: 'image/png' }), 'a.png', '泡沫回廊・第3便');
     expect(ok).toBe(true);
