@@ -205,8 +205,11 @@ export function createSettingsScreen(env: ScreenEnv): Screen {
       setHidden(vignetteRow.el, !state.xrSupported);
       setHidden(postureRow.el, !state.xrSupported);
       // スマートフォンにはマウスがない（今それを選んでいるときだけは残す）
+      // 選べるのが「ドラッグで回す」1つだけになるなら、行ごと隠す（1つだけの radiogroup を出さない）
+      const onlyDrag = isMobile && state.settings.lookMode !== 'follow';
       const follow = lookModeRow.el.querySelector<HTMLElement>('[data-value="follow"]');
-      if (follow) setHidden(follow, isMobile && state.settings.lookMode !== 'follow');
+      if (follow) setHidden(follow, onlyDrag);
+      setHidden(lookModeRow.el, onlyDrag);
     },
     show() {
       selectTab('quality');

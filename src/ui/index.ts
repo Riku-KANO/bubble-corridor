@@ -73,7 +73,7 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
     howto: createHowtoScreen(env),
     credits: createCreditsScreen(env),
   };
-  // 乗車中の読み上げ（role="status"）が、ほかの画面の知らせより先に来るようにする（DOM の順で最初の status）
+  // 乗車中の画面を DOM の先頭に置く: 最初の role="status" が乗車中の案内になる（テストと、status を先頭から探す道具のため）
   const order = ['riding', ...(Object.keys(screens) as ScreenId[]).filter((id) => id !== 'riding')] as ScreenId[];
   for (const id of order) {
     const screen = screens[id];

@@ -17,10 +17,9 @@ export const MENU_FADE_SEC = 0.35;
 
 const SUB: readonly ScreenId[] = ['shelf', 'settings', 'howto', 'credits'];
 
-/** 遷移全体の長さ（秒）。VR で乗るときは「白い霧」の長さ */
-export function transitionSec(from: ScreenId | null, to: ScreenId, vr: boolean): number {
-  if (from === null) return TRANSITION_SEC.queueToHome * 0.5;
-  if (SUB.includes(from) || SUB.includes(to)) return MENU_FADE_SEC;
+/** 設計書に長さがある遷移の長さ（秒）。ない組み合わせ（メニューの行き来）は null */
+function designedSec(from: ScreenId, to: ScreenId, vr: boolean): number | null {
+  if (SUB.includes(from) || SUB.includes(to)) return null;
   if (vr && (to === 'guide' || to === 'riding') && (from === 'home' || from === 'guide')) return TRANSITION_SEC.screenToVR;
   if (from === 'queue' && to === 'home') return TRANSITION_SEC.queueToHome;
   if (from === 'home' && to === 'guide') return TRANSITION_SEC.homeToGuide;
@@ -32,15 +31,21 @@ export function transitionSec(from: ScreenId | null, to: ScreenId, vr: boolean):
   if (from === 'photo' && to === 'home') return TRANSITION_SEC.photoToHome;
   // ポーズの「降りる」で入口へ。設計書に一覧がないので、写真から入口へ戻る長さに揃える
   if (from === 'pause' && to === 'home') return TRANSITION_SEC.photoToHome;
-  return MENU_FADE_SEC;
+  return null;
+}
+
+/** 遷移全体の長さ（秒）。VR で乗るときは「白い霧」の長さ */
+export function transitionSec(from: ScreenId | null, to: ScreenId, vr: boolean): number {
+  if (from === null) return TRANSITION_SEC.queueToHome * 0.5;
+  return designedSec(from, to, vr) ?? MENU_FADE_SEC;
 }
 
 /** 出ていく画面と入ってくる画面の時間の配分 */
 export function timing(from: ScreenId | null, to: ScreenId, vr: boolean): Timing {
   const total = transitionSec(from, to, vr);
   if (from === null) return { leave: 0, delay: 0, enter: total };
-  // 入口・棚・設定などの行き来は、重ねて入れ替える（待たせない）
-  if (total === MENU_FADE_SEC) return { leave: total, delay: 0, enter: total };
+  // 入口・棚・設定などの行き来は、重ねて入れ替える（待たせない）。秒数ではなく組み合わせで判定する
+  if (designedSec(from, to, vr) === null) return { leave: total, delay: 0, enter: total };
   // 乗る・ポーズから戻る: 出ていく画面が全体をかけて晴れ、入ってくるものはない
   if (to === 'riding') return { leave: total, delay: 0, enter: total };
   // ポーズ: 曇りがすぐ広がり、項目が書かれる

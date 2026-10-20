@@ -273,7 +273,9 @@
   padding: 0.85rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
-.ui .row:last-child {
+/* 隠した行の後ろに区切り線を残さない: 見えている最後の行は線なし */
+.ui .row:last-child,
+.ui .row:not(:has(~ .row:not([hidden]))) {
   border-bottom: 0;
 }
 .ui .row-text {

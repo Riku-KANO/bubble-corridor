@@ -21,7 +21,7 @@ export function createGuideScreen(env: ScreenEnv): Screen {
   // 3つの案内は読み上げにも届ける（最初にフォーカスが置かれる「飛ばす」の説明として読まれる）
   const skip = h('button', { type: 'button', class: 'btn btn-quiet guide-skip', 'aria-describedby': ids.join(' '), on: { click: () => ready() && commands.skipGuide() } });
   const gyro = h('button', { type: 'button', class: 'btn btn-secondary guide-gyro', hidden: true, on: { click: () => askGyro() } });
-  const note = h('p', { class: 'guide-note', role: 'status', hidden: true });
+  const note = h('p', { class: 'guide-note sr-only', role: 'status' });
   const foot = h('div', { class: 'guide-foot' }, timer, gyro, note, skip);
   const el = h('section', { class: 'screen screen-guide', 'data-room': 'guide' }, h('div', { class: 'board-wrap' }, board, h('span', { class: 'board-post', 'aria-hidden': 'true' })), foot);
   const fog = createFog(board, { tint: 'rgba(150, 172, 205, 0.5)' });
@@ -52,13 +52,17 @@ export function createGuideScreen(env: ScreenEnv): Screen {
   function finishGyro(ok: boolean): void {
     gyroResult = ok ? 'granted' : 'denied';
     if (ok) commands.setSettings({ gyro: true });
+    // 押したボタンは隠れるので、フォーカスを「飛ばす」へ移す（body に落とさない）
+    const hadFocus = document.activeElement === gyro;
     paintGyro();
+    if (hadFocus) skip.focus();
   }
 
   function paintGyro(): void {
     const { tr } = env;
     setHidden(gyro, !wantsGyro || gyroResult !== 'idle');
-    setHidden(note, gyroResult === 'idle');
+    // 知らせ（role=status）は表に置いたまま文言だけ入れ替える（hidden を外すのと同時に入れると読み上げに届かない）
+    note.classList.toggle('sr-only', gyroResult === 'idle');
     setText(note, gyroResult === 'granted' ? tr('guide.gyro.on') : gyroResult === 'denied' ? tr('look.gyro.denied') : '');
   }
 
@@ -69,8 +73,9 @@ export function createGuideScreen(env: ScreenEnv): Screen {
       setText(gyro, env.tr('guide.gyro'));
       setAttr(board, 'aria-label', env.tr('guide.label'));
       for (const line of lines) setText(line, env.tr(line.dataset.key as 'guide.touch'));
-      // 傾きの許可を求められる端末（iOS）で、まだ許可していないときだけ
-      wantsGyro = state.isMobile && state.gyroNeedsPermission && !state.settings.gyro;
+      // 設計書「スマートフォンの傾きによる見回しは、最初に許可を求める」: まだ使っていないスマートフォンで尋ねる
+      // （iOS は許可の問い合わせ、Android は許可なしでそのまま有効になる）
+      wantsGyro = state.isMobile && !state.settings.gyro;
       paintGyro();
     },
     show(delaySec) {

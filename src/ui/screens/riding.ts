@@ -79,7 +79,11 @@ export function createRidingScreen(env: ScreenEnv): RidingScreen {
   // 雫を狙っている間は消さない
   drop.addEventListener('pointerenter', () => cancel(dropTimer));
   drop.addEventListener('pointerleave', () => {
-    if (!dropShown()) return;
+    // 消える途中（is-on が外れた後）に乗ったときも、隠すタイマーを張り直す（透明なのに押せる雫を残さない）
+    if (!dropShown()) {
+      if (!drop.hidden) dropTimer = later(() => setHidden(drop, true), DROP_FADE_SEC);
+      return;
+    }
     dropUntil = Date.now() + UI.pauseDropVisibleSec * 1000;
     cancel(dropTimer);
     dropTimer = later(onDropTimer, UI.pauseDropVisibleSec);
