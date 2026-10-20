@@ -123,8 +123,8 @@ slices:
   depends_on: [S-11, S-12]
   paths: [src/core/**, src/app/**, src/contracts/room.ts, src/rooms/testing.ts, src/input/look.ts, src/rooms/placeholder.ts, src/dev/core/**, scripts/check-core.ts]
   tests: [scripts/core-union.test.ts, src/core/quality-tier.test.ts]
-  status: red
-  notes: '2026-10-21 発案者の判断「和集合で統合」。案1のセッションが並行で src/core を 0.3.0（glass/、perf/、transition/、renderer・bench・params・scene・quality）まで作っていた。こちらのリポジトリだけを触る 2026-10-20 2026-10-21 親がテストを作成（scripts/core-union.test.ts: 案1 8aa3a5c の src/core 0.3.0 の30ファイルを git の blob の SHA で照合、版 0.4.0、変更記録、quality と quality-tier、easeGlass = glassEase、core の境界）。こちらの quality のテストを quality-tier.test.ts へ移した（中身は同じ）。赤の証跡: 35 failed / 1 passed。親の試し: 案1の 0.3.0 はこちらの tsc・eslint をそのまま通り、テスト 120件も緑。ぶつかるのは quality の利用側（app・rooms/testing・contracts/room・dev/core・materials/glass）だけ。gondola は和集合で触らないので paths から外し、dev/core を足した。実装 消費 0/3 2026-10-20 2026-10-21 実装 1/3 で緑（案1 8aa3a5c との和集合 0.4.0、200件、check --quick ALL OK、build 通る）。ただし core:sync で「同じ版で中身が違う」: 案1が並行で 0.4.0（b88d317）に進んでいた。親がテストの基準を b88d317（53ファイル）に取り直し、版を 0.5.0 に（ADR-0011、CORE-5 を更新）。1回目の判断（TierPreset、look の戻しは easeInOutSine、check-core でテストも検査）は採る。実装 消費 2/3'
+  status: green
+  notes: '2026-10-21 発案者の判断「和集合で統合」。案1のセッションが並行で src/core を 0.3.0（glass/、perf/、transition/、renderer・bench・params・scene・quality）まで作っていた。こちらのリポジトリだけを触る 2026-10-20 2026-10-21 親がテストを作成（scripts/core-union.test.ts: 案1 8aa3a5c の src/core 0.3.0 の30ファイルを git の blob の SHA で照合、版 0.4.0、変更記録、quality と quality-tier、easeGlass = glassEase、core の境界）。こちらの quality のテストを quality-tier.test.ts へ移した（中身は同じ）。赤の証跡: 35 failed / 1 passed。親の試し: 案1の 0.3.0 はこちらの tsc・eslint をそのまま通り、テスト 120件も緑。ぶつかるのは quality の利用側（app・rooms/testing・contracts/room・dev/core・materials/glass）だけ。gondola は和集合で触らないので paths から外し、dev/core を足した。実装 消費 0/3 2026-10-20 2026-10-21 実装 1/3 で緑（案1 8aa3a5c との和集合 0.4.0、200件、check --quick ALL OK、build 通る）。ただし core:sync で「同じ版で中身が違う」: 案1が並行で 0.4.0（b88d317）に進んでいた。親がテストの基準を b88d317（53ファイル）に取り直し、版を 0.5.0 に（ADR-0011、CORE-5 を更新）。1回目の判断（TierPreset、look の戻しは easeInOutSine、check-core でテストも検査）は採る。実装 消費 2/3 2026-10-20 2026-10-21 実装 2/3 で緑（core 25ファイル 303件、build 通る、core:sync の表示は こちら 0.5.0 / 相手 0.4.0 で止まらない、案1 は無変更）。lint は案1から取り込んだ perf/gpu-span.test.ts の no-this-alias だけ赤 → 親が eslint.config.js に src/core/**/*.test.ts に限る上書きを足して ALL OK。レビュー1巡目へ'
 - id: S-20
   title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を Blender で造形・焼き込みし、完成品質で
   wave: 2
@@ -178,8 +178,8 @@ slices:
   depends_on: [S-10, S-14, S-15, S-16, S-23]
   paths: [src/app/**, src/main.ts, src/contracts/xr.ts, src/contracts/ui.ts, scripts/dev/**]
   tests: [src/app/timeline.test.ts, src/app/idle-chime.test.ts]
-  status: green
-  notes: '2026-10-20 親がテスト（timeline 7件、idle-chime 3件）を作成。赤の証跡: ./timeline・./idle-chime が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 2026-10-21 実装 1/3 で緑（app 23件、e2e 7件）。親が最新の main を取り込み、UiState.viewMode を省略できる形に（S-13 の UI・確認ページの型を壊さない）。check --quick ALL OK。レビュー1巡目へ'
+  status: red
+  notes: '2026-10-20 親がテスト（timeline 7件、idle-chime 3件）を作成。赤の証跡: ./timeline・./idle-chime が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 2026-10-21 実装 1/3 で緑（app 23件、e2e 7件）。親が最新の main を取り込み、UiState.viewMode を省略できる形に（S-13 の UI・確認ページの型を壊さない）。check --quick ALL OK。レビュー1巡目へ 2026-10-20 2026-10-21 レビュー1巡目 request_changes（P1 なし）: P2 VR の暗転なし、一体型のヘッドセットで isXR が偽、毎フレームの確保2か所、setDefaultGlassTier・setGlassFlashScale の配線なし。親が P2 の2件をテストにした（xr-darkness.test.ts、device.test.ts、赤）。S-25 へ: gondola.rise、降車後の入口の部屋の計画、部屋ごとの setGlassLighting。実装 消費 2/3'
 - id: S-25
   title: 統合・後半（部屋ごとのガラスの擬似照明、UiState の viewMode、音の時計と映像の確認、13分の通しの e2e、関門1・2の計測）
   wave: 3
