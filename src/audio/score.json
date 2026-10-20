@@ -1,0 +1,268 @@
+{
+  "bpm": 72,
+  "beatsPerBar": 4,
+  "theme": [
+    [0, 0, 4, 1], [0, 1, 2, 0.5], [0, 1.5, 4, 0.5], [0, 2, 5, 1.5],
+    [0, 3.5, 4, 0.5], [1, 0, 2, 2], [1, 2, 1, 1], [1, 3, 0, 1],
+    [2, 0, 1, 1], [2, 1, 2, 1], [2, 2, 4, 1], [2, 3, 5, 1],
+    [3, 0, 2, 1.5], [3, 1.5, 1, 0.5], [3, 2, 0, 2]
+  ],
+  "lobby": {
+    "key": "Am",
+    "reverb": "large",
+    "chords": [[0, "Am9"], [2, "Fmaj7"], [4, "Cadd9"], [6, "G"]],
+    "theme": null,
+    "layers": [
+      {"kind": "drone", "timbre": "warm", "from": 0, "to": 8, "level": [[0, 0.5], [8, 0.5]], "vel": 0.4, "base": 45, "pick": [0, 2, 3]},
+      {"kind": "drone", "timbre": "air", "from": 0, "to": 8, "level": [[0, 0.4], [8, 0.4]], "vel": 0.32, "base": 57, "pick": [1, 2, 3]},
+      {"kind": "bass", "timbre": "bowl", "from": 0, "to": 8, "level": [[0, 0.5], [8, 0.5]], "vel": 0.45, "base": 33, "pick": [0], "trigger": "chord"},
+      {"kind": "arpeggio", "timbre": "bell", "from": 0, "to": 8, "level": [[0, 0.5], [8, 0.5]], "vel": 0.4, "base": 69, "rate": 2, "steps": [0, 2, 3, 2], "dur": 3},
+      {"kind": "sparkle", "timbre": "bell", "from": 0, "to": 8, "level": [[0, 0.5], [8, 0.5]], "vel": 0.34, "low": 81, "high": 96, "perBar": 0.6, "seed": 71}
+    ],
+    "ambient": []
+  },
+  "sections": {
+    "platform": {
+      "key": "Am",
+      "reverb": "large",
+      "chords": [[0, "Am9"], [4, "Fmaj7"], [8, "Cadd9"], [12, "Dm7"], [14, "Em7"], [16, "G"]],
+      "theme": null,
+      "layers": [
+        {"kind": "drone", "timbre": "warm", "from": 0, "to": 18, "level": [[0, 0], [3, 0.55], [14, 0.7], [17, 0.8], [18, 0.6]], "vel": 0.5, "base": 45, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "air", "from": 6, "to": 18, "level": [[6, 0], [10, 0.5], [17, 0.8], [18, 0.6]], "vel": 0.45, "base": 57, "pick": [1, 2, 3]},
+        {"kind": "bass", "timbre": "bowl", "from": 0, "to": 18, "level": [[0, 0.45], [18, 0.7]], "vel": 0.55, "base": 33, "pick": [0], "trigger": "chord"},
+        {"kind": "sparkle", "timbre": "bell", "from": 1, "to": 18, "level": [[1, 0.35], [10, 0.55], [17, 0.8], [18, 0.8]], "vel": 0.5, "low": 76, "high": 93, "perBar": 0.9, "seed": 11},
+        {"kind": "arpeggio", "timbre": "harp", "from": 8, "to": 18, "level": [[8, 0], [10, 0.5], [16, 0.8], [18, 0.8]], "vel": 0.45, "base": 60, "rate": 2, "steps": [0, 2, 3, 2], "dur": 3.4}
+      ],
+      "ambient": [
+        {"bed": "water", "level": [[0, 0], [1, 0.7], [16, 0.7], [18, 0]]}
+      ]
+    },
+    "greenhouse": {
+      "key": "C",
+      "reverb": "large",
+      "chords": [
+        [0, "Cmaj7"], [2, "Fmaj7"], [4, "Am7"], [5, "G"],
+        [6, "Cadd9"], [8, "Am7"], [10, "Fmaj7"], [12, "G"],
+        [14, "Cadd9"], [16, "Am7"], [18, "Fmaj7"], [20, "G"],
+        [22, "Cadd9"], [24, "Am7"], [26, "Fmaj7"], [28, "G"],
+        [30, "Cmaj7"], [32, "Fmaj7"], [34, "Am7"], [36, "Fmaj7"],
+        [38, "Cadd9"], [40, "Am7"], [42, "Fmaj7"], [44, "G"]
+      ],
+      "theme": {"octave": 0},
+      "layers": [
+        {"kind": "drone", "timbre": "warm", "from": 0, "to": 45, "level": [[0, 0.35], [6, 0.6], [30, 0.8], [38, 0.6], [45, 0.4]], "vel": 0.5, "base": 45, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "air", "from": 14, "to": 45, "level": [[14, 0], [22, 0.5], [30, 0.7], [45, 0.4]], "vel": 0.4, "base": 60, "pick": [1, 2, 3]},
+        {"kind": "bass", "timbre": "bowl", "from": 0, "to": 45, "level": [[0, 0.4], [30, 0.7], [45, 0.5]], "vel": 0.5, "base": 33, "pick": [0], "trigger": "chord"},
+        {"kind": "arpeggio", "timbre": "chime", "from": 6, "to": 45, "level": [[6, 0], [10, 0.35], [22, 0.55], [30, 0.85], [37, 0.7], [45, 0.3]], "vel": 0.42, "base": 72, "rate": 0.5, "steps": [0, 2, 3, 2, 1, 3, 2, 3], "dur": 1, "keep": 0.85},
+        {"kind": "melody", "timbre": "harp", "from": 6, "to": 45, "level": [[6, 0.8], [30, 1], [45, 0.8]], "vel": 0.6, "at": [6, 14, 22, 30, 38], "octave": 0},
+        {"kind": "melody", "timbre": "bell", "from": 30, "to": 45, "level": [[30, 1], [45, 0.8]], "vel": 0.35, "at": [30, 38], "octave": 1},
+        {"kind": "sparkle", "timbre": "drop", "from": 6, "to": 45, "level": [[6, 0.2], [28, 0.5], [30, 0.9], [36, 0.8], [45, 0.3]], "vel": 0.38, "low": 84, "high": 98, "perBar": 1.5, "seed": 3},
+        {"kind": "sparkle", "timbre": "drop", "from": 31, "to": 33.5, "level": [[31, 1], [33.5, 0.1]], "vel": 0.45, "low": 78, "high": 98, "perBar": 7, "seed": 5}
+      ],
+      "ambient": [
+        {"bed": "air", "level": [[0, 0], [2, 0.6], [43, 0.6], [45, 0]]}
+      ]
+    },
+    "rain": {
+      "key": "Em",
+      "reverb": "small",
+      "chords": [
+        [0, "Em9"], [3, "Cmaj7"], [6, "Am7"], [9, "Bm7"],
+        [12, "Em9"], [15, "Cmaj7"], [18, "Am7"], [21, "Bm7"],
+        [24, "Em9"], [27, "Cmaj7"], [29, "Am7"], [30, "Em9"],
+        [32, "Cmaj7"], [35, "Am7"], [38, "Bm7"], [40, "Cmaj7"],
+        [42, "G"]
+      ],
+      "theme": {"octave": 0},
+      "layers": [
+        {"kind": "drone", "timbre": "warm", "from": 0, "to": 29.5, "level": [[0, 0.2], [8, 0.45], [28, 0.4], [29.5, 0.2]], "vel": 0.45, "base": 40, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "warm", "from": 32, "to": 45, "level": [[32, 0.15], [38, 0.45], [44, 0.55], [45, 0.4]], "vel": 0.45, "base": 40, "pick": [0, 2, 3]},
+        {"kind": "bass", "timbre": "bowl", "from": 0, "to": 29, "level": [[0, 0.4], [29, 0.4]], "vel": 0.45, "base": 33, "pick": [0], "trigger": "chord"},
+        {"kind": "bass", "timbre": "bowl", "from": 32, "to": 45, "level": [[32, 0.3], [45, 0.5]], "vel": 0.45, "base": 33, "pick": [0], "trigger": "chord"},
+        {"kind": "arpeggio", "timbre": "bottle", "from": 2, "to": 30, "level": [[2, 0], [6, 0.45], [27, 0.5], [29.5, 0.2], [30, 0]], "vel": 0.5, "base": 52, "rate": 1, "steps": [0, 2, 3, 2], "dur": 2},
+        {"kind": "arpeggio", "timbre": "bottle", "from": 35, "to": 45, "level": [[35, 0], [38, 0.4], [44, 0.55], [45, 0.4]], "vel": 0.5, "base": 52, "rate": 1, "steps": [0, 2, 3, 2], "dur": 2},
+        {"kind": "sparkle", "timbre": "drop", "from": 4, "to": 29.5, "level": [[4, 0.3], [20, 0.6], [28, 0.5], [29.5, 0.15]], "vel": 0.34, "low": 76, "high": 92, "perBar": 2.2, "seed": 21},
+        {"kind": "melody", "timbre": "bottle", "from": 12, "to": 29.5, "level": [[12, 0.7], [25, 0.8]], "vel": 0.55, "at": [12, 20, 25], "octave": -1, "take": 8},
+        {"kind": "melody", "timbre": "harp", "from": 34, "to": 45, "level": [[34, 0.6], [40, 0.9], [45, 0.7]], "vel": 0.5, "at": [34, 39], "octave": 0},
+        {"kind": "sparkle", "timbre": "bell", "from": 33, "to": 45, "level": [[33, 0.2], [40, 0.5], [44, 0.7], [45, 0.7]], "vel": 0.35, "low": 81, "high": 96, "perBar": 0.8, "seed": 7}
+      ],
+      "ambient": [
+        {"bed": "rain", "level": [[0, 0], [1.5, 0.75], [29.9, 0.75], [30, 0]]}
+      ]
+    },
+    "kaleidoscope": {
+      "amber": {
+        "key": "D",
+        "reverb": "medium",
+        "chords": [
+          [0, "D"], [2, "A"], [4, "Bm7"], [6, "Gmaj7"],
+          [8, "D"], [10, "A"], [12, "Bm7"], [14, "Gmaj7"],
+          [16, "D"], [18, "A"], [20, "Bm7"], [22, "Gmaj7"],
+          [24, "D"], [26, "A"], [28, "Bm7"], [30, "Gmaj7"],
+          [32, "Gmaj7"], [34, "A"]
+        ],
+        "theme": null,
+        "layers": [
+          {"kind": "drone", "timbre": "warm", "from": 0, "to": 36, "level": [[0, 0.3], [8, 0.5], [24, 0.7], [30, 0.55], [36, 0.35]], "vel": 0.42, "base": 45, "pick": [0, 2, 3]},
+          {"kind": "bass", "timbre": "bowl", "from": 0, "to": 36, "level": [[0, 0.4], [24, 0.8], [36, 0.5]], "vel": 0.5, "base": 33, "pick": [0], "trigger": "chord"},
+          {"kind": "arpeggio", "timbre": "bottle", "from": 0, "to": 36, "level": [[0, 0.3], [4, 0.5], [16, 0.6], [22, 0.7], [24, 0.95], [30, 0.75], [36, 0.45]], "vel": 0.5, "base": 62, "rate": 0.5, "steps": [0, 1, 2, 3, 2, 1, 2, 1], "dur": 0.9},
+          {"kind": "arpeggio", "timbre": "chime", "from": 4, "to": 36, "level": [[4, 0], [8, 0.4], [24, 0.8], [34, 0.4], [36, 0.2]], "vel": 0.35, "base": 74, "rate": 0.5, "steps": [-1, -1, 3, -1, 4, -1, 3, -1], "dur": 1, "keep": 0.8},
+          {
+            "kind": "rhythm",
+            "timbre": "tap",
+            "from": 2,
+            "to": 36,
+            "level": [[2, 0], [4, 0.55], [16, 0.75], [24, 1], [34, 0.5], [36, 0.2]],
+            "vel": 0.5,
+            "parts": [
+              {"timbre": "tap", "midi": 42, "steps": ["9.....7.9.....7."]},
+              {"timbre": "tap", "midi": 72, "steps": ["....9.......9..."]},
+              {"timbre": "tap", "midi": 96, "steps": ["5.3.5.3.5.3.5.35"]}
+            ]
+          },
+          {"kind": "sparkle", "timbre": "chime", "from": 0, "to": 36, "level": [[0, 0.2], [22, 0.5], [24, 1], [28, 0.7], [36, 0.3]], "vel": 0.35, "low": 84, "high": 98, "perBar": 2.5, "seed": 31}
+        ],
+        "ambient": [
+          {"bed": "prism", "level": [[0, 0], [2, 0.5], [34, 0.5], [36, 0]]}
+        ]
+      },
+      "lapis": {
+        "key": "Bm",
+        "reverb": "medium",
+        "chords": [
+          [0, "Bm7"], [2, "Gmaj7"], [4, "D"], [6, "A"],
+          [8, "Bm7"], [10, "Gmaj7"], [12, "D"], [14, "A"],
+          [16, "Bm7"], [18, "D"], [20, "A"], [22, "Bm7"],
+          [24, "Gmaj7"], [26, "D"], [28, "A"], [30, "Bm7"],
+          [32, "Gmaj7"], [34, "A"]
+        ],
+        "theme": null,
+        "layers": [
+          {"kind": "drone", "timbre": "air", "from": 0, "to": 36, "level": [[0, 0.35], [10, 0.55], [24, 0.75], [34, 0.5], [36, 0.3]], "vel": 0.4, "base": 57, "pick": [1, 2, 3]},
+          {"kind": "drone", "timbre": "warm", "from": 0, "to": 36, "level": [[0, 0.3], [8, 0.5], [24, 0.65], [36, 0.35]], "vel": 0.38, "base": 40, "pick": [0, 2, 3]},
+          {"kind": "bass", "timbre": "bowl", "from": 0, "to": 36, "level": [[0, 0.4], [24, 0.8], [36, 0.5]], "vel": 0.5, "base": 33, "pick": [0], "trigger": "chord"},
+          {"kind": "arpeggio", "timbre": "bell", "from": 0, "to": 36, "level": [[0, 0.3], [4, 0.5], [16, 0.6], [22, 0.7], [24, 0.95], [30, 0.75], [36, 0.45]], "vel": 0.46, "base": 66, "rate": 0.5, "steps": [0, 2, 1, 3, 2, 4, 3, 2], "dur": 1.2, "keep": 0.9},
+          {"kind": "arpeggio", "timbre": "drop", "from": 8, "to": 36, "level": [[8, 0], [12, 0.4], [24, 0.8], [34, 0.4], [36, 0.2]], "vel": 0.3, "base": 78, "rate": 0.5, "steps": [3, -1, 2, -1, 4, -1, 2, 3], "dur": 0.8, "keep": 0.85},
+          {
+            "kind": "rhythm",
+            "timbre": "tap",
+            "from": 2,
+            "to": 36,
+            "level": [[2, 0], [4, 0.5], [16, 0.7], [24, 1], [34, 0.5], [36, 0.2]],
+            "vel": 0.5,
+            "parts": [
+              {"timbre": "tap", "midi": 40, "steps": ["9..5..9...5.9..."]},
+              {"timbre": "bottle", "midi": 55, "steps": ["..7....5..7....5"]},
+              {"timbre": "tap", "midi": 96, "steps": ["..3...3...3...3."]}
+            ]
+          },
+          {"kind": "sparkle", "timbre": "drop", "from": 0, "to": 36, "level": [[0, 0.2], [22, 0.5], [24, 1], [28, 0.7], [36, 0.3]], "vel": 0.35, "low": 84, "high": 98, "perBar": 2.5, "seed": 33}
+        ],
+        "ambient": [
+          {"bed": "prism", "level": [[0, 0], [2, 0.5], [34, 0.5], [36, 0]]}
+        ]
+      }
+    },
+    "celestial": {
+      "key": "E",
+      "reverb": "huge",
+      "chords": [
+        [0, "Esus2"], [1, "E"], [3, "B"], [5, "C#m7"],
+        [7, "Amaj7"], [9, "E"], [11, "B"], [13, "C#m7"],
+        [15, "Amaj7"], [17, "E"], [19, "B"], [21, "C#m7"],
+        [23, "Amaj7"], [25, "E"], [27, "B"], [29, "C#m7"],
+        [31, "Amaj7"], [33, "E"], [35, "B"], [37, "C#m7"],
+        [39, "Amaj7"], [41, "E"], [43, "B"], [45, "C#m7"],
+        [47, "Amaj7"], [49, "E"], [51, "Amaj7"]
+      ],
+      "theme": {"octave": 0},
+      "layers": [
+        {"kind": "drone", "timbre": "strings", "from": 0.5, "to": 54, "level": [[0.5, 0], [2, 0.3], [16, 0.5], [28, 0.75], [33, 1], [40, 0.9], [48, 0.5], [54, 0.2]], "vel": 0.55, "base": 40, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "choir", "from": 12, "to": 54, "level": [[12, 0], [20, 0.4], [32, 0.7], [33, 1], [42, 0.85], [50, 0.3], [54, 0]], "vel": 0.5, "base": 52, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "harp", "from": 6, "to": 54, "level": [[6, 0], [14, 0.4], [28, 0.6], [33, 0.9], [44, 0.7], [54, 0.2]], "vel": 0.4, "base": 64, "pick": [1, 2, 3]},
+        {"kind": "bass", "timbre": "bowl", "from": 0, "to": 54, "level": [[0, 0.3], [8, 0.5], [33, 1], [48, 0.6], [54, 0.3]], "vel": 0.6, "base": 28, "pick": [0], "trigger": "chord"},
+        {"kind": "arpeggio", "timbre": "bell", "from": 6, "to": 54, "level": [[6, 0], [10, 0.4], [24, 0.6], [33, 0.85], [44, 0.55], [54, 0.2]], "vel": 0.5, "base": 64, "rate": 0.5, "steps": [0, 1, 2, 3, 4, 3, 2, 1], "dur": 1.5, "keep": 0.95},
+        {
+          "kind": "arpeggio",
+          "timbre": "chime",
+          "from": 20,
+          "to": 44,
+          "level": [[20, 0], [26, 0.5], [31, 0.8], [33, 1], [40, 0.85], [44, 0]],
+          "vel": 0.32,
+          "base": 76,
+          "rate": 0.25,
+          "steps": [0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3, 4, 3, 2, 1],
+          "dur": 0.6,
+          "keep": 0.9
+        },
+        {"kind": "melody", "timbre": "bell", "from": 17, "to": 21, "level": [[17, 0.5], [21, 0.5]], "vel": 0.45, "at": [17], "octave": 0, "take": 8},
+        {"kind": "melody", "timbre": "harp", "from": 25, "to": 46, "level": [[25, 0.7], [33, 1], [44, 0.8]], "vel": 0.65, "at": [25, 33, 37, 41], "octave": 0},
+        {"kind": "melody", "timbre": "bell", "from": 33, "to": 46, "level": [[33, 1], [46, 0.8]], "vel": 0.4, "at": [33, 37], "octave": 1},
+        {"kind": "melody", "timbre": "choir", "from": 33, "to": 46, "level": [[33, 1], [46, 0.8]], "vel": 0.45, "at": [33, 37, 41], "octave": 0},
+        {"kind": "melody", "timbre": "strings", "from": 33, "to": 46, "level": [[33, 1], [46, 0.8]], "vel": 0.4, "at": [33], "octave": -1},
+        {
+          "kind": "rhythm",
+          "timbre": "tap",
+          "from": 16,
+          "to": 46,
+          "level": [[16, 0], [20, 0.4], [26, 0.6], [33, 0.95], [44, 0.45], [46, 0]],
+          "vel": 0.55,
+          "parts": [
+            {"timbre": "tap", "midi": 38, "steps": ["9...6...9...6..."]},
+            {"timbre": "tap", "midi": 72, "steps": ["....7.......7..."]},
+            {"timbre": "tap", "midi": 96, "steps": ["3.5.3.5.3.5.3.5."]}
+          ]
+        },
+        {"kind": "sparkle", "timbre": "bell", "from": 0.6, "to": 54, "level": [[0.6, 0.15], [8, 0.35], [24, 0.6], [33, 1], [44, 0.5], [54, 0.2]], "vel": 0.38, "low": 84, "high": 100, "perBar": 1.5, "seed": 41},
+        {"kind": "sparkle", "timbre": "chime", "from": 24, "to": 44, "level": [[24, 0], [31, 0.6], [33, 1], [38, 0.9], [44, 0]], "vel": 0.3, "low": 88, "high": 100, "perBar": 4, "seed": 43}
+      ],
+      "ambient": [
+        {"bed": "space", "level": [[0, 0], [1, 0.6], [53, 0.5], [54, 0]]}
+      ]
+    },
+    "dawn": {
+      "key": "C",
+      "reverb": "large",
+      "chords": [
+        [0, "Fmaj7"], [2, "Cadd9"], [4, "Am7"], [6, "G"],
+        [8, "Fmaj7"], [10, "Cadd9"], [12, "Am7"], [14, "G"],
+        [15, "Cmaj7"], [19, "Am7"], [21, "Fmaj7"], [23, "Cadd9"],
+        [25, "Fmaj7"]
+      ],
+      "theme": {"octave": 0},
+      "layers": [
+        {"kind": "drone", "timbre": "warm", "from": 0, "to": 27, "level": [[0, 0.2], [10, 0.5], [15, 0.85], [22, 0.5], [27, 0.2]], "vel": 0.5, "base": 45, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "choir", "from": 12, "to": 27, "level": [[12, 0], [15, 0.8], [22, 0.4], [26, 0.1], [27, 0]], "vel": 0.45, "base": 52, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "air", "from": 0, "to": 27, "level": [[0, 0.4], [15, 0.7], [27, 0.2]], "vel": 0.4, "base": 60, "pick": [1, 2, 3]},
+        {"kind": "bass", "timbre": "bowl", "from": 0, "to": 27, "level": [[0, 0.4], [15, 0.8], [27, 0.3]], "vel": 0.5, "base": 33, "pick": [0], "trigger": "chord"},
+        {"kind": "melody", "timbre": "harp", "from": 4, "to": 12.5, "level": [[4, 0.7], [12, 0.7]], "vel": 0.55, "at": [4], "octave": 0, "stretch": 2},
+        {"kind": "melody", "timbre": "harp", "from": 15, "to": 24, "level": [[15, 0.9], [23, 0.4]], "vel": 0.55, "at": [15], "octave": 0, "stretch": 2, "take": 11},
+        {"kind": "melody", "timbre": "bell", "from": 15, "to": 24, "level": [[15, 0.8], [23, 0.4]], "vel": 0.35, "at": [15], "octave": 1, "stretch": 2, "take": 8},
+        {"kind": "arpeggio", "timbre": "bell", "from": 6, "to": 27, "level": [[6, 0], [10, 0.4], [15, 0.75], [22, 0.4], [26, 0]], "vel": 0.4, "base": 60, "rate": 1, "steps": [0, 2, 3, 2], "dur": 2.5},
+        {"kind": "sparkle", "timbre": "bell", "from": 15, "to": 19.5, "level": [[15, 1], [19.5, 0.15]], "vel": 0.45, "low": 80, "high": 100, "perBar": 5, "seed": 51},
+        {"kind": "sparkle", "timbre": "bell", "from": 4, "to": 27, "level": [[4, 0.2], [15, 0.5], [27, 0.1]], "vel": 0.32, "low": 80, "high": 96, "perBar": 1, "seed": 53}
+      ],
+      "ambient": [
+        {"bed": "waves", "level": [[0, 0], [2, 0.35], [14, 0.6], [22, 0.7], [27, 0.55]]}
+      ]
+    },
+    "departure": {
+      "key": "Am",
+      "reverb": "large",
+      "chords": [[0, "Am9"], [3, "Fmaj7"], [5, "Cadd9"], [7, "Am9"]],
+      "theme": null,
+      "layers": [
+        {"kind": "drone", "timbre": "warm", "from": 0, "to": 8.5, "level": [[0, 0.45], [7, 0.5], [8.5, 0.2]], "vel": 0.4, "base": 45, "pick": [0, 2, 3]},
+        {"kind": "drone", "timbre": "air", "from": 0, "to": 9, "level": [[0, 0.4], [9, 0.15]], "vel": 0.35, "base": 57, "pick": [1, 2, 3]},
+        {"kind": "bass", "timbre": "bowl", "from": 0, "to": 9, "level": [[0, 0.5], [9, 0.3]], "vel": 0.5, "base": 33, "pick": [0], "trigger": "chord"},
+        {"kind": "arpeggio", "timbre": "bell", "from": 0, "to": 7, "level": [[0, 0.6], [6, 0.4], [7, 0]], "vel": 0.45, "base": 69, "rate": 1, "steps": [0, 2, 3, 2], "dur": 2.5},
+        {"kind": "arpeggio", "timbre": "bell", "from": 7, "to": 8, "level": [[7, 1], [8, 1]], "vel": 0.6, "base": 69, "rate": 4, "steps": [0], "dur": 8},
+        {"kind": "sparkle", "timbre": "bell", "from": 0, "to": 9, "level": [[0, 0.4], [9, 0.15]], "vel": 0.35, "low": 81, "high": 96, "perBar": 1, "seed": 61}
+      ],
+      "ambient": [
+        {"bed": "waves", "level": [[0, 0.55], [7, 0.5], [9, 0]]}
+      ]
+    }
+  }
+}
