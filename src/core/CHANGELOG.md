@@ -19,4 +19,4 @@
   - space: `setListenerPose`（yaw は -Z が 0 で左回りが正、pitch は上向きが正。毎フレーム呼ばれるので関数も配列も作らない）、決定的な乱数で作る残響のインパルス応答（RT60 = REVERB_SECONDS、高域は早く減衰、左右は別の乱数、1サンプルごとに定数を掛けて減衰させる）。`createSpatialPanner` は既定のまま（距離の減衰などは使う側で決める）。
   - voices: 録音の代わりに Web Audio で合成。harp（擦ったワイングラス）・bell・chime・bottle・drop・bowl・tap と、strings / choir / warm / air のパッド。`noiseBuffer` は種つきで決定的。
     - 減衰する倍音は、時定数の5倍（約 -43dB）で1本ずつ止める（止める直前の60msでさらに絞る）。小さすぎて聞こえない倍音は作らない。解除用の門は止めるときに初めて挟む。
-    - `Voice` に `liveSources(now)`（まだ鳴っている音源の数。同時発音の予算の数え方）を足した。`prepareVoices(ctx)`（使い回す雑音を先に作る）を足した。
+    - `Voice` に `liveSources(at)`（at に鳴っている音源の数。音源ごとに「始まる時刻 ≤ at < 止まる時刻」で数え、先読みで予約しただけの音は始まる時刻まで数えない。同時発音の予算の数え方）を足した。`prepareVoices(ctx)`（使い回す雑音を先に作る）を足した。

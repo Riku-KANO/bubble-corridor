@@ -6,12 +6,13 @@ import type { RideEvents, Vec3Tuple } from '../../contracts/events';
 import type { SfxId } from '../../contracts/audio';
 import type { DoorChoice, TouchKind } from '../../contracts/ids';
 import { SECTION_IDS } from '../../contracts/ids';
-import { auditionCue, createAudioEngine } from '../../audio';
+import { createAudioEngine } from '../../audio';
 import { audioCues } from '../../audio/cues';
 import type { AudioClock } from '../../audio/clock';
 import { harmonyAt, sectionScore } from '../../audio/score';
 import { SFX } from '../../audio/effects';
 import { createBus } from '../../core/events';
+import { createAuditioner } from './audition';
 import { measureRide, measureTimbres, measureTouchTail } from './measure';
 import type { LevelRow } from './measure';
 
@@ -36,6 +37,7 @@ const bus = createBus<RideEvents>();
 const engine = createAudioEngine(bus);
 // 本物のエンジンの時計は toContextTime / jumps を持つ（契約の型は RideClock）
 const clock = engine.clock as AudioClock;
+const auditioner = createAuditioner();
 let door: DoorChoice = 'lapis';
 
 // 見どころ・膜の効果音は、エンジンが先読みの中で乗車の秒から予約して鳴らす（cues.ts の一覧）。ここでは一覧を使うだけ
@@ -157,7 +159,7 @@ const cuesEl = $('cues');
 for (const c of cues) {
   cuesEl.append(
     button(c.id, () => {
-      void enable().then(() => auditionCue(engine, { ...c, t: clock.running ? clock.time : c.t }));
+      auditioner.play({ ...c, t: clock.running ? clock.time : c.t }, door);
     }),
   );
 }
@@ -184,6 +186,7 @@ for (const key of ['master', 'music', 'sfx', 'ambient'] as const) {
   input.addEventListener('input', () => {
     vols[key] = Number(input.value);
     engine.setVolumes({ ...vols });
+    auditioner.setVolumes({ ...vols });
   });
   label.append(input);
   volsEl.append(label);

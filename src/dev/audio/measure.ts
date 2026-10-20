@@ -82,7 +82,7 @@ export async function measureRide(door: DoorChoice, onProgress?: (done: number, 
       (n) => graph.reverb(sectionScore(n.section, door).reverb).input,
       (t) => t - start,
       voices,
-      100000,
+      null,
       0,
     );
     const keys = ambientKeys(door);

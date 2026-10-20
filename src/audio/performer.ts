@@ -21,7 +21,7 @@ export const LAYER_TRIM: Readonly<Record<LayerKind, number>> = {
   sparkle: 1,
 };
 
-/** 鳴っている音を覚えておき、ポーズ・シークのときにまとめて止める。同時発音の予算は音源（オシレーター）の数で数える */
+/** 鳴っている音を覚えておき、ポーズ・シークのときにまとめて止める。同時発音の数え方は budget.ts */
 export class VoiceSet {
   private list: Voice[] = [];
 
@@ -33,18 +33,26 @@ export class VoiceSet {
     this.list.push(v);
   }
 
-  /** 鳴り終わった音を忘れる。残っている音源の数を返す */
+  /** 鳴り終わった音を忘れる。残っている音の数を返す */
   prune(now: number): number {
     let j = 0;
-    let sources = 0;
-    for (const v of this.list) {
-      if (v.endsAt > now) {
-        this.list[j++] = v;
-        sources += v.liveSources(now);
-      }
-    }
+    for (let i = 0; i < this.list.length; i++) if (this.list[i].endsAt > now) this.list[j++] = this.list[i];
     this.list.length = j;
-    return sources;
+    return j;
+  }
+
+  /** at（AudioContext の秒）に鳴っている音源の数（まだ始まっていない音源は数えない） */
+  liveAt(at: number): number {
+    let n = 0;
+    for (let i = 0; i < this.list.length; i++) n += this.list[i].liveSources(at);
+    return n;
+  }
+
+  /** いまの音の並びの写し（予算の試算で、予約を試して捨てるために使う） */
+  clone(): VoiceSet {
+    const c = new VoiceSet();
+    c.list = this.list.slice();
+    return c;
   }
 
   releaseAll(when: number): void {
@@ -57,28 +65,35 @@ export class VoiceSet {
 const LATE_OK = 0.08;
 
 /**
- * 同時発音の予算を超えたとき、どの音から見送るか。0 は見送らない（低音、持続音、主旋律）。
- * 数が大きいほど先に見送る: 3 きらめき・小さな分散和音・小さなリズム、2 それ以外の分散和音とリズム・旋律の重ね（鐘・合唱・弦）、
- * 1 持続するグラスハープの和音。
+ * 同時発音の予算を超える楽句で、どの音を残すか（budget.ts が4小節の楽句ごとに level を決める）。
+ * 間引きは小節の中の位置と層で決まるので、1音ずつ散らばらず、規則的に薄くなる:
+ *   1 きらめきを止める
+ *   2 さらに、分散和音は1つおき、リズムは強拍（4分音符の位置）だけ
+ *   3 さらに、分散和音は4つに1つ、リズムは2拍に1つ、旋律の重ね（鐘・合唱・弦）と持続するグラスハープを止める
+ * 低音・持続音（弦・合唱・温かい音・息）・主旋律は、どの level でも残す。
  */
-function shedTier(n: PlannedNote, v: number): 0 | 1 | 2 | 3 {
+export function keepNote(level: number, n: PlannedNote): boolean {
+  if (level <= 0) return true;
   switch (n.layer) {
     case 'sparkle':
-      return 3;
+      return false;
     case 'arpeggio':
+      return level === 1 || n.step % (level === 2 ? 2 : 4) === 0;
     case 'rhythm':
-      return v < 0.35 ? 3 : 2;
+      return level === 1 || n.step % (level === 2 ? 4 : 8) === 0;
     case 'melody':
-      return n.timbre === 'bell' || isPad(n.timbre) ? 2 : 0;
+      return level < 3 || !(n.timbre === 'bell' || isPad(n.timbre));
     case 'drone':
-      return n.timbre === 'harp' ? 1 : 0;
+      return level < 3 || n.timbre !== 'harp';
     default:
-      return 0;
+      return true;
   }
 }
 
-/** shedTier ごとに、予算の何倍に達したら見送るか（0 は見送らない） */
-const SHED_AT: readonly number[] = [Infinity, 1.4, 1.2, 1];
+/** 楽句ごとの間引きの level（budget.ts が作る）。時刻から決まる */
+export interface ShedPolicy {
+  levelAt(t: number): number;
+}
 
 // 同じ時刻・同じ層・同じ音色・同じ長さの持続音は、1つの和音としてまとめて鳴らす。
 // 毎回の先読みで配列や Map を作らないよう、作業用の入れ物を使い回す
@@ -104,8 +119,7 @@ function addToGroup(n: PlannedNote): void {
 
 /**
  * 予定の音を鳴らす。destOf は音の区間に合った出力先（区間ごとの残響の経路）、whenOf は乗車の秒 → AudioContext の秒。
- * budget は同時に鳴らしてよい音源（オシレーターなど）の数の目安。超えたら、きらめきから、さらに超えたら小さな分散和音・
- * リズムも見送る（持続音・旋律・低音は見送らない）。
+ * shed があれば、その時刻の楽句の level で音を間引く（同時発音の予算を超える楽句。null なら間引かない）。
  */
 export function performNotes(
   ctx: BaseAudioContext,
@@ -113,14 +127,14 @@ export function performNotes(
   destOf: (n: PlannedNote) => AudioNode,
   whenOf: (t: number) => number,
   voices: VoiceSet,
-  budget: number,
+  shed: ShedPolicy | null,
   minWhen: number,
 ): void {
-  const now = ctx.currentTime;
-  let live = voices.prune(now);
+  voices.prune(ctx.currentTime);
   groupCount = 0;
   for (let i = 0; i < notes.length; i++) {
     const n = notes[i];
+    if (shed !== null && !keepNote(shed.levelAt(n.t), n)) continue;
     let when = whenOf(n.t);
     if (when < minWhen) {
       if (minWhen - when <= LATE_OK) {
@@ -137,35 +151,35 @@ export function performNotes(
       addToGroup(n);
       continue;
     }
-    const v = n.velocity * LAYER_TRIM[n.layer];
-    if (live >= budget * SHED_AT[shedTier(n, v)]) continue;
-    const voice = playGlass(ctx, destOf(n), n.timbre as GlassTimbre, { midi: n.midi, when, velocity: v, duration: n.duration });
-    voices.add(voice);
-    live += voice.liveSources(now);
+    voices.add(playGlass(ctx, destOf(n), n.timbre as GlassTimbre, { midi: n.midi, when, velocity: n.velocity * LAYER_TRIM[n.layer], duration: n.duration }));
   }
   for (let i = 0; i < groupCount; i++) {
     const n = groupNotes[i];
     const when = Math.max(whenOf(n.t), minWhen);
-    const voice = playPad(ctx, destOf(n), n.timbre as PadTimbre, { midis: groupMidis[i], when, duration: n.duration, velocity: n.velocity * LAYER_TRIM[n.layer] });
-    voices.add(voice);
+    voices.add(playPad(ctx, destOf(n), n.timbre as PadTimbre, { midis: groupMidis[i], when, duration: n.duration, velocity: n.velocity * LAYER_TRIM[n.layer] }));
   }
 }
 
-/** 同時に使う立体音響のパンナーの上限（HRTF は重いので） */
+/** 同時に使う頭部伝達関数（HRTF）のパンナーの上限（HRTF は重いので） */
 const MAX_PANNERS = 10;
+/** 触れた音や効果音は、このぶんの HRTF の枠を誘導音のために空けておく（枠が溢れたら、軽い equalpower の左右の定位にする） */
+const LURE_RESERVE = 2;
 
-/** 空間に置いた音の出口（HRTF）を作り、鳴り終わったら外す */
+/** 空間に置いた音の出口を作り、鳴り終わったら外す */
 export class SpatialPool {
-  private live: { node: AudioNode; until: number }[] = [];
+  private live: { node: AudioNode; until: number; hrtf: boolean }[] = [];
+  private hrtfCount = 0;
 
   /**
-   * position から鳴る出口を作る。上限を超えていたら、方向のない出口（そのままの音）にする。
+   * position から鳴る出口を作る。通常は HRTF（頭部伝達関数）で方向と前後上下が分かるが、枠（MAX_PANNERS）が溢れたら
+   * equalpower（左右の定位だけ。軽い）にする。誘導音（lure）は、そのための枠を最後まで使える。
    * until は出口を外す時刻（AudioContext の秒）。鳴らした音の鳴り終わりが分かったら extend で延ばす。
    */
-  create(ctx: BaseAudioContext, position: readonly [number, number, number] | undefined, dry: AudioNode, wet: AudioNode | null, wetLevel: number, until: number): AudioNode {
+  create(ctx: BaseAudioContext, position: readonly [number, number, number] | undefined, dry: AudioNode, wet: AudioNode | null, wetLevel: number, until: number, lure = false): AudioNode {
     this.sweep(ctx.currentTime);
     let node: AudioNode;
-    if (!position || this.live.length >= MAX_PANNERS) {
+    let hrtf = false;
+    if (!position) {
       node = ctx.createGain();
     } else {
       const p = createSpatialPanner(ctx, position);
@@ -173,6 +187,8 @@ export class SpatialPool {
       p.refDistance = 2;
       p.rolloffFactor = 0.6;
       p.maxDistance = 60;
+      hrtf = this.hrtfCount < MAX_PANNERS - (lure ? 0 : LURE_RESERVE);
+      if (!hrtf) p.panningModel = 'equalpower';
       node = p;
     }
     node.connect(dry);
@@ -181,7 +197,8 @@ export class SpatialPool {
       g.gain.value = wetLevel;
       node.connect(g).connect(wet);
     }
-    this.live.push({ node, until });
+    if (hrtf) this.hrtfCount++;
+    this.live.push({ node, until, hrtf });
     return node;
   }
 
@@ -199,8 +216,12 @@ export class SpatialPool {
   sweep(now: number): void {
     let j = 0;
     for (const e of this.live) {
-      if (e.until < now) e.node.disconnect();
-      else this.live[j++] = e;
+      if (e.until < now) {
+        e.node.disconnect();
+        if (e.hrtf) this.hrtfCount--;
+      } else {
+        this.live[j++] = e;
+      }
     }
     this.live.length = j;
   }
@@ -208,5 +229,6 @@ export class SpatialPool {
   dispose(): void {
     for (const e of this.live) e.node.disconnect();
     this.live.length = 0;
+    this.hrtfCount = 0;
   }
 }

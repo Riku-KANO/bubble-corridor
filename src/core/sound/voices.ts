@@ -41,8 +41,11 @@ export interface Voice {
   readonly endsAt: number;
   /** 早めに止める（滑らかに消す） */
   release(when: number): void;
-  /** now（AudioContext の秒）の時点でまだ鳴っている音源（オシレーターなど）の数。同時発音の予算の数え方に使う */
-  liveSources(now: number): number;
+  /**
+   * at（AudioContext の秒）に鳴っている音源（オシレーターなど）の数。音源ごとに「始まる時刻 ≤ at < 止まる時刻」で数える。
+   * まだ始まっていない（先読みで予約しただけの）音源は、始まる時刻より前の at では数えない。同時発音の予算の数え方に使う
+   */
+  liveSources(at: number): number;
 }
 
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
@@ -95,6 +98,8 @@ class Rig {
   readonly out: GainNode;
   private readonly dest: AudioNode;
   private readonly sources: AudioScheduledSourceNode[] = [];
+  /** sources と同じ並びの、鳴り始める時刻 */
+  private readonly starts: number[] = [];
   /** sources と同じ並びの、止める時刻。まだ決まっていないもの（finish で一括）は Infinity */
   private readonly stops: number[] = [];
   private latestStop = 0;
@@ -107,8 +112,9 @@ class Rig {
     this.out.connect(dest);
   }
 
-  private add<T extends AudioScheduledSourceNode>(s: T, stopAt = Infinity): T {
+  private add<T extends AudioScheduledSourceNode>(s: T, startAt: number, stopAt = Infinity): T {
     this.sources.push(s);
+    this.starts.push(startAt);
     this.stops.push(stopAt);
     if (stopAt !== Infinity && stopAt > this.latestStop) this.latestStop = stopAt;
     return s;
@@ -119,7 +125,7 @@ class Rig {
     o.type = type;
     o.frequency.value = freq;
     o.start(when);
-    return this.add(o);
+    return this.add(o, when);
   }
 
   /** 雑音の短い打音（start の offset を音ごとに変えて、毎回同じ波形にならないようにする） */
@@ -127,7 +133,7 @@ class Rig {
     const s = this.ctx.createBufferSource();
     s.buffer = clickBuffer(this.ctx);
     s.start(when, offset % 1.5, seconds);
-    return this.add(s, when + seconds + 0.01);
+    return this.add(s, when, when + seconds + 0.01);
   }
 
   /** 鳴っている間ずっと続く雑音（繰り返し再生する） */
@@ -136,11 +142,11 @@ class Rig {
     s.buffer = clickBuffer(this.ctx);
     s.loop = true;
     s.start(when, offset % 1.5);
-    return this.add(s);
+    return this.add(s, when);
   }
 
   /**
-   * 減衰する倍音 1 本: 発音 → 急な立ち上がり → 指数的に減衰し、減衰し切る頃（tau の7倍）に自分で止まる。
+   * 減衰する倍音 1 本: 発音 → 急な立ち上がり → 指数的に減衰し、減衰し切る頃（tau の5倍）に自分で止まる。
    * 小さすぎて聞こえない倍音は作らず null を返す。
    */
   partial(type: OscillatorType, freq: number, when: number, amp: number, tau: number, attack = 0.003): OscillatorNode | null {
@@ -158,7 +164,7 @@ class Rig {
     // 止める直前の 60ms でさらに絞る（残っている音を止める段差を、静かな場所でも聞こえない大きさにする）
     g.gain.setTargetAtTime(0, stopAt - 0.06, 0.012);
     o.connect(g).connect(this.out);
-    return this.add(o, stopAt);
+    return this.add(o, when, stopAt);
   }
 
   /** 止まる時刻が決まっていない音源（LFO、持続する雑音など）を stopAt に止めて、Voice を返す。endsAt は最も遅い音源が止まる時刻 */
@@ -170,7 +176,7 @@ class Rig {
         if (stopAt > this.latestStop) this.latestStop = stopAt;
       }
     }
-    const { ctx, out, dest, sources, stops } = this;
+    const { ctx, out, dest, sources, starts, stops } = this;
     let released = false;
     return {
       endsAt: Math.max(this.latestStop, minEndsAt),
@@ -195,9 +201,9 @@ class Rig {
           }
         }
       },
-      liveSources(now) {
+      liveSources(at) {
         let n = 0;
-        for (let i = 0; i < stops.length; i++) if (stops[i] > now) n++;
+        for (let i = 0; i < stops.length; i++) if (starts[i] <= at && at < stops[i]) n++;
         return n;
       },
     };

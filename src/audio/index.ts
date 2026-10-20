@@ -18,6 +18,8 @@ import type { ReverbSize } from '../core/sound/space';
 import { playGlass, playPad, prepareVoices } from '../core/sound/voices';
 import { createBed, sharedNoise } from './ambient';
 import type { BedNode } from './ambient';
+import { createShedBuilder } from './budget';
+import type { ShedBuilder } from './budget';
 import { createAudioClock } from './clock';
 import type { AudioClock } from './clock';
 import { LOBBY_SECONDS, planLobby, planNotes } from './conductor';
@@ -40,8 +42,10 @@ export interface AudioEngineOptions {
   /** 先読みの長さ（秒）。既定 0.8。出力の遅延（Bluetooth で 0.2 秒を超える）と、メインスレッドの停止に耐える長さ */
   readonly lookahead?: number;
   /**
-   * 楽曲の同時発音の予算（鳴っているオシレーターなど音源の数）。超えたら、きらめきから、さらに超えたら小さな分散和音・
-   * リズムも見送る。スマートフォン・VR では下げる。既定は端末から決める（スマートフォン 80、4コア以下 110、それ以外 150）
+   * 同時発音の予算（鳴っているオシレーターなど音源の数）。うち2割（最低12）は触れた音と効果音のために空け、残りを楽曲の予算にする。
+   * 楽曲が予算を超える4小節の楽句は、きらめきを止め、分散和音を1つおきに、リズムを強拍だけに、と規則的に薄くする
+   * （budget.ts。楽曲の予定だけから決まり、実行時の混み具合で音が散らばって抜けない）。
+   * スマートフォン・VR では下げる。既定は端末から決める（スマートフォン 80、4コア以下 110、それ以外 150）
    */
   readonly maxSources?: number;
 }
@@ -55,6 +59,11 @@ const LOOKAHEAD_HIDDEN = 2.0;
 const CUE_PREROLL = 0.6;
 /** シークや再開のとき、鳴っていたはずの持続音を探す範囲（秒）。長い和音（4小節）より長く */
 const CATCH_UP_SEC = 16;
+/** シークや再開のとき、これだけ前までの見どころの効果音の、持続する部分（グラスハープ、パッド）を入れ直す（秒） */
+const CUE_CATCH_UP_SEC = 5;
+/** 楽曲の予算のうち、触れた音と効果音のために空ける割合と、最低の数 */
+const SFX_RESERVE_RATIO = 0.2;
+const SFX_RESERVE_MIN = 12;
 /** 環境音の折れ線を先まで予約する長さ（秒） */
 const AMBIENT_AHEAD = 20;
 /** ポーズがこれより長く続いたら、環境音の床を止める（秒） */
@@ -98,13 +107,11 @@ function hasPositive(keys: readonly AmbientKey[], from: number, to: number): boo
   return false;
 }
 
-const KALEIDOSCOPE_START = (SECTIONS.find((s) => s.id === 'kaleidoscope')?.startBar ?? 0) * SEC_PER_BAR;
-
-/** 確認ページ用: エンジンの内側で、出来事の効果音をいますぐ鳴らす（乗車中は先読みが鳴らすので、bus の cue は無視される） */
-const auditions = new WeakMap<AudioEngine, (cue: Cue) => void>();
-export function auditionCue(engine: AudioEngine, cue: Cue): void {
-  auditions.get(engine)?.(cue);
-}
+/** 扉（金と青）で曲が変わる範囲: 万華鏡の間（秒） */
+const KALEIDOSCOPE = (() => {
+  const s = SECTIONS.find((x) => x.id === 'kaleidoscope')!;
+  return { from: s.startBar * SEC_PER_BAR, to: (s.startBar + s.bars) * SEC_PER_BAR };
+})();
 
 export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}): AudioEngine {
   let ctx: AudioContext | null = opts.context ?? null;
@@ -115,6 +122,7 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
   let volumes: Volumes = { master: 0.85, music: 0.85, sfx: 0.9, ambient: 0.8 };
   let pose: ListenerPose | null = null;
   const maxSources = opts.maxSources ?? defaultMaxSources();
+  const musicBudget = maxSources - Math.max(SFX_RESERVE_MIN, Math.round(maxSources * SFX_RESERVE_RATIO));
   const onState = () => {
     if (ctx && ctx.state !== 'running') needsRestart = true;
   };
@@ -127,6 +135,10 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
 
   // ── 鳴っている音 ──
   const voices = new VoiceSet();
+  /** 扉で変わる万華鏡の間の音。扉の決定が遅れて先読みが万華鏡に入っていたとき、ここだけ作り直す */
+  const doorVoices = new VoiceSet();
+  const sheds: Partial<Record<DoorChoice, ShedBuilder>> = {};
+  const shedFor = (d: DoorChoice): ShedBuilder => (sheds[d] ??= createShedBuilder(d, musicBudget));
   const spatial = new SpatialPool();
   const gate = createTouchGate();
   /** 自分で鳴る小さな音（chime）の枠。乗る人の触れた音の枠（gate）とは別に数える */
@@ -153,6 +165,8 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
   /** AudioContext が音を出している（状態は変わるので、そのつど読み直す） */
   const running = (): boolean => ctx !== null && ctx.state === 'running';
   const ready = (): boolean => ctx !== null && graph !== null && ctx.state === 'running' && !disposed;
+  /** 配線がある（AudioContext が止まっていてもよい。止まっている間に予約した音は、動き出せば鳴る）。UI の効果音に使う */
+  const hasGraph = (): boolean => ctx !== null && graph !== null && !disposed;
 
   function refreshReverbs(): void {
     for (const id of SECTION_IDS) reverbBySection[id] = sectionScore(id, door).reverb;
@@ -178,10 +192,10 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
   }
 
   /** 位置があれば立体音響の出口、なければ中央の出口。鳴らし終わったら spatial.extend で外す時刻を延ばす */
-  function outlet(position: Vec3Tuple | undefined, section: SectionId, until: number): AudioNode {
+  function outlet(position: Vec3Tuple | undefined, section: SectionId, until: number, lure = false): AudioNode {
     const size = reverbBySection[section];
     if (!position) return sfxBus(size);
-    return spatial.create(ctx!, position, graph!.sfxGate, graph!.reverb(size).send, 0.5, until);
+    return spatial.create(ctx!, position, graph!.sfxGate, graph!.reverb(size).send, 0.5, until, lure);
   }
 
   // ── AudioContext の用意 ──
@@ -207,6 +221,8 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
     if (pose) setListenerPose(ctx.listener, pose);
     timer = setInterval(tick, TICK_MS);
     ctx.addEventListener('statechange', onState);
+    // タブが隠れた・戻った瞬間にすぐ先読みを進める（隠れると setInterval が間引かれる前に、先読みの長さを切り替える）
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', tick);
   }
 
   /** 必要になる前に、重い準備を1つずつ、間を空けて済ませる（クリックの応答や描画を止めない） */
@@ -229,6 +245,13 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
       planNotes(0, RIDE_DURATION, 'amber');
       planNotes(0, RIDE_DURATION, 'lapis');
     });
+    // 同時発音の予算を超える楽句の表（budget.ts）。いまの扉の分を先に、少しずつ作る
+    const shedJob = (d: DoorChoice) => () => {
+      const b = shedFor(d);
+      b.advance(16);
+      if (!b.done) warmJobs.unshift(shedJob(d));
+    };
+    warmJobs.push(shedJob(door), shedJob(door === 'amber' ? 'lapis' : 'amber'));
     const step = () => {
       warmTimer = null;
       const job = warmJobs.shift();
@@ -294,7 +317,10 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
     const t = clock.time;
     const horizon = Math.min(RIDE_DURATION, t + lookahead());
     if (horizon > cursor) {
-      perform(planNotes(cursor, horizon, door, scratch), now);
+      // 扉で変わる万華鏡の間の音は別に覚えておく（扉の決定が遅れたとき、ここだけ作り直すため）
+      scheduleWindow(cursor, Math.min(horizon, KALEIDOSCOPE.from), voices, now);
+      scheduleWindow(Math.max(cursor, KALEIDOSCOPE.from), Math.min(horizon, KALEIDOSCOPE.to), doorVoices, now);
+      scheduleWindow(Math.max(cursor, KALEIDOSCOPE.to), horizon, voices, now);
       cursor = horizon;
     }
     const cueTo = Math.min(RIDE_DURATION + 1, horizon + CUE_PREROLL);
@@ -303,12 +329,20 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
       cueCursor = cueTo;
     }
     voices.prune(now);
+    doorVoices.prune(now);
     ambientTick(now, t);
   }
 
   function perform(notes: readonly PlannedNote[], now: number): void {
     if (notes.length === 0) return;
-    performNotes(ctx!, notes, destOf, whenOf, voices, maxSources, now + 0.005);
+    performNotes(ctx!, notes, destOf, whenOf, voices, shedFor(door), now + 0.005);
+  }
+
+  /** 乗車の秒 [from, to) の予定の音を、set に覚えさせながら鳴らす */
+  function scheduleWindow(from: number, to: number, set: VoiceSet, now: number): void {
+    if (!(to > from)) return;
+    const notes = planNotes(from, to, door, scratch);
+    if (notes.length > 0) performNotes(ctx!, notes, destOf, whenOf, set, shedFor(door), now + 0.005);
   }
 
   /** 先読みの窓 [from, to) に時刻がある見どころ・膜の効果音を、乗車の秒から予約する（bus の cue を待たない） */
@@ -355,6 +389,7 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
   function pauseRide(now: number): void {
     graph!.setGates(false, now, 0.025);
     voices.releaseAll(now + 0.12);
+    doorVoices.releaseAll(now + 0.12);
     muteCueVoices(now);
     for (const [, e] of beds) holdParam(e.node.gain.gain, now);
   }
@@ -362,10 +397,12 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
   /** 開始・シーク・再開: 今の位置から演奏をやり直す。鳴っているはずの持続音も、途中から入れる */
   function restart(now: number): void {
     voices.releaseAll(now + 0.03);
+    doorVoices.releaseAll(now + 0.03);
     muteCueVoices(now);
     const t = clock.time;
     cursor = t;
-    cueCursor = t;
+    // 見どころの効果音のうち、少し前に始まって鳴り続けているはずの持続する部分も入れ直す（短い音は鳴らさない）
+    cueCursor = Math.max(0, t - CUE_CATCH_UP_SEC);
     graph!.setGates(true, now, 0.03);
     // 区間をまたいで鳴り続けているはずの持続音（和音）を、残りの長さで入れ直す
     const caught: PlannedNote[] = [];
@@ -443,7 +480,7 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
     const notes = planLobby(lobby.cursor, horizon);
     if (notes.length > 0) {
       const l = lobby;
-      performNotes(ctx!, notes, () => l.gate, (t) => l.anchor + t, l.voices, 60, now + 0.005);
+      performNotes(ctx!, notes, () => l.gate, (t) => l.anchor + t, l.voices, null, now + 0.005);
     }
     lobby.cursor = horizon;
     lobby.voices.prune(now);
@@ -516,18 +553,19 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
   // ── 出来事 ──
   const offCue = bus.on('cue', onCue);
   /**
-   * bus の cue。乗車中の見どころ・膜の効果音は、先読みがすでに乗車の秒から予約しているので、ここでは鳴らさない
-   * （cue を待つと、1フレームぶん遅れて小節の頭に合わない）。時計が動いていないとき（確認ページ、?t= の早送り）や、
+   * bus の cue。乗車の時計を start した後は、見どころ・膜の効果音は先読みがすでに乗車の秒から予約しているので、ここでは鳴らさない
+   * （cue を待つと、1フレームぶん遅れて小節の頭に合わない）。時計を使わない（?t= の早送りなど、アプリが別の時計で進めている）ときと、
    * 先読みの対象でない出来事だけ、届いた時点で鳴らす。
    */
   function onCue(cue: Cue): void {
-    if (!ready()) return;
-    if (clock.running && isAudioCue(cue.name)) return;
+    if (!hasGraph()) return;
+    // 乗車を始めた時計（start 済み）なら、ポーズと同じフレームに届いた cue も含めて、先読みに任せる
+    if (clock.jumps > 0 && isAudioCue(cue.name)) return;
     const now = ctx!.currentTime;
     playCue(cue, now + 0.01, now);
   }
 
-  const engine: AudioEngine = {
+  return {
     clock,
     get unlocked() {
       return running();
@@ -536,11 +574,13 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
       if (disposed) return;
       const c = ensureContext();
       if (!c) return; // AudioContext のない環境（テスト・古いブラウザ）。乗車は実時間の時計で進む
-      // クリックの中でやるのは、AudioContext を作って resume() を呼ぶところまで（自動再生の規則）
+      // クリックの中でやるのは、AudioContext を作って resume() を呼び、配線の骨組みを作るところまで。
+      // 骨組みは同期で作る（約0.3ms）: アプリは同じ操作の中で unlock() の直後に sfx('door.open') などを呼ぶので、
+      // 配線がないと最初の音が捨てられる。重い準備（残響の応答、演奏の予定、間引きの表）は warm で後回しにする
       const resumed = c.state === 'running' ? Promise.resolve() : c.resume().catch(() => undefined);
+      buildGraph();
       await Promise.race([resumed, new Promise<void>((r) => setTimeout(r, RESUME_WAIT_MS))]);
       if (disposed) return;
-      buildGraph();
       if (!running()) resumeOnGesture();
       if (running()) afterUnlocked();
       warm();
@@ -551,9 +591,20 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
       refreshReverbs();
       if (!ready() || !clock.running) return;
       const t = clock.time;
-      // 先読みがもう万華鏡に届いていたら、予約した音を作り直す。届いていなければ環境音の予約だけ入れ直す
-      if (t + lookahead() + CUE_PREROLL >= KALEIDOSCOPE_START) needsRestart = true;
-      else for (const [bed, e] of beds) resetBed(bed, e, t, ctx!.currentTime);
+      const now = ctx!.currentTime;
+      if (t >= KALEIDOSCOPE.from) {
+        // 万華鏡にもう入っている: 今の位置から予約し直す
+        needsRestart = true;
+        return;
+      }
+      if (cursor > KALEIDOSCOPE.from) {
+        // 先読みが万華鏡の頭を越えていた（扉の決定が膜の直前だった）: 万華鏡の頭以降の音だけを、新しい扉で予定し直す。
+        // それより前の音（雨の回廊）は扉で変わらないので、途切れさせない
+        doorVoices.releaseAll(now + 0.02);
+        cursor = KALEIDOSCOPE.from;
+        if (cueCursor > KALEIDOSCOPE.from) cueCursor = KALEIDOSCOPE.from + 1e-6; // 膜（扉に依らない）は二重に鳴らさない
+      }
+      for (const [bed, e] of beds) resetBed(bed, e, t, now);
     },
     touch(e) {
       return playTouch(e, false);
@@ -567,12 +618,13 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
       // 誘導音も、拍（8分音符）の格子に揃えて鳴らす
       const at = nextGridTime(clock.time + heard.lag(), 0, BPM, TOUCH_GRID_BEATS, 0.03);
       const h = harmonyAt(at, door);
-      const out = outlet(position, h.section, whenOf(at) + 1);
+      const out = outlet(position, h.section, whenOf(at) + 1, true);
       const endsAt = playEvents(c, out, lureEffect(h), whenOf(at), c.currentTime + 0.005);
       spatial.extend(out, endsAt + 0.5);
     },
     sfx(id: SfxId, position?: Vec3Tuple) {
-      if (!ready()) return;
+      // 配線があれば予約する（AudioContext がまだ止まっていても、動き出せば鳴る。unlock() の直後の扉の音など）
+      if (!hasGraph()) return;
       const c = ctx!;
       let out: AudioNode = graph!.ui;
       if (position) out = spatial.create(c, position, graph!.ui, null, 0, c.currentTime + 1);
@@ -608,7 +660,9 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
       offCue();
       if (timer !== null) clearInterval(timer);
       if (warmTimer !== null) clearTimeout(warmTimer);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', tick);
       voices.releaseAll(0);
+      doorVoices.releaseAll(0);
       spatial.dispose();
       for (let i = 0; i < cueVoices.length; i++) cueVoices[i].gain.disconnect();
       cueVoices.length = 0;
@@ -624,10 +678,4 @@ export function createAudioEngine(bus: EventBus, opts: AudioEngineOptions = {}):
       graph = null;
     },
   };
-  auditions.set(engine, (cue) => {
-    if (!ready()) return;
-    const now = ctx!.currentTime;
-    playCue(cue, now + 0.01, now);
-  });
-  return engine;
 }

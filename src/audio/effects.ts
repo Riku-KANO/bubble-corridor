@@ -28,13 +28,17 @@ const LATE_OK = 0.08;
 export function playEvents(ctx: BaseAudioContext, dest: AudioNode, evs: readonly Ev[], when: number, minWhen = ctx.currentTime): number {
   let endsAt = when;
   for (const ev of evs) {
-    let t = when + ev.dt;
+    const planned = when + ev.dt;
+    let t = planned;
     const late = minWhen - t;
     if (late > 0) {
       const sustained = ('glass' in ev && ev.glass === 'harp') || 'pad' in ev;
       if (late <= LATE_OK || sustained) t = minWhen;
       else continue;
     }
+    // 遅れて入る持続音は、遅れたぶん短くする（本来の終わりに揃える）。残りが短すぎるなら鳴らさない
+    const shift = t - planned;
+    if (shift > LATE_OK && (('glass' in ev && (ev.dur ?? 2.5) - shift < 0.4) || ('pad' in ev && ev.dur - shift < 0.4))) continue;
     if ('glass' in ev) {
       let out: AudioNode = dest;
       if (ev.pan !== undefined && typeof ctx.createStereoPanner === 'function') {
@@ -43,10 +47,10 @@ export function playEvents(ctx: BaseAudioContext, dest: AudioNode, evs: readonly
         p.connect(dest);
         out = p;
       }
-      const voice = playGlass(ctx, out, ev.glass, { midi: ev.midi, when: t, velocity: ev.vel, duration: ev.dur });
+      const voice = playGlass(ctx, out, ev.glass, { midi: ev.midi, when: t, velocity: ev.vel, duration: ev.dur === undefined ? undefined : ev.dur - shift });
       if (voice.endsAt > endsAt) endsAt = voice.endsAt;
     } else if ('pad' in ev) {
-      const voice = playPad(ctx, dest, ev.pad, { midis: ev.midis, when: t, duration: ev.dur, velocity: ev.vel });
+      const voice = playPad(ctx, dest, ev.pad, { midis: ev.midis, when: t, duration: ev.dur - shift, velocity: ev.vel });
       if (voice.endsAt > endsAt) endsAt = voice.endsAt;
     } else {
       const { dur, f0, f1, q, gain } = ev.sweep;

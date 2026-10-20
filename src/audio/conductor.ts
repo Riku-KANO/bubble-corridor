@@ -3,7 +3,7 @@
 // 純粋で決定的: 同じ窓と扉には、いつ何度呼んでも同じ音が同じ順で返る。ばらつき（きらめきの位置や高さ）は
 // 乱数ではなく、小節と位置から決めた値で作る。窓は [t0, t1) の半開区間なので、窓を分けて呼んでも
 // まとめて呼んだのと同じになる（境目で取りこぼしも二重もない）。
-// 先読みの予約は、25ms ごとにこの関数を「前回の続きから約0.2秒先まで」の窓で呼んで鳴らす（engine）。
+// 先読みの予約は、25ms ごとにこの関数を「前回の続きから先読み（既定 0.8 秒）先まで」の窓で呼んで鳴らす（engine）。
 import type { DoorChoice, SectionId } from '../contracts/ids';
 import { BEATS_PER_BAR, SECTIONS, SEC_PER_BAR, SEC_PER_BEAT } from '../config';
 import { chordIntervals, nearestPitch, touchCandidates } from '../core/sound/scale';
@@ -23,6 +23,11 @@ export interface PlannedNote {
   /** 持続する音色の長さ（秒） */
   readonly duration: number;
   readonly section: SectionId;
+  /**
+   * 分散和音・リズムの、その小節の格子の何番目か（分散和音は層の歩幅ごと、リズムは16分音符ごと）。それ以外は 0。
+   * 同時発音の予算を超えたときに、「分散和音を1つおき」「リズムは強拍だけ」と小節の中の位置で間引くのに使う（budget.ts）
+   */
+  readonly step: number;
 }
 
 /** 同じ時刻の音を並べる順（低い音の層が先） */
@@ -62,9 +67,9 @@ function levelAt(layer: Layer, relBar: number): number {
 function generate(s: SectionScore): PlannedNote[] {
   const out: PlannedNote[] = [];
   const tOf = (relBar: number) => (s.startBar + relBar) * SEC_PER_BAR;
-  const push = (relBar: number, layer: Layer, timbre: LayerTimbre, midi: number, velocity: number, duration: number) => {
+  const push = (relBar: number, layer: Layer, timbre: LayerTimbre, midi: number, velocity: number, duration: number, step = 0) => {
     if (velocity < MIN_VELOCITY) return;
-    out.push({ t: tOf(relBar), layer: layer.kind, timbre, midi, velocity: Math.min(1, velocity), duration, section: s.section });
+    out.push({ t: tOf(relBar), layer: layer.kind, timbre, midi, velocity: Math.min(1, velocity), duration, section: s.section, step });
   };
   /** 和音の区切り: [開始, 終了) の小節 */
   const spans = s.chords.map((c, i) => ({ start: c.bar, end: i + 1 < s.chords.length ? s.chords[i + 1].bar : s.bars }));
@@ -112,7 +117,7 @@ function generate(s: SectionScore): PlannedNote[] {
             const beat = st * layer.rate;
             const accent = beat === 0 ? 1 : beat === 2 ? 0.9 : Number.isInteger(beat) ? 0.8 : 0.7;
             const chord = chordAtBar(s, pos);
-            push(pos, layer, layer.timbre, chordLadder(chord, layer.base, idx), layer.vel * levelAt(layer, pos) * accent, layer.dur * SEC_PER_BEAT);
+            push(pos, layer, layer.timbre, chordLadder(chord, layer.base, idx), layer.vel * levelAt(layer, pos) * accent, layer.dur * SEC_PER_BEAT, st);
           }
         }
         break;
@@ -139,7 +144,7 @@ function generate(s: SectionScore): PlannedNote[] {
             for (const part of layer.parts) {
               const ch = part.steps[r % part.steps.length][st];
               if (ch === '.' || ch === undefined) continue;
-              push(pos, layer, part.timbre, part.midi, layer.vel * levelAt(layer, pos) * (Number(ch) / 9), 0.3);
+              push(pos, layer, part.timbre, part.midi, layer.vel * levelAt(layer, pos) * (Number(ch) / 9), 0.3, st);
             }
           }
         }
