@@ -11,6 +11,11 @@ const DOORS: readonly DoorChoice[] = ['amber', 'lapis'];
 const LANGS: readonly Lang[] = ['ja', 'en'];
 const SHOTS: readonly ShotId[] = ['bloom', 'freeze', 'constellation'];
 
+/** 整数に丸めて範囲に収める。数でなければ fallback */
+function clampInt(v: unknown, min: number, max: number, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback;
+}
+
 /** 読んだ値から既知のキーだけを取り出す。壊れていたら null（棚には出さない） */
 function sanitizeRecord(raw: unknown): PhotoRecord | null {
   const id = own(raw, 'id');
@@ -21,21 +26,25 @@ function sanitizeRecord(raw: unknown): PhotoRecord | null {
   const date = own(m, 'date');
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const meta: PhotoMeta = {
-    rideNo: Math.floor(num(own(m, 'rideNo'), 0, 0, 1_000_000)),
+    rideNo: clampInt(own(m, 'rideNo'), 0, 1_000_000, 0),
     date,
     door: oneOf(own(m, 'door'), DOORS, 'lapis'),
-    hiddenTotal: Math.floor(num(own(m, 'hiddenTotal'), 0, 0, 5)),
-    constellations: Math.floor(num(own(m, 'constellations'), 0, 0, 10_000)),
+    // 額縁を決める数。範囲の外は端に丸める（壊れた値で額縁が崩れないように）
+    hiddenTotal: clampInt(own(m, 'hiddenTotal'), 0, 5, 0),
+    constellations: clampInt(own(m, 'constellations'), 0, 10_000, 0),
     lang: oneOf(own(m, 'lang'), LANGS, 'ja'),
   };
 
+  // 場面ごとに 1 枚、最大 3 枚。画像でない Blob（種類が image/ でないもの）は捨てる
   const rawShots = own(raw, 'shots');
   const shots: { shot: ShotId; image: Blob }[] = [];
   if (Array.isArray(rawShots)) {
     for (const s of rawShots) {
       const shot = own(s, 'shot');
       const image = own(s, 'image');
-      if ((SHOTS as readonly unknown[]).includes(shot) && image instanceof Blob) shots.push({ shot: shot as ShotId, image });
+      if (!(SHOTS as readonly unknown[]).includes(shot) || !(image instanceof Blob) || !image.type.startsWith('image/')) continue;
+      if (shots.some((x) => x.shot === shot) || shots.length >= SHOTS.length) continue;
+      shots.push({ shot: shot as ShotId, image });
     }
   }
   if (shots.length === 0) return null;

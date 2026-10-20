@@ -227,7 +227,9 @@ function baseFill(ctx: Ctx, w: number, h: number, tier: FrameTier): CanvasGradie
 }
 
 function conic(ctx: Ctx, w: number, h: number, stops: readonly (readonly [number, string])[]): CanvasGradient {
-  const g = 'createConicGradient' in ctx ? ctx.createConicGradient(Math.PI * 0.25, w / 2, h / 2) : diagonal(ctx, w, h, stops);
+  // 円錐グラデーションがない環境では、同じ色の段階を斜めの線形グラデーションで代わりにする（diagonal が段階を足す）
+  if (!('createConicGradient' in ctx)) return diagonal(ctx, w, h, stops);
+  const g = ctx.createConicGradient(Math.PI * 0.25, w / 2, h / 2);
   for (const [at, color] of stops) g.addColorStop(at, color);
   return g;
 }

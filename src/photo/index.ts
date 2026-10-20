@@ -2,7 +2,7 @@
 // 撮影は capture.ts、合成は compose.ts、IndexedDB は store.ts、決まりは rules.ts。
 // ここは受け取り（ダウンロード・共有）を持ち、外から使う名前をまとめて出す。
 
-export { capturePhoto } from './capture';
+export { capturePhoto, warmUpCapture } from './capture';
 export { composePhoto } from './compose';
 export { createPhotoStore } from './store';
 export { cropFor, doorTint, frameTierFor, photoFileName, stampText } from './rules';

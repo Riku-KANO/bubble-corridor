@@ -7,11 +7,13 @@ import { float, hue, mix, normalize, normalView, positionLocal, positionViewDire
 import { PHOTO } from '../../config';
 import type { DoorChoice, Lang } from '../../contracts/ids';
 import type { FrameTier, PhotoFormat, PhotoMeta } from '../../contracts/photo';
-import { capturePhoto, composePhoto, createPhotoStore, downloadPhoto, photoFileName } from '../../photo';
+import { capturePhoto, composePhoto, createPhotoStore, downloadPhoto, photoFileName, warmUpCapture } from '../../photo';
 
 const params = new URLSearchParams(location.search);
 const forceWebGL = params.has('webgl');
 const frozen = params.has('freeze');
+/** ?nowarm: 下ごしらえをしない（初回の撮影の重さを比べる用） */
+const noWarm = params.has('nowarm');
 
 const el = <T extends HTMLElement>(id: string): T => {
   const e = document.getElementById(id);
@@ -182,8 +184,12 @@ interface ShootResult {
   /** 撮影の前後のフレーム間隔の最大（ms） */
   medianGapBefore: number;
   maxGapBefore: number;
-  /** 撮影（描画・読み出し・PNG）の間の最大。乗車中に起きるのはここだけ */
+  /** 撮影（描画・読み出し・符号化）の間の最大。乗車中に起きるのはここだけ */
   maxGapCapture: number;
+  /** 撮影の間に落ちたフレームの数（間隔が通常より長かった分を、通常の間隔で割って数える） */
+  droppedCapture: number;
+  /** 撮影の種類（image/webp など） */
+  rawType: string;
   /** 合成 8 枚の間の最大。乗車後の保存のときにだけ起きる */
   maxGapCompose: number;
   stored: number;
@@ -192,6 +198,8 @@ interface ShootResult {
 interface PhotoDevApi {
   backend: string;
   ready: boolean;
+  /** 下ごしらえにかかった時間（ms）。?nowarm なら null */
+  warmUpMs: number | null;
   last: ShootResult | null;
   history: ShootResult[];
   /** 直近の撮影そのまま */
@@ -210,7 +218,8 @@ let rideNo = 2;
 
 const api: PhotoDevApi = {
   backend,
-  ready: true,
+  ready: false,
+  warmUpMs: null,
   last: null,
   history: [],
   raw: null,
@@ -243,6 +252,12 @@ function currentMeta(hiddenTotal: number): PhotoMeta {
 
 function maxOf(a: readonly number[]): number {
   return a.reduce((m, v) => Math.max(m, v), 0);
+}
+
+/** 通常の間隔（base）より長かった分のフレーム数。1.5 倍までは揺れとして数えない */
+function dropped(gaps: readonly number[], base: number): number {
+  if (base <= 0) return 0;
+  return gaps.reduce((n, g) => (g > base * 1.5 ? n + Math.round(g / base) - 1 : n), 0);
 }
 
 function median(a: readonly number[]): number {
@@ -294,7 +309,7 @@ async function shoot(): Promise<ShootResult> {
   resultsEl.replaceChildren();
   api.raw = raw;
   api.composed.clear();
-  show(resultsEl, raw, `撮影そのまま ${size.width}×${size.height}`, 'utakata-raw.png');
+  show(resultsEl, raw, `撮影そのまま ${size.width}×${size.height} ${raw.type}`, `utakata-raw.${raw.type === 'image/webp' ? 'webp' : 'jpg'}`);
   for (const { tier, format, blob } of images) {
     api.composed.set(`${tier.tier}-${format}`, blob);
     const meta = currentMeta(tier.hiddenTotal);
@@ -322,15 +337,17 @@ async function shoot(): Promise<ShootResult> {
     medianGapBefore: median(frameGaps.slice(Math.max(0, gapsBefore - 120), gapsBefore)),
     maxGapBefore: maxOf(frameGaps.slice(Math.max(0, gapsBefore - 120), gapsBefore)),
     maxGapCapture: maxOf(gapsCapture),
+    droppedCapture: dropped(gapsCapture, median(frameGaps.slice(Math.max(0, gapsBefore - 120), gapsBefore))),
+    rawType: raw.type,
     maxGapCompose: maxOf(gapsCompose),
     stored,
   };
   api.last = result;
   api.history.push(result);
   statusEl.textContent = [
-    `${backend}  撮影 ${size.width}×${size.height}  PNG ${(raw.size / 1048576).toFixed(2)} MB`,
-    `同期の時間 ${syncMs.toFixed(1)} ms / 撮影の全体 ${captureMs.toFixed(0)} ms / 合成 8 枚 ${composeMs.toFixed(0)} ms`,
-    `フレーム間隔: 撮影前 中央値 ${result.medianGapBefore.toFixed(1)} ms・最大 ${result.maxGapBefore.toFixed(1)} ms → 撮影の間の最大 ${result.maxGapCapture.toFixed(1)} ms / 合成の間の最大 ${result.maxGapCompose.toFixed(1)} ms`,
+    `${backend}  撮影 ${size.width}×${size.height}  ${raw.type} ${(raw.size / 1048576).toFixed(2)} MB`,
+    `同期の時間 ${syncMs.toFixed(1)} ms / 撮影の全体 ${captureMs.toFixed(0)} ms / 合成 8 枚 ${composeMs.toFixed(0)} ms / 下ごしらえ ${api.warmUpMs === null ? 'なし' : `${api.warmUpMs.toFixed(0)} ms`}`,
+    `フレーム間隔: 撮影前 中央値 ${result.medianGapBefore.toFixed(1)} ms・最大 ${result.maxGapBefore.toFixed(1)} ms → 撮影の間の最大 ${result.maxGapCapture.toFixed(1)} ms（落ちたフレーム ${result.droppedCapture}） / 合成の間の最大 ${result.maxGapCompose.toFixed(1)} ms`,
     `カメラの縦横比: 撮影前 ${aspectBefore.toFixed(4)} / 撮影の呼び出し直後 ${aspectAfterSync.toFixed(4)} / 完了後 ${camera.aspect.toFixed(4)}`,
     `棚（IndexedDB）: ${stored} 件`,
   ].join('\n');
@@ -370,7 +387,6 @@ async function compareWithLive(): Promise<{ meanAbs: number[]; meanSigned: numbe
   return { meanAbs: abs.map((v) => v / n), meanSigned: signed.map((v) => v / n) };
 }
 
-shootBtn.disabled = false;
 shootBtn.addEventListener('click', () => {
   shoot().catch((err: unknown) => {
     console.error(err);
@@ -378,4 +394,13 @@ shootBtn.addEventListener('click', () => {
     shootBtn.disabled = false;
   });
 });
-statusEl.textContent = `${backend}: 準備できました。「撮る」を押してください`;
+// 読み込み直後に下ごしらえ（出力の変換のパイプラインなど、初回だけ重いものを先に作る）。アプリ本体でも同じ位置で呼ぶ想定
+if (!noWarm) {
+  const t0 = performance.now();
+  // ?warmfull: 本番と同じ大きさで下ごしらえする（確認用。メモリの一時的なピークが出る）
+  await warmUpCapture(renderer, scene, camera, params.has('warmfull') ? PHOTO.captureDesktop : undefined);
+  api.warmUpMs = performance.now() - t0;
+}
+api.ready = true;
+shootBtn.disabled = false;
+statusEl.textContent = `${backend}: 準備できました（下ごしらえ ${api.warmUpMs === null ? 'なし' : `${api.warmUpMs.toFixed(0)} ms`}）。「撮る」を押してください`;
