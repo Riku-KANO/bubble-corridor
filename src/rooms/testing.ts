@@ -212,3 +212,68 @@ export async function expectRoomContract(factory: RoomFactory, sections: readonl
   room.dispose();
   expect(spies.every((s) => s()), '形をすべて解放する').toBe(true);
 }
+
+/** userData.role で物を探す（部屋の担当は、テストが探す物に role を付ける: membrane / shell / stars / pattern / lamp / ticket / arch / rim） */
+export function findByRole(root: THREE.Object3D, role: string): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (o.userData.role === role) out.push(o);
+  });
+  return out;
+}
+
+/** 世界座標の中心 */
+export function worldCenter(o: THREE.Object3D): THREE.Vector3 {
+  const box = new THREE.Box3().setFromObject(o);
+  return box.isEmpty() ? o.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
+}
+
+/**
+ * TRN-1 部屋の境目はすべて膜。膜はその部屋を出る側の部屋が持つ（近づくあいだ見えるので）。
+ * 部屋の最後の区間の終わりのレールの点から 3m 以内に role=membrane の物があり、clearanceExempt であること。
+ */
+export function expectExitMembrane(room: RoomModule, section: SectionId): void {
+  const { s1 } = ride.sectionSpan(section);
+  const p = ride.pointAt(s1);
+  const at = new THREE.Vector3(p.x, p.y, p.z);
+  const membranes = findByRole(room.root, 'membrane');
+  expect(membranes.length, `${room.id} の出口の膜`).toBeGreaterThan(0);
+  const nearest = Math.min(...membranes.map((m) => new THREE.Box3().setFromObject(m).distanceToPoint(at)));
+  expect(nearest, `${room.id} の膜とレールの終わりの距離`).toBeLessThanOrEqual(3);
+  for (const m of membranes) {
+    let exempt = false;
+    for (let o: THREE.Object3D | null = m; o; o = o.parent) if (o.userData.clearanceExempt) exempt = true;
+    expect(exempt, '膜は通り抜けるので clearanceExempt').toBe(true);
+  }
+}
+
+/** INT-6 隠れた小さな泡: ちょうど1つ、小さく（半径 0.25m 以下）、触れると hiddenFound を出す */
+export async function expectHiddenBubble(factory: RoomFactory, section: SectionId): Promise<void> {
+  const h = await loadRoom(factory);
+  const hidden = h.room.touchables.filter((t) => t.kind === 'hidden-bubble');
+  expect(hidden, '隠れた泡の数').toHaveLength(1);
+  expect(hidden[0].radius).toBeLessThanOrEqual(0.25);
+  expect(hidden[0].section).toBe(section);
+  hidden[0].onTouch({ t: ride.sectionTime(section).t0 + 10, source: 'pointer', point: [0, 0, 0] });
+  expect(h.emitted.filter((e) => e.type === 'hiddenFound').map((e) => e.payload)).toEqual([{ section }]);
+}
+
+/** 触れられる物のうち、区間のどこかでレールから dist 以内に来るものの割合（手が届く・縁が光る） */
+export function reachableFraction(room: RoomModule, kind: string, sections: readonly SectionId[], dist: number): number {
+  const list = room.touchables.filter((t) => t.kind === kind);
+  if (list.length === 0) return 0;
+  const samples: THREE.Vector3[] = [];
+  for (const id of sections) {
+    const { s0, s1 } = ride.sectionSpan(id);
+    for (let s = s0; s <= s1; s += 1) {
+      const p = ride.pointAt(s);
+      samples.push(new THREE.Vector3(p.x, p.y, p.z));
+    }
+  }
+  let ok = 0;
+  for (const t of list) {
+    const c = t.object.getWorldPosition(new THREE.Vector3());
+    if (samples.some((p) => p.distanceTo(c) <= dist)) ok++;
+  }
+  return ok / list.length;
+}
