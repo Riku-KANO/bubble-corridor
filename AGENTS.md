@@ -6,7 +6,7 @@
 
 姉妹作の案1「ビードロの向こう」は `~/develop/through-the-vidro` で並行して作る。共通部品 [src/core](src/core/README.md) は両方のディレクトリに同じものを置き、ディレクトリをまたいで参照しない（ADR-0005）。
 
-技術: three.js r186 の `three/webgpu`（WebGPURenderer＋TSL。WebGL2 と VR の経路も同じ部品）、TypeScript、Vite 8、Web Audio、WebXR。配信は Cloudflare の静的配信（M4）。パッケージ管理は **pnpm のみ**。
+技術: three.js r186 の `three/webgpu`（WebGPURenderer＋TSL。WebGL2 と VR の経路も同じ部品）、TypeScript、Vite 8、Web Audio、WebXR。造形・プレビズ・焼き込みは **Blender 5.2.2**（`/Applications/Blender.app`。PATH にはない。`scripts/blender.ts` が探す。ADR-0002）。配信は Cloudflare の静的配信（M4）。パッケージ管理は **pnpm のみ**。
 
 ## コマンド
 
@@ -24,6 +24,8 @@
 | 開発ループの実行権 | `pnpm loop begin|status|finish|stop|resume` |
 | スライスの worktree | `scripts/worktree.sh add|remove|list|ports <ID>` |
 | 共通部品を案1へコピー | `pnpm core:sync ../through-the-vidro [--apply]` |
+| Blender のスクリプトを走らせる | `pnpm blender <script.py> [--blend <file>] [-- 引数]`（ヘッドレス） |
+| プレビズを組む / 書き出す / 撮る | `pnpm previz:build`（rail.json・cues.json → `blender/scenes/previz.blend`）、`pnpm previz:export`（→ rail.json・cues.json）、`pnpm previz:render`（Eevee の静止画・動画 → `.snaps/previz/`） |
 
 ## 開発ループ（ループエンジニアリング）
 
@@ -60,9 +62,10 @@
 | ライドフォト | photo | `src/photo/**` |
 | 見回すと触れる | input | `src/input/**` |
 | 画面効果 | fx | `src/fx/**` |
-| 部屋A | rooms-a | `src/rooms/lobby/**`、`src/rooms/platform/**`、`src/rooms/greenhouse/**`、`src/gondola/**` |
-| 部屋B | rooms-b | `src/rooms/rain/**`、`src/rooms/kaleidoscope/**` |
-| 部屋C | rooms-c | `src/rooms/celestial/**`、`src/rooms/dawn/**` |
+| Blender のパイプライン | blender | `blender/scripts/previz.py`・`export_ride.py`・`render_previz.py`、`blender/scripts/common/**`（案1と共有） |
+| 部屋A | rooms-a | `src/rooms/lobby/**`、`src/rooms/platform/**`、`src/rooms/greenhouse/**`、`src/gondola/**`、`blender/scripts/rooms/{lobby,platform,greenhouse,gondola}.py`、`public/assets/rooms/{lobby,platform,greenhouse,gondola}*` |
+| 部屋B | rooms-b | `src/rooms/rain/**`、`src/rooms/kaleidoscope/**`、`blender/scripts/rooms/{rain,kaleidoscope}.py`、`public/assets/rooms/{rain,kaleidoscope}*` |
+| 部屋C | rooms-c | `src/rooms/celestial/**`、`src/rooms/dawn/**`、`blender/scripts/rooms/{celestial,dawn}.py`、`public/assets/rooms/{celestial,dawn}*` |
 | VR | xr | `src/xr/**`、`e2e/xr.spec.ts`、`e2e/render-paths.spec.ts` |
 
 各担当は確認ページ `dev/<担当>.html` と `src/dev/<担当>/**` も持てる。
@@ -81,6 +84,12 @@
 - 他の担当の範囲のファイルは編集しない。必要な変更は報告に書く。
 - 並行で動かすときは worktree ごとにポートを変える（`scripts/worktree.sh ports <ID>` の `DEV_PORT`・`PREVIEW_PORT`・`E2E_PORT`）。
 - 同じ checkout を複数のセッションで同時に使わない。
+
+### 部屋の作り方（Blender → glb → TS）
+
+1. `blender/scripts/rooms/<部屋>.py`（bpy）が、出荷する rail.json を読んでレールの周りに部屋の形を作る（`blender/scenes/<部屋>.blend` に保存。人が開いて直してよい）。
+2. 光と影を焼き込み（`common/bake.py`）、レールから見えない面を消し（`common/visibility.py`）、`public/assets/rooms/<部屋>.glb` とライトマップを書き出す（`common/export.py`。画像は埋め込まない、15MB 以下）。
+3. `src/rooms/<部屋>/index.ts` が `ctx.assets.gltf()` で読み、カスタムプロパティ（userData の role・touch_kind・glass など）を見て、ガラスの材質（`src/core/materials/glass.ts`）・触れられる物・見どころの動きを重ねる。
 
 ## 作品の決まり（設計書の柱）
 
