@@ -1,5 +1,5 @@
 // 部屋（セット）の契約。各部屋の担当は src/rooms/<部屋>/ で RoomModule を実装する。
-import type { Camera, ColorRepresentation, Object3D, Texture } from 'three';
+import type { AnimationClip, Camera, ColorRepresentation, Group, Object3D, Texture } from 'three';
 import type { QualityPreset } from '../core/quality';
 import type { Cue, EventBus, Vec3Tuple } from './events';
 import type { ComfortMode, DoorChoice, RoomId, SectionId, TouchKind, TouchSource } from './ids';
@@ -45,8 +45,20 @@ export interface Atmosphere {
   readonly environment?: Texture | null;
 }
 
+/**
+ * アセットの読み込み口（Blender で作って書き出した glb とライトマップ）。パスは public/assets/ からの相対。
+ * 本番はブラウザの GLTFLoader、テストは node でファイルを読む（src/rooms/testing.ts）。
+ * glb には画像を埋め込まない（ライトマップは別の PNG / WebP。texture() で読む）。
+ */
+export interface AssetLoader {
+  gltf(path: string): Promise<{ readonly scene: Group; readonly animations: readonly AnimationClip[] }>;
+  /** 色空間は呼び出し側で決める（ライトマップは線形のまま） */
+  texture(path: string): Promise<Texture>;
+}
+
 export interface RoomContext {
   readonly ride: Ride;
+  readonly assets: AssetLoader;
   readonly events: EventBus;
   readonly quality: QualityPreset;
   /** 現在の快適モード（穏やかでは万華鏡の模様の回転を止める） */
@@ -76,6 +88,10 @@ export interface RoomModule {
   /** この部屋のすべての物。統合担当がシーンに足し、外す */
   readonly root: Object3D;
   readonly touchables: readonly Touchable[];
+  /**
+   * 部屋の空気。時刻で変えてよい（例: 乗り場のホールは降車で朝の光になる）。
+   * 変えるときは新しいオブジェクトに差し替える（統合担当は参照が変わったら反映する）。
+   */
   readonly atmosphere: Atmosphere;
   /**
    * 形と材質を作る。重い処理はここで行う（前の部屋の途中で呼ばれ、膜に着くまでに終える）。
@@ -86,6 +102,9 @@ export interface RoomModule {
   update(frame: RoomFrame): void;
   /** キューシートの出来事（この部屋の区間のもの、と membrane・photo.capture を含むすべて） */
   onCue(cue: Cue): void;
+  /*
+   * 誘導（lure）の出来事では、見どころの方向へ光の粒を流して視線を誘う（音と正面へ戻すのは統合担当）。
+   */
   /**
    * 見どころの位置（ワールド座標）。誘導の音と光の粒、正面へ戻すカメラの向きに使う。
    * この部屋の見どころでなければ null。
