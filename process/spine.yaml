@@ -46,8 +46,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/sound/**, src/audio/**, dev/audio.html, src/dev/audio/**]
   tests: [src/core/sound/sound.test.ts, src/audio/audio.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 実装 1/3 で緑（sound 14・audio 21、全体58件、check --quick ALL OK、テスト無変更）。OfflineAudioContext で乗車全体を測定: 5:10 は -55dB、9:50 前後が最大 -14dB、ピーク 0.82。ポーズは suspend ではなく門で止める（UI の音を鳴らすため）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 吊られた泡（bowl）の音が鳴っている途中で切れる（出口を外す時刻が短い）。P2 chime が触れた音の枠を使う、見どころの効果音が cue の1フレーム後＋負の dt、映像の時計が currentTime の塊で進み出力遅延を補正しない、先読み0.2秒が短い、頂点で同時約305音源、unlock の同期が重い、見どころの間の触れた音を控えめに。core の VERSION は統合で親が上げる。実装 消費 2/3'
+  status: green
+  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 実装 1/3 で緑（sound 14・audio 21、全体58件、check --quick ALL OK、テスト無変更）。OfflineAudioContext で乗車全体を測定: 5:10 は -55dB、9:50 前後が最大 -14dB、ピーク 0.82。ポーズは suspend ではなく門で止める（UI の音を鳴らすため）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 吊られた泡（bowl）の音が鳴っている途中で切れる（出口を外す時刻が短い）。P2 chime が触れた音の枠を使う、見どころの効果音が cue の1フレーム後＋負の dt、映像の時計が currentTime の塊で進み出力遅延を補正しない、先読み0.2秒が短い、頂点で同時約305音源、unlock の同期が重い、見どころの間の触れた音を控えめに。core の VERSION は統合で親が上げる。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。bowl は 5.1s 以降も鳴り続ける（旧は無音）、時計のずれの標準偏差 1.7〜2.0ms → 0.08ms、頂点の同時音源 226（予算150で193）、乗車全体の描画 109.8s → 52.9s、unlock の同期 340〜424ms → 134〜157ms（AudioContext の生成が下限）。レビュー 消費 2/2'
 - id: S-12
   title: 共通部品（ガラスの材質ライブラリ、曇りと指の文字、品質プリセットと動的な解像度）
   wave: 1
