@@ -50,7 +50,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
   let progress: Progress = readProgress();
 
   // ── 描画 ──
-  const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: params.webgl });
+  // VR で乗れる端末（ヘッドセットのブラウザ）では最初から WebGL2 の経路で描く（ADR-0001。VR は WebGL2 の経路）
+  const xrCapable = await isImmersiveVrSupported();
+  const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: params.webgl || xrCapable });
   await renderer.init();
   const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'WebGPU' : 'WebGL2';
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -143,6 +145,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   };
 
   const debug = params.debug ? createDebugOverlay(root, backend) : null;
+  let xrFrames = 0;
 
   const commands: UiCommands = {
     enterHome() {
@@ -213,6 +216,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   };
 
   const ui = mountUi(root, commands);
+  // e2e と snap が操作するための口（?debug のときだけ）
+  debug?.expose({ commands, xr: () => xr.active, xrFrames: () => xrFrames, xrSupported: () => xrSupported });
   const uiState = (): UiState => ({
     screen: flow.screen,
     loadProgress,
@@ -503,7 +508,10 @@ export async function startApp(root: HTMLElement): Promise<void> {
     camEuler.setFromQuaternion(camQuat, 'YXZ');
     audio.setListener({ x: camWorld.x, y: camWorld.y, z: camWorld.z, yaw: camEuler.y, pitch: camEuler.x });
 
-    if (xr.active) renderer.render(scene, camera);
+    if (xr.active) {
+      xrFrames++;
+      renderer.render(scene, camera);
+    }
     else fx.render(scene, camera);
 
     // 動的な解像度
@@ -550,6 +558,14 @@ export async function startApp(root: HTMLElement): Promise<void> {
     return smoothstep(t0, t0 + 6, t) * (1 - smoothstep(t1 - 8, t1, t));
   }
 
+}
+
+async function isImmersiveVrSupported(): Promise<boolean> {
+  try {
+    return (await navigator.xr?.isSessionSupported('immersive-vr')) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 function sectionStart(id: SectionId): number {
