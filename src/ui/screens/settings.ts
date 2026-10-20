@@ -61,6 +61,28 @@ export function createSettingsScreen(env: ScreenEnv): Screen {
   const gyroNote = h('p', { class: 'row-note', hidden: true });
   const comfortNote = noteRow();
   const soundNote = noteRow();
+  // 端末によって要らない行（VR が使えない端末の外周の暗さ・姿勢、スマートフォンの「マウスに追従」）は隠す
+  const lookModeRow = segmentedRow({
+    setting: 'lookMode',
+    label: 'look.mode',
+    options: [
+      { value: 'drag', label: 'look.drag' },
+      { value: 'follow', label: 'look.follow' },
+    ],
+    get: (s) => s.lookMode,
+    pick: (lookMode) => set({ lookMode }),
+  });
+  const vignetteRow = sliderRow({ setting: 'vignette', label: 'comfort.vignette', min: 0, max: 1, step: 0.05, get: (s) => s.vignette, pick: (vignette) => set({ vignette }), format: percent });
+  const postureRow = segmentedRow({
+    setting: 'xrPosture',
+    label: 'comfort.posture',
+    options: [
+      { value: 'seated', label: 'posture.seated' },
+      { value: 'standing', label: 'posture.standing' },
+    ],
+    get: (s) => s.xrPosture,
+    pick: (xrPosture) => set({ xrPosture }),
+  });
 
   const rows: Record<TabId, Row[]> = {
     quality: [
@@ -78,16 +100,7 @@ export function createSettingsScreen(env: ScreenEnv): Screen {
       }),
     ],
     look: [
-      segmentedRow({
-        setting: 'lookMode',
-        label: 'look.mode',
-        options: [
-          { value: 'drag', label: 'look.drag' },
-          { value: 'follow', label: 'look.follow' },
-        ],
-        get: (s) => s.lookMode,
-        pick: (lookMode) => set({ lookMode }),
-      }),
+      lookModeRow,
       gyro,
       sliderRow({ setting: 'fov', label: 'look.fov', min: CAMERA.fovMinDeg, max: CAMERA.fovMaxDeg, step: 1, get: (s) => s.fov, pick: (fov) => set({ fov }), format: (v) => `${Math.round(v)}°` }),
       switchRow({ setting: 'autoRecenter', label: 'look.recenter', get: (s) => s.autoRecenter, pick: (autoRecenter) => set({ autoRecenter }) }),
@@ -111,17 +124,8 @@ export function createSettingsScreen(env: ScreenEnv): Screen {
         pick: (comfort) => set({ comfort }),
       }),
       switchRow({ setting: 'reducedFlash', label: 'comfort.reducedFlash', desc: 'comfort.reducedFlash.desc', get: (s) => s.reducedFlash, pick: (reducedFlash) => set({ reducedFlash }) }),
-      sliderRow({ setting: 'vignette', label: 'comfort.vignette', min: 0, max: 1, step: 0.05, get: (s) => s.vignette, pick: (vignette) => set({ vignette }), format: percent }),
-      segmentedRow({
-        setting: 'xrPosture',
-        label: 'comfort.posture',
-        options: [
-          { value: 'seated', label: 'posture.seated' },
-          { value: 'standing', label: 'posture.standing' },
-        ],
-        get: (s) => s.xrPosture,
-        pick: (xrPosture) => set({ xrPosture }),
-      }),
+      vignetteRow,
+      postureRow,
     ],
     sound: [volume('master', 'sound.master'), volume('music', 'sound.music'), volume('sfx', 'sound.sfx'), volume('ambient', 'sound.ambient')],
     display: [
@@ -197,10 +201,16 @@ export function createSettingsScreen(env: ScreenEnv): Screen {
       // 端末の傾きは、スマートフォンなど傾きを取れる端末にだけ出す
       setHidden(gyro.el, !isMobile);
       setHidden(gyroNote, !(isMobile && gyroDenied));
+      // VR が使えない端末では、VR のためだけの行を隠す
+      setHidden(vignetteRow.el, !state.xrSupported);
+      setHidden(postureRow.el, !state.xrSupported);
+      // スマートフォンにはマウスがない（今それを選んでいるときだけは残す）
+      const follow = lookModeRow.el.querySelector<HTMLElement>('[data-value="follow"]');
+      if (follow) setHidden(follow, isMobile && state.settings.lookMode !== 'follow');
     },
     show() {
       selectTab('quality');
-      header.focus();
     },
+    focus: () => header.focus(),
   };
 }

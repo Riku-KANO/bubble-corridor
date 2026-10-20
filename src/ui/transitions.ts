@@ -39,6 +39,8 @@ export function transitionSec(from: ScreenId | null, to: ScreenId, vr: boolean):
 export function timing(from: ScreenId | null, to: ScreenId, vr: boolean): Timing {
   const total = transitionSec(from, to, vr);
   if (from === null) return { leave: 0, delay: 0, enter: total };
+  // 入口・棚・設定などの行き来は、重ねて入れ替える（待たせない）
+  if (total === MENU_FADE_SEC) return { leave: total, delay: 0, enter: total };
   // 乗る・ポーズから戻る: 出ていく画面が全体をかけて晴れ、入ってくるものはない
   if (to === 'riding') return { leave: total, delay: 0, enter: total };
   // ポーズ: 曇りがすぐ広がり、項目が書かれる

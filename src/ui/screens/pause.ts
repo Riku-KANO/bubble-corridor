@@ -73,6 +73,8 @@ export function createPauseScreen(env: ScreenEnv): Screen {
       setAttr(volume, 'aria-expanded', 'false');
       // 項目は少しずつずらして、ほぼ同時に書き始める（すぐ押せるように）
       [heading, ...items].forEach((el, i) => armWrite(el, delaySec + 0.1 + i * 0.13, QUICK));
+    },
+    focus() {
       resume.focus({ preventScroll: true });
     },
     hide() {

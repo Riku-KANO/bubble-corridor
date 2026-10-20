@@ -11,7 +11,7 @@ export function createPhotoScreen(env: ScreenEnv): Screen {
   const { commands } = env;
   const pane = createPhotoPane(env, { choices: true });
 
-  const thanks = h('h2', { class: 'photo-thanks' });
+  const thanks = h('h2', { class: 'photo-thanks', tabindex: '-1' });
   const cell = (name: string) => {
     const value = h('span', { class: 'cell-value' });
     const label = h('span', { class: 'cell-label' });
@@ -61,6 +61,10 @@ export function createPhotoScreen(env: ScreenEnv): Screen {
     },
     show() {
       replay(el, 'enter');
+    },
+    // 最初のフォーカスは見出しに置く（読み上げがここから始まる。押すとすぐ動くボタンには置かない）
+    focus() {
+      thanks.focus({ preventScroll: true });
     },
   };
 }

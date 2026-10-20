@@ -18,6 +18,8 @@ export interface FogOptions {
 }
 
 const quiet = (): void => undefined;
+/** 曇りの canvas の解像度。ぼんやりした曇りなので、等倍で足りる */
+const FOG_DPR = 1;
 /** 晴れ終わってから、動かすのをやめるまでの余裕（ms） */
 const SETTLE_MS = 120;
 
@@ -34,7 +36,7 @@ export function createFog(host: HTMLElement, opts: FogOptions = {}): Fog {
     const box = host.getBoundingClientRect();
     if (box.width < 1 || box.height < 1) return;
     try {
-      fog.resize(Math.round(box.width), Math.round(box.height), Math.min(window.devicePixelRatio || 1, 2));
+      fog.resize(Math.round(box.width), Math.round(box.height), FOG_DPR);
     } catch {
       // 大きさを変えられなくても続ける
     }
@@ -62,7 +64,7 @@ export function createFog(host: HTMLElement, opts: FogOptions = {}): Fog {
       const box = host.getBoundingClientRect();
       const width = Math.max(1, Math.round(box.width || window.innerWidth));
       const height = Math.max(1, Math.round(box.height || window.innerHeight));
-      fog = createCondensation({ width, height, dpr: Math.min(window.devicePixelRatio || 1, 2), tint: opts.tint, autoTick: false });
+      fog = createCondensation({ width, height, dpr: FOG_DPR, tint: opts.tint, autoTick: false });
       fog.canvas.classList.add('fog-canvas');
       fog.canvas.setAttribute('aria-hidden', 'true');
       host.prepend(fog.canvas);

@@ -73,7 +73,8 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
     howto: createHowtoScreen(env),
     credits: createCreditsScreen(env),
   };
-  const order = Object.keys(screens) as ScreenId[];
+  // 乗車中の読み上げ（role="status"）が、ほかの画面の知らせより先に来るようにする（DOM の順で最初の status）
+  const order = ['riding', ...(Object.keys(screens) as ScreenId[]).filter((id) => id !== 'riding')] as ScreenId[];
   for (const id of order) {
     const screen = screens[id];
     screen.el.hidden = true;
@@ -83,9 +84,13 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
   // ── 画面の切り替え ──
   let current: ScreenId | null = null;
   const leaving = new Map<ScreenId, number>();
+  /** 現れ始めるまで待っている画面の、触れる状態にするタイマー */
+  const waiting = new Map<ScreenId, number>();
 
   function leave(id: ScreenId, sec: number): void {
     const screen = screens[id];
+    window.clearTimeout(waiting.get(id));
+    waiting.delete(id);
     screen.hide?.();
     // 消える間も触れず、読み上げにも出さない（動きが終わったら hidden にする）。フォーカスは先に手放す
     if (document.activeElement instanceof HTMLElement && screen.el.contains(document.activeElement)) document.activeElement.blur();
@@ -112,11 +117,25 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
     el.style.setProperty('--delay', `${delaySec}s`);
     el.hidden = false;
     el.classList.remove('is-leaving');
-    el.removeAttribute('inert');
-    el.removeAttribute('aria-hidden');
+    // まだ見えない間（delay）は触れさせない。見えない案内を押して飛ばしてしまう、を防ぐ
+    const activate = (): void => {
+      window.clearTimeout(waiting.get(id));
+      waiting.delete(id);
+      if (current !== id) return;
+      el.removeAttribute('inert');
+      el.removeAttribute('aria-hidden');
+      screen.focus?.();
+    };
+    window.clearTimeout(waiting.get(id));
+    if (delaySec > 0) {
+      el.setAttribute('inert', '');
+      el.setAttribute('aria-hidden', 'true');
+      waiting.set(id, window.setTimeout(activate, delaySec * 1000));
+    }
     void el.offsetWidth; // 隠れていた要素の現れる動きを始めるため
     el.classList.add('is-in');
     screen.show?.(delaySec);
+    if (delaySec <= 0) activate();
   }
 
   function switchTo(next: ScreenId): void {
@@ -176,7 +195,8 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
   };
   const onPressStart = (e: PointerEvent): void => {
     stopPress();
-    if (current !== 'riding' || !e.isPrimary || (e.target instanceof Node && ui.contains(e.target))) return;
+    // マウスには Esc と雫がある。長押しは指（タッチ・ペン）のため。見回しのドラッグで止めてしまわない
+    if (current !== 'riding' || !e.isPrimary || e.pointerType === 'mouse' || (e.target instanceof Node && ui.contains(e.target))) return;
     pressAt = { x: e.clientX, y: e.clientY };
     pressTimer = window.setTimeout(() => {
       pressAt = null;
@@ -186,6 +206,11 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
   const onPressMove = (e: PointerEvent): void => {
     if (pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > PRESS_SLOP_PX) stopPress();
   };
+  // 長押しでメニュー（コンテキストメニュー）が割り込まないようにする（乗車中だけ）
+  const onContextMenu = (e: Event): void => {
+    if (current === 'riding' && !(e.target instanceof Node && ui.contains(e.target))) e.preventDefault();
+  };
+  root.addEventListener('contextmenu', onContextMenu);
   root.addEventListener('pointerdown', onPressStart);
   root.addEventListener('pointermove', onPressMove);
   root.addEventListener('pointerup', stopPress);
@@ -197,6 +222,7 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
     flashPauseDrop: () => riding.flashDrop(),
     dispose() {
       stopPress();
+      root.removeEventListener('contextmenu', onContextMenu);
       root.removeEventListener('pointerdown', onPressStart);
       root.removeEventListener('pointermove', onPressMove);
       root.removeEventListener('pointerup', stopPress);
@@ -204,6 +230,8 @@ export function mountUi(root: HTMLElement, commands: UiCommands): UiHandle {
       document.removeEventListener('keydown', onKeyDown);
       for (const id of leaving.values()) window.clearTimeout(id);
       leaving.clear();
+      for (const id of waiting.values()) window.clearTimeout(id);
+      waiting.clear();
       for (const id of order) {
         screens[id].hide?.();
         screens[id].dispose?.();

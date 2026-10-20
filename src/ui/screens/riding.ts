@@ -41,6 +41,7 @@ export function createRidingScreen(env: ScreenEnv): RidingScreen {
   let active = false;
   const timers = new Set<number>();
   let dropTimer = 0;
+  let dropUntil = 0;
   let hintTimers: number[] = [];
   const later = (fn: () => void, sec: number): number => {
     const id = window.setTimeout(() => {
@@ -61,18 +62,27 @@ export function createRidingScreen(env: ScreenEnv): RidingScreen {
     setHidden(drop, true);
   }
 
-  function armDropTimer(): void {
-    cancel(dropTimer);
-    dropTimer = later(() => {
-      drop.classList.remove('is-on');
-      dropTimer = later(() => setHidden(drop, true), DROP_FADE_SEC);
-    }, UI.pauseDropVisibleSec);
+  /** 雫が出ているか（消える動きの途中は含めない） */
+  const dropShown = (): boolean => !drop.hidden && drop.classList.contains('is-on');
+
+  /** 雫を消す時刻（ms）になったら消す。マウスを動かすたびに時刻だけが延びる */
+  function onDropTimer(): void {
+    const rest = dropUntil - Date.now();
+    if (rest > 0) {
+      dropTimer = later(onDropTimer, rest / 1000);
+      return;
+    }
+    drop.classList.remove('is-on');
+    dropTimer = later(() => setHidden(drop, true), DROP_FADE_SEC);
   }
 
   // 雫を狙っている間は消さない
   drop.addEventListener('pointerenter', () => cancel(dropTimer));
   drop.addEventListener('pointerleave', () => {
-    if (!drop.hidden) armDropTimer();
+    if (!dropShown()) return;
+    dropUntil = Date.now() + UI.pauseDropVisibleSec * 1000;
+    cancel(dropTimer);
+    dropTimer = later(onDropTimer, UI.pauseDropVisibleSec);
   });
 
   function endHint(): void {
@@ -99,11 +109,15 @@ export function createRidingScreen(env: ScreenEnv): RidingScreen {
     },
     flashDrop() {
       if (!active) return;
+      dropUntil = Date.now() + UI.pauseDropVisibleSec * 1000;
+      // マウスを動かすたびに呼ばれる。出ているときは、消す時刻を延ばすだけにする
+      if (dropShown()) return;
       setAttr(drop, 'aria-label', env.tr('ride.pause'));
       setHidden(drop, false);
       void drop.offsetWidth; // 隠れていた要素が現れる動きを始めるため
       drop.classList.add('is-on');
-      armDropTimer();
+      cancel(dropTimer);
+      dropTimer = later(onDropTimer, UI.pauseDropVisibleSec);
     },
     showHint() {
       if (!active) return;

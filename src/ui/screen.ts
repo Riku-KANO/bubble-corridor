@@ -21,6 +21,8 @@ export interface Screen {
    * delaySec は、画面が現れ始めるまでの秒（前の画面が消えるのを待つ間）。演出の始まりをこの分だけ遅らせる
    */
   show?(delaySec: number): void;
+  /** 触れる状態になった（delay が過ぎた）。最初のフォーカスを置く。見えない間は呼ばれない */
+  focus?(): void;
   /** 見えなくなった（タイマーや曇りを片付ける） */
   hide?(): void;
   dispose?(): void;

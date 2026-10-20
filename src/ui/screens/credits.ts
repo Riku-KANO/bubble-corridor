@@ -17,8 +17,6 @@ export function createCreditsScreen(env: ScreenEnv): Screen {
       setText(subtitle, env.tr('subtitle'));
       for (const l of lines) setText(l.el, env.tr(l.key));
     },
-    show() {
-      header.focus();
-    },
+    focus: () => header.focus(),
   };
 }

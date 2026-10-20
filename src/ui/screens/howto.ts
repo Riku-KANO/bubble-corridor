@@ -47,8 +47,6 @@ export function createHowtoScreen(env: ScreenEnv): Screen {
       setText(pause, tr('howto.pause'));
       setText(note, tr('howto.note'));
     },
-    show() {
-      header.focus();
-    },
+    focus: () => header.focus(),
   };
 }

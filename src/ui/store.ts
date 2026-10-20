@@ -1,7 +1,7 @@
 // 設定と乗車をまたぐ記録の保存（localStorage）。
 // 読んだ値は外から来るものとして扱い、項目ごとに検証する。不正な項目だけ既定値に戻し、正しい項目は残す。
 // 保存できない環境（プライベートウィンドウ、容量超過）でも例外を出さない（storage.ts が受け止める）。
-import { CAMERA, HIDDEN_BUBBLE_SECTIONS, INTERACTION, STORAGE_PREFIX } from '../config';
+import { CAMERA, HIDDEN_BUBBLE_SECTIONS, INTERACTION, STORAGE_PREFIX, XR } from '../config';
 import type { Lang } from '../contracts/ids';
 import type { Progress, Settings } from '../contracts/ui';
 import { bool, num, oneOf, own, readJson, subsetOf, writeJson } from '../core/storage';
@@ -21,7 +21,7 @@ export function defaultSettings(lang: Lang = 'ja'): Settings {
     fov: CAMERA.fovDeg,
     autoRecenter: true,
     comfort: 'standard',
-    vignette: 0.35,
+    vignette: XR.vignetteDefault,
     volumes: { master: 0.8, music: 0.8, sfx: 0.8, ambient: 0.7 },
     reducedFlash: false,
     textScale: 1,

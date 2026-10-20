@@ -65,6 +65,8 @@ export function createHomeScreen(env: ScreenEnv): Screen {
     show(delaySec) {
       armWrites([title], 0.35 + delaySec);
       replay(el, 'enter');
+    },
+    focus() {
       ride.focus({ preventScroll: true });
     },
     hide() {

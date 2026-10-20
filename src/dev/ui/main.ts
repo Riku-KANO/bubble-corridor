@@ -3,6 +3,8 @@
 //   ?screen=home   最初の画面（queue / home / guide / riding / pause / photo / shelf / settings / howto / credits）
 //   ?lang=en       言語   ?xr=1  VR の項目を出す   ?mobile=1  スマートフォンの項目を出す
 //   ?scale=1.25    文字の大きさ   ?rides=2  これまでの便の数   ?hidden=3  見つけた泡の数   ?develop=1  写真がまだ届いていない
+//   ?fail=1        保存と共有を失敗させる
+//   ?gyro=deny     「傾けて見回す」の許可を断られた場合にする（既定は許可される）
 //   ?bar=0         切り替えのバーを出さない（撮影用）
 import '@fontsource/zen-old-mincho/400.css';
 import '@fontsource/noto-sans-jp/300.css';
@@ -60,22 +62,32 @@ async function buildPhoto(rideNo: number, chosen: ShotId, hiddenTotal: number): 
   };
 }
 
+/** 呼ばれた命令の記録（確認の操作で「何が呼ばれたか」を見るため） */
+const calls: string[] = [];
 const ui = mountUi(root, makeCommands());
 (window as unknown as { __devui: unknown }).__devui = {
   go,
   patch,
   ui,
+  calls,
   get state() {
     return state;
   },
 };
 
 function makeCommands(): UiCommands {
-  const noop = async (): Promise<void> => undefined;
+  // ?fail=1 のとき、保存と共有を失敗させる（失敗の知らせを見るため）
+  const failing = async (): Promise<void> => {
+    if (q.get('fail') === '1') throw new Error('失敗（確認用）');
+  };
   return {
     enterHome: () => go('home'),
-    ride: () => go(state.progress.seenGuide ? 'riding' : 'guide'),
+    ride: () => {
+      calls.push('ride');
+      go(state.progress.seenGuide ? 'riding' : 'guide');
+    },
     skipGuide: () => {
+      calls.push('skipGuide');
       patch({ progress: { ...state.progress, seenGuide: true } });
       go('riding');
     },
@@ -91,9 +103,12 @@ function makeCommands(): UiCommands {
       document.documentElement.style.setProperty('--text-scale', String(settings.textScale));
       patch({ settings });
     },
-    requestGyro: async () => true,
-    savePhoto: noop,
-    sharePhoto: noop,
+    requestGyro: async () => {
+      calls.push('requestGyro');
+      return q.get('gyro') !== 'deny';
+    },
+    savePhoto: failing,
+    sharePhoto: failing,
     choosePhoto: (r, shot) => {
       const next = { ...r, chosen: shot };
       patch({ latestPhoto: state.latestPhoto?.id === r.id ? next : state.latestPhoto, shelf: state.shelf.map((x) => (x.id === r.id ? next : x)) });

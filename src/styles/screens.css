@@ -19,12 +19,16 @@
   isolation: isolate;
   /* 画面が出ている間は、下の 3D に触れさせない */
   pointer-events: auto;
-  opacity: 0;
-  transition: opacity var(--out, 0.35s) var(--ease-glass);
+  /* 現れる・消える動き（opacity）。出ていくときは --out、入ってくるときは --in と --delay。
+     --fade-on は入ってくる間だけ 1（要素ごとの --stagger を足すため） */
+  --fade-d: var(--out, 0.35s);
+  --fade-w: 0s;
+  --fade-on: 0;
 }
 .ui .screen.is-in {
-  opacity: 1;
-  transition: opacity var(--in, 0.35s) var(--ease-glass) var(--delay, 0s);
+  --fade-d: var(--in, 0.35s);
+  --fade-w: var(--delay, 0s);
+  --fade-on: 1;
 }
 /* 部屋の光を敷く。スクロールしても動かない */
 .ui .screen::before {
@@ -34,6 +38,24 @@
   z-index: -1;
   pointer-events: none;
   background: var(--veil, none);
+  opacity: 0;
+  transition: opacity var(--fade-d, 0s) var(--ease-glass) var(--fade-w, 0s);
+}
+.ui .screen.is-in::before {
+  opacity: 1;
+}
+
+/* 現れる・消える動きは、画面全体ではなく中身の一つ一つの opacity で行う。
+   opacity が 1 未満の祖先の下では、Chrome は backdrop-filter に下の 3D を見せない（動きの間だけガラスが曇らず、
+   終わった瞬間にぼかしが現れる）。そこで、ガラス（blur を持つ要素）を含む入れ物には opacity をかけず、
+   ガラスそのものと、ガラスを含まない要素にだけかける。ガラスの要素は自分の transition にも同じ opacity を足してある。
+   現れる動きの opacity は transition だけで行い、入ってくる動き（animation）では translate と scale だけを動かす。 */
+:where(.ui .screen:not(.screen-riding)) :where(*:not(:has(.btn, .chip, .glass-panel, .board, .plaque, .arch, .ticket))) {
+  opacity: 0;
+  transition: opacity var(--fade-d, 0s) var(--ease-glass) calc(var(--fade-w, 0s) + var(--stagger, 0s) * var(--fade-on, 0));
+}
+:where(.ui .screen.is-in:not(.screen-riding)) :where(*:not(:has(.btn, .chip, .glass-panel, .board, .plaque, .arch, .ticket))) {
+  opacity: 1;
 }
 
 .ui [data-room='queue'] {
@@ -180,7 +202,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: min(86vw, max(25rem, 56vmin));
+  --arch-w: min(86vw, max(25rem, 56vmin));
+  width: var(--arch-w);
   height: clamp(13rem, 50vh, max(26rem, 62vmin));
   border-radius: 999px 999px 0.6rem 0.6rem;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.02));
@@ -222,14 +245,14 @@
   display: grid;
   justify-items: center;
   gap: 0.7rem;
-  margin-top: -1.5rem;
   padding: 0 1rem;
   text-align: center;
 }
 .ui .title {
   font-family: var(--font-serif);
   font-weight: 400;
-  font-size: min(max(3.9rem, 7.2vmin), 13vw);
+  /* アーチの縁にかからない大きさ（4字 + 字間で、アーチの幅の約 7 割） */
+  font-size: min(max(3.9rem, 7.2vmin), calc(var(--arch-w) * 0.14));
   line-height: 1.2;
   letter-spacing: 0.3em;
   text-indent: 0.3em;
@@ -321,27 +344,43 @@
   max-width: min(56rem, 100%);
 }
 .ui .screen-home.enter .arch {
-  animation: arch-in 1.4s var(--ease-glass) var(--delay, 0s) both;
+  animation: arch-in 1.4s var(--ease-glass) var(--delay, 0s) backwards;
 }
 .ui .screen-home.enter .ticket {
-  animation: ticket-in 1.3s calc(0.5s + var(--delay, 0s)) var(--ease-glass) both, ticket-float 6.5s calc(1.8s + var(--delay, 0s)) ease-in-out infinite;
+  animation: ticket-in 1.3s calc(0.5s + var(--delay, 0s)) var(--ease-glass) backwards, ticket-float 6.5s calc(1.8s + var(--delay, 0s)) ease-in-out infinite;
 }
-.ui .screen-home.enter :is(.home-actions, .home-menu) {
-  animation: rise-in 1s calc(0.9s + var(--delay, 0s)) var(--ease-glass) both;
+/* 現れる順（--stagger）: 弧 → 切符 → 項目 */
+.ui .screen-home .ticket {
+  --stagger: 0.5s;
+}
+.ui .screen-home :is(.home-actions > .btn, .home-menu > .chip) {
+  --stagger: 0.9s;
+}
+.ui .screen-photo :is(.plaque, .photo-actions > .btn, .photo-thanks, .shot-choices, .pane-format, .pane-buttons > .btn) {
+  --stagger: 1.1s;
+}
+/* 入れ物ではなく、ガラスの一つ一つが浮かぶ（入れ物に opacity をかけると、中のガラスが下の 3D を見なくなる） */
+.ui .screen-home.enter :is(.home-actions > .btn, .home-menu > .chip) {
+  animation: rise-in 1s calc(0.9s + var(--delay, 0s)) var(--ease-glass) backwards;
 }
 @keyframes arch-in {
   from {
-    opacity: 0;
     scale: 0.96;
   }
 }
 @keyframes ticket-in {
   from {
-    opacity: 0;
     translate: 0 2rem;
   }
 }
+/* 画面の現れる動き: 浮かび上がる（opacity は transition が受け持つ） */
 @keyframes rise-in {
+  from {
+    translate: 0 1rem;
+  }
+}
+/* 画面の中で、あとから出る部分: 浮かびながら現れる */
+@keyframes rise-fade {
   from {
     opacity: 0;
     translate: 0 1rem;
@@ -567,17 +606,14 @@
   gap: 0.35rem;
 }
 .ui .pause-row {
-  position: relative;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
+  gap: 0 0.6rem;
 }
-/* 項目の名前は中央に置き、今の状態はその右に添える */
+/* 今の状態は項目の名前の右に添える。幅が足りなければ（英語・大きな文字）下に回る */
 .ui .pause-state {
-  position: absolute;
-  left: calc(100% + 0.4rem);
-  top: 50%;
-  translate: 0 -50%;
-  white-space: nowrap;
   padding: 0.05rem 0.9rem;
   border-radius: 999px;
   color: var(--ink);
@@ -620,7 +656,7 @@
   border-radius: 1.2rem;
   background: rgba(255, 255, 255, 0.16);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  animation: rise-in 0.4s var(--ease-glass) both;
+  animation: rise-fade 0.4s var(--ease-glass) backwards;
 }
 .ui .pause-volume .row {
   padding: 0.4rem 0;
@@ -684,7 +720,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  animation: photo-in 1.3s var(--ease-glass) both;
+  animation: photo-in 1.3s var(--ease-glass) backwards;
 }
 @keyframes photo-in {
   from {
@@ -852,15 +888,15 @@
   gap: 0.8rem 1.2rem;
 }
 /* 降車: 泡が開いたあと、写真が空から降りてくる */
-.ui .screen-photo.enter .photo-pane .photo-glass {
-  animation: descend 2.2s var(--ease-glass) var(--delay, 0s) both;
+.ui .screen-photo.enter .photo-pane .photo-stage {
+  /* 額縁ごと降りてくる（sway は transform、descend は translate と scale なので重ねられる） */
+  animation: sway 11s ease-in-out infinite, descend 2.2s var(--ease-glass) var(--delay, 0s) backwards;
 }
-.ui .screen-photo.enter :is(.plaque, .photo-actions, .photo-thanks, .shot-choices, .pane-controls) {
-  animation: rise-in 1.1s calc(1.1s + var(--delay, 0s)) var(--ease-glass) both;
+.ui .screen-photo.enter :is(.plaque, .photo-actions > .btn, .photo-thanks, .shot-choices, .pane-format, .pane-buttons > .btn) {
+  animation: rise-in 1.1s calc(1.1s + var(--delay, 0s)) var(--ease-glass) backwards;
 }
 @keyframes descend {
   from {
-    opacity: 0;
     translate: 0 -28vh;
     scale: 0.35;
   }
@@ -903,14 +939,10 @@
 /* 設定のタブ */
 .ui .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.3rem;
   margin-bottom: 0.4rem;
   padding: 0.2rem 0 0.5rem;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.ui .tabs::-webkit-scrollbar {
-  display: none;
 }
 .ui .tab {
   position: relative;
@@ -947,7 +979,7 @@
   opacity: 0.8;
 }
 .ui .tab-panel {
-  animation: rise-in 0.4s var(--ease-glass) both;
+  animation: rise-fade 0.4s var(--ease-glass) backwards;
 }
 
 /* 乗り方 */
@@ -1069,6 +1101,59 @@
   }
 }
 
+/* 乗車前の案内の「傾けて見回す」と、その結果 */
+.ui .guide-gyro {
+  letter-spacing: 0.12em;
+}
+.ui .guide-note {
+  max-width: 24rem;
+  text-align: center;
+  text-wrap: balance;
+  color: var(--ink);
+}
+/* 保存・共有に失敗したときの知らせ */
+.ui .pane-status {
+  max-width: 28rem;
+  padding: 0.25rem 1.1rem;
+  border-radius: 999px;
+  text-align: center;
+  text-wrap: balance;
+  color: #ffe6d6;
+  background: rgba(104, 40, 40, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* 英語: 字間を日本語ほど空けない（長い英文が間延びしない） */
+.ui:lang(en) :is(.btn-primary, .btn-secondary) {
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+}
+.ui:lang(en) .title {
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+}
+.ui:lang(en) :is(.subtitle, .credits-sub, .queue-caption, .ticket-label) {
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+}
+.ui:lang(en) :is(.ticket-number, .credits-name) {
+  letter-spacing: 0.1em;
+  text-indent: 0;
+}
+.ui:lang(en) :is(.photo-thanks, .sub-title, .howto-head, .pause-title, .shelf-caption, .photo-developing) {
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+}
+.ui:lang(en) :is(.write-item, .hint-text, .guide-line) {
+  letter-spacing: 0.06em;
+  text-indent: 0.06em;
+}
+/* 日本語: 語の途中で折り返さない（対応するブラウザで） */
+.ui:lang(ja) :is(.howto-text, .howto-note, .credits-line, .row-desc, .row-note, .guide-note, .shelf-empty, .pane-status, .row-label) {
+  word-break: auto-phrase;
+  text-wrap: pretty;
+}
+
 /* ── スマートフォン（縦） ─────────────────────────────────────── */
 @media (max-width: 640px) {
   .ui .arch {
@@ -1083,7 +1168,8 @@
     grid-template-columns: 1fr;
   }
   .ui .tab {
-    padding-inline: 0.8rem;
+    flex: 1 1 auto;
+    padding-inline: 0.6rem;
   }
   .ui .settings-panel,
   .ui .howto-panel,

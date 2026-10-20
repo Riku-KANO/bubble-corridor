@@ -13,7 +13,7 @@ interface Orb {
 }
 
 /** 日付 YYYY-MM-DD を 2026.10.20 の形にする（刻印と同じ書き方） */
-export const dotDate = (date: string): string => date.replaceAll('-', '.');
+export const dotDate = (date: unknown): string => (typeof date === 'string' ? date.replaceAll('-', '.') : '');
 
 export function createShelfScreen(env: ScreenEnv): Screen {
   const header = createSubHeader(env, 'shelf.title');
@@ -94,7 +94,7 @@ export function createShelfScreen(env: ScreenEnv): Screen {
     },
     show() {
       selectedId = null;
-      header.focus();
     },
+    focus: () => header.focus(),
   };
 }

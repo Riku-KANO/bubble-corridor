@@ -1,21 +1,13 @@
 // 写真の見せ方（ライドフォトと写真の棚で共通）。ガラスの中に浮かぶ写真、保存の形、保存と共有。
 // ライドフォトでは、ここに 3 枚から選ぶ小さなガラス玉（data-shot）も並ぶ。
-import { HIDDEN_BUBBLE_SECTIONS } from '../../config';
 import type { ShotId } from '../../contracts/ids';
-import type { FrameTier, PhotoFormat, PhotoRecord } from '../../contracts/photo';
+import type { PhotoFormat, PhotoRecord } from '../../contracts/photo';
+import { frameTierFor } from '../../photo/rules';
 import { arrowNav } from '../widgets';
 import { h, setAttr, setClass, setFlag, setHidden, setText } from '../dom';
 import type { ScreenEnv } from '../screen';
 
 export const SHOT_ORDER: readonly ShotId[] = ['bloom', 'freeze', 'constellation'];
-
-/** 隠れた泡の数で額縁が変わる（0〜1 通常、2〜3 銀、4 金、5 虹色） */
-export function frameTier(hiddenTotal: number): FrameTier {
-  if (hiddenTotal >= HIDDEN_BUBBLE_SECTIONS.length) return 'rainbow';
-  if (hiddenTotal >= 4) return 'gold';
-  if (hiddenTotal >= 2) return 'silver';
-  return 'plain';
-}
 
 export interface PhotoPane {
   readonly el: HTMLElement;
@@ -53,16 +45,29 @@ export function createPhotoPane(env: ScreenEnv, opts: { readonly choices: boolea
   const formatButtons = (['wide', 'square'] as const).map((f) => h('button', { type: 'button', class: 'seg-opt', role: 'radio', 'data-value': f, on: { click: () => setFormat(f) } }));
   const formatGroup = h('div', { class: 'seg', role: 'radiogroup' }, ...formatButtons);
   arrowNav(formatGroup, '.seg-opt');
-  const save = h('button', { type: 'button', class: 'btn', on: { click: () => record && fire(commands.savePhoto(record, format)) } });
-  const share = h('button', { type: 'button', class: 'btn', on: { click: () => record && fire(commands.sharePhoto(record, format)) } });
+  const save = h('button', { type: 'button', class: 'btn', on: { click: () => record && fire(commands.savePhoto(record, format), 'saveFailed') } });
+  const share = h('button', { type: 'button', class: 'btn', on: { click: () => record && fire(commands.sharePhoto(record, format), 'shareFailed') } });
   const actions = h('div', { class: 'pane-buttons' }, save, share);
   const controls = h('div', { class: 'pane-controls' }, h('div', { class: 'pane-format' }, formatLabel, formatGroup), actions);
+  // 保存や共有に失敗したときに、利用者へ伝える
+  const status = h('p', { class: 'pane-status', role: 'status', hidden: true });
+  let failure: 'saveFailed' | 'shareFailed' | null = null;
 
-  const el = h('div', { class: 'photo-pane', 'data-format': format, 'data-tier': 'plain' }, stage, choices, controls);
+  const el = h('div', { class: 'photo-pane', 'data-format': format, 'data-tier': 'plain' }, stage, choices, controls, status);
 
-  /** 保存と共有は非同期。失敗しても画面は止めない（app 側が扱う） */
-  function fire(p: Promise<void>): void {
-    Promise.resolve(p).catch(() => undefined);
+  /** 保存と共有は非同期。失敗しても画面は止めず、失敗したことを伝える */
+  function fire(p: Promise<void>, onFail: 'saveFailed' | 'shareFailed'): void {
+    failure = null;
+    paintStatus();
+    Promise.resolve(p).catch(() => {
+      failure = onFail;
+      paintStatus();
+    });
+  }
+
+  function paintStatus(): void {
+    setHidden(status, failure === null);
+    setText(status, failure === null ? '' : env.tr(failure === 'saveFailed' ? 'photo.saveFailed' : 'photo.shareFailed'));
   }
 
   function setFormat(f: PhotoFormat): void {
@@ -100,7 +105,10 @@ export function createPhotoPane(env: ScreenEnv, opts: { readonly choices: boolea
     current: () => record,
     update(next) {
       const { tr } = env;
+      // 別の写真に変わったら、前の失敗の知らせは消す
+      if (next?.id !== record?.id) failure = null;
       record = next;
+      paintStatus();
       setText(developing, tr('photo.developing'));
       setText(save, tr('photo.save'));
       setText(share, tr('photo.share'));
@@ -111,7 +119,7 @@ export function createPhotoPane(env: ScreenEnv, opts: { readonly choices: boolea
       setText(formatButtons[1], tr('photo.square'));
       setFlag(save, 'disabled', next === null);
       setFlag(share, 'disabled', next === null);
-      setAttr(el, 'data-tier', next ? frameTier(next.meta.hiddenTotal) : 'plain');
+      setAttr(el, 'data-tier', next ? frameTierFor(next.meta.hiddenTotal) : 'plain');
       const chosen = next ? shotImage(next, next.chosen) ?? next.shots[0]?.image : undefined;
       const shown = setImage(img, chosen);
       setHidden(developing, shown);

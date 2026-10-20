@@ -35,6 +35,10 @@ canvas.stage {
   height: 100%;
   display: block;
   touch-action: none;
+  /* 長押し（ポーズ）に、端末のメニューや文字の選択が割り込まないようにする */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .fatal {
   position: fixed;
