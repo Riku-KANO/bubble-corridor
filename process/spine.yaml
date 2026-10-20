@@ -90,8 +90,8 @@ slices:
   depends_on: [S-00]
   paths: [src/input/**, dev/input.html, src/dev/input/**]
   tests: [src/input/look.test.ts, src/input/touch.test.ts]
-  status: green
-  notes: '2026-10-20 親がテスト（look 11、touch 11）を作成。赤の証跡: 12 failed（STUB は見回しも触れるも何もしない）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（input 20件、全体43件、check.sh --quick ALL OK、テスト無変更を親が確認）。dev/input.html で 26 項目を Playwright で操作確認（.snaps/input/）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P2 傾きの NaN、180°越えの急な振れ、追従で戻した直後の振り戻し、見つめる距離の制限（親の判断: config に gazeMaxDistance 25m を足し半径を引いた距離）。P3 視野角の感度（LookOptions.fovDeg を足した）、radius を使う縁の光、ポーズ後の傾きの基準、見つめる猶予など。親: config に recenterMaxDegPerSec 60 を足し、乗車の頭は即座に正面へ。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。戻しの最大 59.4°/秒、180°越えで張り付き急な振れなし、NaN でも有限。追従モードの素早い動きで 445°/秒になりうる（範囲外、残件）。レビュー 消費 2/2'
+  status: red
+  notes: '2026-10-20 親がテスト（look 11、touch 11）を作成。赤の証跡: 12 failed（STUB は見回しも触れるも何もしない）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（input 20件、全体43件、check.sh --quick ALL OK、テスト無変更を親が確認）。dev/input.html で 26 項目を Playwright で操作確認（.snaps/input/）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P2 傾きの NaN、180°越えの急な振れ、追従で戻した直後の振り戻し、見つめる距離の制限（親の判断: config に gazeMaxDistance 25m を足し半径を引いた距離）。P3 視野角の感度（LookOptions.fovDeg を足した）、radius を使う縁の光、ポーズ後の傾きの基準、見つめる猶予など。親: config に recenterMaxDegPerSec 60 を足し、乗車の頭は即座に正面へ。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。戻しの最大 59.4°/秒、180°越えで張り付き急な振れなし、NaN でも有限。追従モードの素早い動きで 445°/秒になりうる（範囲外、残件）。レビュー 消費 2/2 2026-10-20 レビュー2巡目 request_changes（P2 1件: 追従モードで戻した後の引き継ぎが、縦の動きで横に120°振れる・入力と逆向きに進む）。レビューは 2/2 で使い切り。親が症状を振る舞いテスト3件にした（2件が赤）。実装 消費 3/3（最後。以降は親が確かめる）'
 - id: S-16
   title: 画面効果（泡越しの縁、膜の通過の縞と歪み、万華鏡の折り返し、ブルーム、白い霧、暗転）
   wave: 1
