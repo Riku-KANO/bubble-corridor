@@ -27,8 +27,6 @@ const FOLLOW_EDGE = 0.95;
 const FOLLOW_CURVE = 1.5;
 /** 追従モードで、戻している間にマウスがこれ以上（要素の半幅を 1 とした距離）動いたら、戻しを打ち切ってマウスに任せる */
 const FOLLOW_CANCEL_NORM = 0.25;
-/** 追従モードで正面へ戻した後、マウスがこれだけ動くまでに「戻した向きとマウスの向きの差」を使い切る（それまでは差を保つ） */
-const FOLLOW_RELEASE_NORM = 0.5;
 /** 要素の高さが取れないときの代わり */
 const FALLBACK_HEIGHT = 600;
 /** 傾きの前向きベクトルが垂直に近いとき、yaw は定まらないので前の値を保つ */
@@ -44,13 +42,28 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 const EASE_MAX_SLOPE = (() => {
   const n = 512;
   let m = 0;
-  for (let i = 0; i < n; i++) m = Math.max(m, (easeGlass((i + 1) / n) - easeGlass(i / n)) * n);
+  // 最後の区間は、x=1 で値が 1 に揃う段差（曲線の端の都合）なので測らない
+  for (let i = 0; i < n - 1; i++) m = Math.max(m, (easeGlass((i + 1) / n) - easeGlass(i / n)) * n);
   return m * 1.01; // 差分で測るので少し余裕を見る
 })();
 
 /** 設定の視野角（度）を、感度に使うラジアンにする。範囲外や不正な値は既定に戻す */
 function fovRadians(deg: number | undefined): number {
   return clamp(isNum(deg) ? deg : CAMERA.fovDeg, CAMERA.fovMinDeg, CAMERA.fovMaxDeg) * DEG;
+}
+
+/**
+ * 追従モードの引き継ぎ（軸ごと）。マウスから決まる向きが fPrev から f へ動いたとき、景色 b を同じ向きへ動かす。
+ * 動いた向きの端 end に、景色とマウスの向きが同時に着くようにするので、
+ * 景色は常にマウスと同じ向きへ動き（逆向きに振れない）、b と fPrev の差は往復するたびに縮み、端で 0 になる。
+ * 差がないとき（b === fPrev）は b = f、つまり普通の追従になる。
+ */
+function carry(b: number, fPrev: number, f: number, max: number): number {
+  if (f === fPrev) return b;
+  const end = f > fPrev ? max : -max;
+  const span = end - fPrev;
+  if (Math.abs(span) < 1e-9) return b; // すでに端にいる。動く余地がない
+  return end - (end - b) * ((end - f) / span);
 }
 
 /** 追従モードの曲線。n は -1〜1（要素の中心からの位置）。戻り値も -1〜1 */
@@ -124,10 +137,12 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
   const mouse = { x: 0, y: 0, known: false };
   /** 戻し始めたときのマウスの位置 */
   const rcRef = { x: 0, y: 0, known: false };
-  /** 戻した向き − そのときのマウスから決まる向き。マウスが動くにつれて縮め、振り戻しを防ぐ */
-  const followOff = { yaw: 0, pitch: 0 };
-  /** 戻し終えたときのマウスの位置と、そこからの最大の移動量 */
-  const followRef = { x: 0, y: 0, known: false, moved: 0 };
+  /**
+   * 最後のマウスの位置から決まる向き（軸ごと）。景色（base）はここから次の位置への動きを引き継ぐ。
+   * known でないあいだ（最初のマウスの動き）は、景色をマウスの向きへ寄せる。hold なら（正面へ戻した直後で
+   * マウスの位置が分からなかったとき）、最初の位置を基準にするだけで景色は動かさない。
+   */
+  const fPrev = { yaw: 0, pitch: 0, known: false, hold: false };
 
   // ── 端末の傾き ──
   /** 端末の向きの yaw を、±180° で折り返さない連続した値にしたもの（最初の読みが 0） */
@@ -197,8 +212,6 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
     lastX = e.clientX;
     lastY = e.clientY;
     recenter = null; // 触られたら操作を優先する
-    followOff.yaw = 0;
-    followOff.pitch = 0;
     try {
       el.setPointerCapture?.(e.pointerId);
     } catch {
@@ -235,6 +248,8 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
     mouse.x = nx;
     mouse.y = ny;
     mouse.known = true;
+    const fy = followYaw(nx);
+    const fp = followPitch(ny);
 
     if (recenter) {
       // 戻している間は、マウスが置いてあるだけの揺れでは止めない。大きく動かしたら戻しを打ち切ってマウスに任せる
@@ -242,25 +257,32 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
         rcRef.x = nx;
         rcRef.y = ny;
         rcRef.known = true;
+      }
+      if (Math.hypot(nx - rcRef.x, ny - rcRef.y) < FOLLOW_CANCEL_NORM) {
+        fPrev.yaw = fy;
+        fPrev.pitch = fp;
+        fPrev.known = true;
         return;
       }
-      if (Math.hypot(nx - rcRef.x, ny - rcRef.y) < FOLLOW_CANCEL_NORM) return;
+      // 打ち切り: そのときの向きから、マウスの動きの引き継ぎを始める（差を 0 にして振れさせない）
+      base.yaw = look.yaw - gyro.yaw;
+      base.pitch = look.pitch - gyro.pitch;
       recenter = null;
-      followOff.yaw = 0;
-      followOff.pitch = 0;
     }
 
-    // 戻した直後は「戻した向き」を保ち、マウスが動いた量に応じて、マウスの向きとの差を縮める
-    // （1px 動いただけで、元の向きへ振り戻らないように。縮めたものは戻さない）
-    if (!followRef.known) {
-      followRef.x = nx;
-      followRef.y = ny;
-      followRef.known = true;
+    if (!fPrev.known) {
+      if (!fPrev.hold) {
+        base.yaw = fy;
+        base.pitch = fp;
+      }
+    } else {
+      base.yaw = carry(base.yaw, fPrev.yaw, fy, YAW_MAX);
+      base.pitch = carry(base.pitch, fPrev.pitch, fp, PITCH_MAX);
     }
-    followRef.moved = Math.max(followRef.moved, Math.hypot(nx - followRef.x, ny - followRef.y));
-    const keep = 1 - clamp(followRef.moved / FOLLOW_RELEASE_NORM, 0, 1);
-    base.yaw = followYaw(nx) + followOff.yaw * keep;
-    base.pitch = followPitch(ny) + followOff.pitch * keep;
+    fPrev.yaw = fy;
+    fPrev.pitch = fp;
+    fPrev.known = true;
+    fPrev.hold = false;
     settleBase();
   }
 
@@ -279,6 +301,8 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
       if (hasYaw && !fresh) devYaw += wrapAngle(devTmp.yaw - lastRawYaw);
       lastRawYaw = devTmp.yaw;
       hasYaw = true;
+    } else {
+      hasYaw = false; // 真上・真下を向いていて yaw が定まらない。次に定まった読みから数え直す（その間の向きの変化は無視する）
     }
     devPitch = devTmp.pitch;
     hasDev = true;
@@ -335,17 +359,11 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
     }
   }
 
-  /** 戻し終えた（または即座に向けた）後の仕上げ: 傾きと、追従モードのマウスの基準を取り直す */
-  function finishRecenter(toYaw: number, toPitch: number) {
+  /** 戻し終えた（または即座に向けた）後の仕上げ: 傾きの基準を取り直し、追従モードの引き継ぎを整える */
+  function finishRecenter() {
     if (gyroOn) rebaseGyro();
-    if (mode === 'follow') {
-      followOff.yaw = toYaw - followYaw(mouse.x);
-      followOff.pitch = toPitch - followPitch(mouse.y);
-      followRef.x = mouse.x;
-      followRef.y = mouse.y;
-      followRef.known = mouse.known;
-      followRef.moved = 0;
-    }
+    // 戻した向きのまま、マウスの動きを引き継ぐ。マウスの位置が分からなければ、最初の位置を基準にするだけ
+    if (mode === 'follow' && !fPrev.known) fPrev.hold = true;
   }
 
   // 触れる側の入力（touch）も同じ要素で pointerdown などを受ける。ここでは見回しに必要なものだけを受ける
@@ -367,14 +385,15 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
       if (o.mode !== mode) {
         mode = o.mode;
         endDrag();
-        followOff.yaw = 0;
-        followOff.pitch = 0;
+        fPrev.known = false; // 切り替えたあとの最初のマウスの位置から、景色をマウスの向きへ寄せる
+        fPrev.hold = false;
       }
       applyGyroOption(o.gyro);
     },
 
-    recenter(toward, durationSec = CAMERA.recenterSec) {
+    recenter(toward, durationArg = CAMERA.recenterSec) {
       if (disposed) return;
+      const durationSec = Number.isFinite(durationArg) ? durationArg : CAMERA.recenterSec;
       const toYaw = clamp(isNum(toward?.yaw) ? toward.yaw : 0, -YAW_MAX, YAW_MAX);
       const toPitch = clamp(isNum(toward?.pitch) ? toward.pitch : 0, -PITCH_MAX, PITCH_MAX);
       if (!(durationSec > 0)) {
@@ -384,7 +403,7 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
         settleBase();
         look.yaw = toYaw;
         look.pitch = toPitch;
-        finishRecenter(toYaw, toPitch);
+        finishRecenter();
         return;
       }
       // 大きく外れているときは、指定の秒より長くかけて、最も速い瞬間でも最大の角速度を超えないようにする（酔わせない）
@@ -397,7 +416,7 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
     },
 
     update(dt) {
-      if (disposed) return;
+      if (disposed || !Number.isFinite(dt) || dt < 0) return;
       if (recenter) {
         recenter.elapsed += dt;
         const done = recenter.elapsed >= recenter.duration;
@@ -410,9 +429,8 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
         look.yaw = yaw;
         look.pitch = pitch;
         if (done) {
-          const { toYaw, toPitch } = recenter;
           recenter = null;
-          finishRecenter(toYaw, toPitch);
+          finishRecenter();
         }
         return;
       }
