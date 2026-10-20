@@ -90,8 +90,8 @@ slices:
   depends_on: [S-00]
   paths: [src/input/**, dev/input.html, src/dev/input/**]
   tests: [src/input/look.test.ts, src/input/touch.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（look 11、touch 11）を作成。赤の証跡: 12 failed（STUB は見回しも触れるも何もしない）。実装 消費 1/3'
+  status: green
+  notes: '2026-10-20 親がテスト（look 11、touch 11）を作成。赤の証跡: 12 failed（STUB は見回しも触れるも何もしない）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（input 20件、全体43件、check.sh --quick ALL OK、テスト無変更を親が確認）。dev/input.html で 26 項目を Playwright で操作確認（.snaps/input/）。レビュー 消費 1/2'
 - id: S-16
   title: 画面効果（泡越しの縁、膜の通過の縞と歪み、万華鏡の折り返し、ブルーム、白い霧、暗転）
   wave: 1
@@ -101,8 +101,8 @@ slices:
   depends_on: [S-00]
   paths: [src/fx/**, dev/fx.html, src/dev/fx/**]
   tests: [src/fx/fx.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト9件を作成。赤の証跡: 9 failed（resolveFx が未実装）。実装 消費 1/3'
+  status: green
+  notes: '2026-10-20 親がテスト9件を作成。赤の証跡: 9 failed（resolveFx が未実装）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（fx 9件、全体32件、check.sh --quick ALL OK、テスト無変更）。WebGPU と WebGL2 の両方で確認ページと本アプリの乗車をコンソールエラー0で撮影（.snaps/fx、.snaps/ride）。4K で合成 +1.3ms。レビュー 消費 1/2'
 - id: S-17
   title: Blender のパイプライン基盤（プレビズの組み立てと書き出し、通しの動画、見えない面の削除、焼き込み、命名と glb の書き出し）
   wave: 1
