@@ -1,0 +1,51 @@
+{
+  "name": "bubble-corridor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "泡沫回廊（Utakata: A Ride Through Glass）— ガラスの泡に乗って5つのガラスの部屋を巡る13分のライド型ブラウザ体験",
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "snap": "node --import ./scripts/ts-resolve.mjs scripts/dev/snap.ts",
+    "comfort": "node --import ./scripts/ts-resolve.mjs scripts/comfort.ts",
+    "spine": "node --import ./scripts/ts-resolve.mjs scripts/spine.ts",
+    "loop": "node --import ./scripts/ts-resolve.mjs scripts/dev-loop.ts",
+    "core:sync": "node --import ./scripts/ts-resolve.mjs scripts/sync-core.ts",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "verify:full": "pnpm verify && pnpm e2e",
+    "ride:data": "node --import ./scripts/ts-resolve.mjs scripts/build-ride-data.ts"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans-jp": "^5.3.1",
+    "@fontsource/zen-old-mincho": "^5.3.1",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.186.0",
+    "@types/webxr": "^0.5.24",
+    "eslint": "^10.12.0",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^17.13.0",
+    "iwer": "^2.6.0",
+    "jsdom": "^30.1.2",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4",
+    "yaml": "^2.8.1"
+  }
+}

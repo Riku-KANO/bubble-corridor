@@ -1,0 +1,160 @@
+# 開発スパイン: 実装スライスの台帳。`pnpm spine` で参照・更新する（set・note は対象の `- id:` ブロックだけを書き換える）。
+# status: todo | red | green | reviewed | integrated | blocked
+# wave: 同じ wave のスライスは並行に進められる（paths が重ならない）。depends_on が integrated になってから始める。
+# paths: 実装担当が触ってよいパス（テストは親が書き、実装担当は変更しない）。
+version: 1
+slices:
+- id: S-00
+  title: ハーネスと契約（スパイン、check.sh、エージェント定義、契約、STUB、アプリの骨格）
+  wave: 0
+  lane: main
+  milestone: M0
+  requirements: [CORE-1, CORE-2]
+  depends_on: []
+  paths: ['**']
+  tests: []
+  status: integrated
+  notes: '2026-10-21 統合担当（親）が作成。STUB のままで待ち列→入口→乗車→写真が一周動くことを ?debug&t=0&rate=20 で確認（WebGPU 60fps、エラー0）。'
+- id: S-01
+  title: 画面の流れ（純粋な状態遷移）と確認用の URL パラメータ
+  wave: 0
+  lane: main
+  milestone: M0
+  requirements: [UI-1]
+  depends_on: [S-00]
+  paths: [src/app/flow.ts, src/app/params.ts]
+  tests: [src/app/flow.test.ts, src/app/params.test.ts]
+  status: integrated
+  notes: '2026-10-20 親が実装とテスト（flow 9件、params 3件）を作成し緑。e2e smoke 2件緑。ハーネスのテスト（スパイン・ループ・core の境界）11件も追加。'
+- id: S-10
+  title: 乗り物と時間（レール、時刻表、動きの上限の検査、キューシート、出来事の配信、部屋の先読み）
+  wave: 1
+  lane: ride
+  milestone: M0
+  requirements: [RIDE-1, RIDE-2, RIDE-3, RIDE-4, RIDE-5, RIDE-6, RIDE-7, RIDE-8]
+  depends_on: [S-00]
+  paths: [src/ride/**, scripts/build-ride-data.ts, scripts/comfort.ts, public/assets/rail.json, public/assets/cues.json, dev/ride.html, src/dev/ride/**]
+  tests: [src/ride/ride.test.ts, src/ride/cues.test.ts, src/ride/comfort.test.ts]
+  status: todo
+  notes: ''
+- id: S-11
+  title: 音楽と音（構成データ、演奏、触れた音、立体音響と残響、ガラスの音源の合成）
+  wave: 1
+  lane: audio
+  milestone: M0
+  requirements: [AUD-1, AUD-2, AUD-3, AUD-4, AUD-5, AUD-6, AUD-7]
+  depends_on: [S-00]
+  paths: [src/core/sound/**, src/audio/**, dev/audio.html, src/dev/audio/**]
+  tests: [src/core/sound/sound.test.ts, src/audio/audio.test.ts]
+  status: todo
+  notes: ''
+- id: S-12
+  title: 共通部品（ガラスの材質ライブラリ、曇りと指の文字、品質プリセットと動的な解像度）
+  wave: 1
+  lane: core-visual
+  milestone: M0
+  requirements: [CORE-3, CORE-4, REN-2]
+  depends_on: [S-00]
+  paths: [src/core/materials/**, src/core/fog/**, src/core/quality.ts, dev/core.html, src/dev/core/**]
+  tests: [src/core/quality.test.ts, src/core/fog/condensation.test.ts, src/core/materials/glass.test.ts]
+  status: todo
+  notes: ''
+- id: S-13
+  title: 画面（待ち列・入口・案内・ポーズ・ライドフォト・記録・棚・設定・乗り方・クレジット）と言語・保存
+  wave: 1
+  lane: ui
+  milestone: M1
+  requirements: [UI-1, UI-2, UI-3, UI-4, UI-5, UI-6, INT-7]
+  depends_on: [S-00]
+  paths: [src/ui/**, src/styles/**, dev/ui.html, src/dev/ui/**]
+  tests: [src/ui/store.test.ts, src/ui/i18n.test.ts, src/ui/screens.test.ts]
+  status: todo
+  notes: ''
+- id: S-14
+  title: ライドフォト（高解像度の撮影、額縁と刻印の合成、IndexedDB、保存と共有）
+  wave: 1
+  lane: photo
+  milestone: M1
+  requirements: [PHO-1, PHO-2, PHO-3]
+  depends_on: [S-00]
+  paths: [src/photo/**, dev/photo.html, src/dev/photo/**]
+  tests: [src/photo/photo.test.ts]
+  status: todo
+  notes: ''
+- id: S-15
+  title: 見回すと触れる（ドラッグ・追従・傾き、光線の交差判定、見つめて触れる、縁の光、自分で鳴る合図）
+  wave: 1
+  lane: input
+  milestone: M1
+  requirements: [INT-1, INT-2, INT-4, CAM-1, CAM-2]
+  depends_on: [S-00]
+  paths: [src/input/**, dev/input.html, src/dev/input/**]
+  tests: [src/input/look.test.ts, src/input/touch.test.ts]
+  status: todo
+  notes: ''
+- id: S-16
+  title: 画面効果（泡越しの縁、膜の通過の縞と歪み、万華鏡の折り返し、ブルーム、白い霧、暗転）
+  wave: 1
+  lane: fx
+  milestone: M0
+  requirements: [TRN-1, TRN-2]
+  depends_on: [S-00]
+  paths: [src/fx/**, dev/fx.html, src/dev/fx/**]
+  tests: [src/fx/fx.test.ts]
+  status: todo
+  notes: ''
+- id: S-20
+  title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を完成品質で
+  wave: 2
+  lane: rooms-a
+  milestone: M1
+  requirements: [INT-1, INT-3, INT-4, INT-6, TRN-1, RIDE-8]
+  depends_on: [S-10, S-12]
+  paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**]
+  tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts]
+  status: todo
+  notes: ''
+- id: S-21
+  title: 部屋B（雨の回廊と扉の分岐、万華鏡の間の金と青）
+  wave: 2
+  lane: rooms-b
+  milestone: M2
+  requirements: [INT-1, INT-3, INT-6, INT-8, RIDE-8]
+  depends_on: [S-10, S-12]
+  paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**]
+  tests: [src/rooms/rain/room.test.ts, src/rooms/kaleidoscope/room.test.ts]
+  status: todo
+  notes: ''
+- id: S-22
+  title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）
+  wave: 2
+  lane: rooms-c
+  milestone: M0
+  requirements: [INT-1, INT-3, INT-6, TRN-2, RIDE-8, REN-3]
+  depends_on: [S-10, S-12]
+  paths: [src/rooms/celestial/**, src/rooms/dawn/**, dev/rooms-c.html, src/dev/rooms-c/**]
+  tests: [src/rooms/celestial/room.test.ts, src/rooms/dawn/room.test.ts]
+  status: todo
+  notes: ''
+- id: S-23
+  title: VR（immersive-vr、座る/立つ、指先とコントローラーで触れる、外周の暗さ、曇りガラスのメニュー）と描画経路の検証
+  wave: 2
+  lane: xr
+  milestone: M0
+  requirements: [CAM-3, INT-2, REN-1]
+  depends_on: [S-15]
+  paths: [src/xr/**, e2e/xr.spec.ts, e2e/render-paths.spec.ts, dev/xr.html, src/dev/xr/**]
+  tests: [src/xr/xr.test.ts]
+  status: todo
+  notes: ''
+- id: S-24
+  title: 統合（誘導・正面へ戻す・案内・膜・暗転・撮影の配線、e2e の通し、snap、関門の計測）
+  wave: 3
+  lane: main
+  milestone: M1
+  requirements: [INT-5, TRN-3, REN-3, UI-2]
+  depends_on: [S-10, S-11, S-12, S-13, S-14, S-15, S-16]
+  paths: [src/app/**, src/main.ts, e2e/**, scripts/dev/**]
+  tests: [e2e/ride.spec.ts]
+  status: todo
+  notes: ''

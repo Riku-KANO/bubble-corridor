@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "max_runs": 12,
+  "max_no_progress": 3,
+  "max_run_minutes": 90,
+  "max_total_minutes": 600,
+  "max_parallel": 7,
+  "stop_before": []
+}

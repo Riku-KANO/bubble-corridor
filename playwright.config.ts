@@ -1,0 +1,27 @@
+import { defineConfig } from '@playwright/test';
+
+// 並行開発で複数の worktree が同時に e2e を回せるよう、ポートを環境変数で変えられるようにする
+const port = Number(process.env.E2E_PORT ?? 4174);
+
+// ブラウザのダウンロードを避け、端末にインストール済みの Chrome を使う（destroyer-game と同じ）
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 90_000,
+  fullyParallel: false,
+  reporter: [['list']],
+  use: {
+    baseURL: `http://localhost:${port}`,
+    channel: 'chrome',
+    headless: true,
+    viewport: { width: 1280, height: 720 },
+    locale: 'ja-JP',
+    launchOptions: { args: ['--use-angle=metal', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] },
+  },
+  webServer: {
+    // 毎回ビルドしてから配信する（古いビルドでテストしない）。既存サーバーは再利用しない
+    command: `pnpm build && pnpm preview --port ${port} --strictPort`,
+    url: `http://localhost:${port}`,
+    reuseExistingServer: false,
+    timeout: 180_000,
+  },
+});

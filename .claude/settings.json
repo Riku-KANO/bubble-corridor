@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm lint)",
+      "Bash(pnpm test*)",
+      "Bash(pnpm build)",
+      "Bash(pnpm snap*)",
+      "Bash(pnpm spine*)",
+      "Bash(pnpm comfort)",
+      "Bash(pnpm -s *)",
+      "Bash(scripts/check.sh*)",
+      "Bash(scripts/worktree.sh*)",
+      "Bash(node scripts/*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)"
+    ],
+    "deny": [
+      "Bash(git push*)",
+      "Bash(pnpm cf:deploy*)",
+      "Bash(npx wrangler deploy*)",
+      "Bash(rm -rf /*)"
+    ]
+  }
+}

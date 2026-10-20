@@ -1,0 +1,13 @@
+# サプライチェーン対策（pnpm 11）。destroyer-game と同じ方針
+# 公開から3日未満のバージョンは採用しない（乗っ取り直後の悪性リリース対策）
+minimumReleaseAge: 4320
+# 以前より弱い公開経路（provenance なし等）へのダウングレードを拒否
+trustPolicy: no-downgrade
+# git や tarball URL など registry 外のサブ依存を拒否
+blockExoticSubdeps: true
+# 未承認のビルドスクリプトがあればインストールを失敗させる
+strictDepBuilds: true
+allowBuilds:
+  esbuild: true
+trustPolicyExclude:
+  - 'chokidar@4.0.3'

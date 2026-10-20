@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.wrangler/
+.cloudflare/
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+playwright-report/
+test-results/
+.DS_Store
+*.blend1
+# 並行開発用の git worktree
+.claude/worktrees/
+# 撮影・計測の出力（Read で開いて確かめる。git 管理外）
+.snaps/
+# 開発ループの実行状態（checkout ごと）
+process/.loop-state.json
