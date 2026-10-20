@@ -57,8 +57,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/materials/**, src/core/fog/**, src/core/quality.ts, dev/core.html, src/dev/core/**]
   tests: [src/core/quality.test.ts, src/core/fog/condensation.test.ts, src/core/materials/glass.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（quality 13、condensation 8、glass 7）を作成。赤の証跡: 9 failed。glass の7件は STUB が契約を満たすため初めから緑 → CORE-3 の受け入れは dev/core.html の snap と reviewer の目視で行う。実装 消費 1/3 2026-10-20 実装 1/3 で緑（quality 12・condensation 8・glass 8、全体51件、check.sh --quick ALL OK、テスト無変更）。確認ページを WebGPU・WebGL2 で撮影（.snaps/core/）。足した契約: GlassHandle.pulse の第2引数 origin、CondensationOptions.onDraw。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 波紋の距離の割り算でカメラと同じ奥行きの物が NaN（ゴンドラの殻の虹色が消える・ちらつく）、P1 内側から見ると全画面の薄紫のヴェール（正面の寄与を下げ縁だけで）、P1 premultiplied のブレンドで霧の中のガラスが白く浮く、P1 垂直同期の画面で動的な解像度が下がったまま戻らない。P2 固定の擬似照明（夜明けの光）が共有部品に入っている → 部屋ごとに設定できる口、P2 材質1つ約5.5ms の組み立て → 共有の道。親が core への足し算を承認（環境の setter、共有の材質、閃光の強さ、既定の品質）。実装 消費 2/3'
+  status: green
+  notes: '2026-10-20 親がテスト（quality 13、condensation 8、glass 7）を作成。赤の証跡: 9 failed。glass の7件は STUB が契約を満たすため初めから緑 → CORE-3 の受け入れは dev/core.html の snap と reviewer の目視で行う。実装 消費 1/3 2026-10-20 実装 1/3 で緑（quality 12・condensation 8・glass 8、全体51件、check.sh --quick ALL OK、テスト無変更）。確認ページを WebGPU・WebGL2 で撮影（.snaps/core/）。足した契約: GlassHandle.pulse の第2引数 origin、CondensationOptions.onDraw。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 波紋の距離の割り算でカメラと同じ奥行きの物が NaN（ゴンドラの殻の虹色が消える・ちらつく）、P1 内側から見ると全画面の薄紫のヴェール（正面の寄与を下げ縁だけで）、P1 premultiplied のブレンドで霧の中のガラスが白く浮く、P1 垂直同期の画面で動的な解像度が下がったまま戻らない。P2 固定の擬似照明（夜明けの光）が共有部品に入っている → 部屋ごとに設定できる口、P2 材質1つ約5.5ms の組み立て → 共有の道。親が core への足し算を承認（環境の setter、共有の材質、閃光の強さ、既定の品質）。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。殻の内側の画面の隅 (53,73,112)→(5,27,72)（殻なし (0,15,60)）。垂直同期で 100ms の停止3回でも倍率 1.00 のまま、重い場面の後は約21秒で回復。足した口: face、setGlassLighting、sharedGlass、setGlassFlashScale、setDefaultGlassTier、minFontPx。レビュー 消費 2/2'
 - id: S-13
   title: 画面（待ち列・入口・案内・ポーズ・ライドフォト・記録・棚・設定・乗り方・クレジット）と言語・保存
   wave: 1
