@@ -114,6 +114,17 @@ slices:
   tests: [scripts/blender.test.ts]
   status: red
   notes: '2026-10-20 親がテスト12件（scripts/blender.test.ts、合成のらせんのレールとキューで往復・プレビズ・静止画・面の削除・焼き込み・命名と extras）を作成。赤の証跡: vitest run scripts/blender.test.ts → previz.py がなく beforeAll で失敗（12件 skip 扱い）。SKIP_BLENDER=1 で 12 skipped。実装 消費 1/3 2026-10-20 実装 1/3 で緑（blender.test 12件 約10秒、check --quick ALL OK、テスト無変更）。往復の誤差: 点 0.03mm、時刻表 0.23mm、区間 0.2mm。マーカーの名前は「<id> in=<区間> [k=v]」。面の削除は実寸で 4.5秒。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 ライトマップが 16bit の PNG（約3.8倍）。P2 gentleY を勝手に作る（ADR-0008 違反）、マーカーの検査なし、フレーム範囲の変更で壊れたデータ、1.0 を超える光が飽和、glass が光線を遮る、共有メッシュを黙ってコピー、config の写しのずれ。親が写しの検査テスト（blender-constants.test.ts、速い検査で回る）を追加し赤を確認。実装 消費 2/3 2026-10-20 実装 2/3 で緑（blender 18件、check --quick ALL OK）。ライトマップ 8bit（2048px で約1.8MB、以前 8.7MB）、sun 0.5〜8 で飽和せず lightmap_scale が比例、誤ったマーカー6件と範囲外2件で止まる、シーンの範囲を変えても byte 単位で同じ書き出し。common VERSION 0.2.0。レビュー 消費 2/2 2026-10-20 レビュー2巡目 request_changes（P2 1件: 99.5 百分位で小さな強い光がつぶれる）。ほかは解消。実装 消費 3/3（最後）'
+- id: S-18
+  title: 共通部品の和集合（案1の src/core 0.3.0 を取り込み、quality.ts のぶつかりを整理し、曲線を glassEase にそろえて 0.4.0 に）
+  wave: 2
+  lane: core-union
+  milestone: M0
+  requirements: [CORE-1, CORE-2, CORE-5]
+  depends_on: [S-11, S-12]
+  paths: [src/core/**, src/app/**, src/contracts/room.ts, src/rooms/testing.ts, src/input/look.ts, src/gondola/**, src/rooms/placeholder.ts, scripts/check-core.ts]
+  tests: [scripts/core-union.test.ts]
+  status: todo
+  notes: '2026-10-21 発案者の判断「和集合で統合」。案1のセッションが並行で src/core を 0.3.0（glass/、perf/、transition/、renderer・bench・params・scene・quality）まで作っていた。こちらのリポジトリだけを触る'
 - id: S-20
   title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を Blender で造形・焼き込みし、完成品質で
   wave: 2
