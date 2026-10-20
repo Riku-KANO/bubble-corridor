@@ -22,7 +22,7 @@ const DEG = Math.PI / 180;
 /** 時刻表の細かさ（秒）。createRide が点の間を滑らかに補う */
 const TIMELINE_DT = 0.25;
 /** 加速度の設計の上限（m/s²）。テストの 0.12 に余裕を残す。cosine の加減速の山 = |Δv|·π/(2·時間) */
-const ACCEL_DESIGN_MAX = 0.11;
+const ACCEL_DESIGN_MAX = MOTION.driftAccelMax;
 
 // ── 時刻の基準（config の小節から） ───────────────────────────────
 const startT = (id: SectionId) => SECTIONS.find((s) => s.id === id)!.startBar * SEC_PER_BAR;
@@ -50,7 +50,7 @@ const V_HIGHLIGHT = MOTION.highlightSpeed;
 const V_DOORS = MOTION.doorsSpeed;
 /** 大きな速さの変化にかける秒数（漂う感じを保つ）と、小さな変化（0.35 m/s ほど）にかける秒数 */
 const RAMP = MOTION.driftRampSec;
-const RAMP_SMALL = Math.round(MOTION.driftRampSec * 0.75);
+const RAMP_SMALL = MOTION.driftRampSmallSec;
 /** 部屋に入った直後、膜の前後の遅い速さを保つ秒数 */
 const ENTRY_HOLD = 8;
 /** 見どころの前後で遅い速さを保つ秒数（見どころの時刻の前 / 後） */
@@ -523,6 +523,10 @@ export interface DesignInfo {
   /** 見どころの時刻のゴンドラの位置（物はこの点を基準に置く） */
   readonly highlights: Readonly<Record<HighlightName, Landmark>>;
   /** 乗り場のホール（始点・北の門・降車の門を通る円） */
+  /**
+   * 乗り場のホールの目安の円（2つの門と乗り場の始点を通る）。**壁ではない**: 始点ではゴンドラの中心が円周上にあるので、
+   * 壁は物との最短距離（泡の半径＋0.5m）だけ外側に置くこと。
+   */
   readonly hall: { readonly x: number; readonly z: number; readonly radius: number };
   /**
    * 天球の中心（9:50 のゴンドラの位置）と、入口の膜・出口の膜までの距離（3D、m）。
@@ -660,7 +664,7 @@ function designAll(): { data: RideData; info: DesignCore } {
   for (const sec of sections) {
     if (sec.id === 'platform' || sec.id === 'departure') continue;
     const avg = (sec.s1 - sec.s0) / (SECTIONS.find((x) => x.id === sec.id)!.bars * SEC_PER_BAR);
-    if (avg < 0.8 || avg > MOTION.cruiseMax) problems.push(`区間 ${sec.id}: 平均 ${avg.toFixed(2)} m/s が 0.8〜${MOTION.cruiseMax} の外`);
+    if (avg < MOTION.roomAverageMin || avg > MOTION.cruiseMax) problems.push(`区間 ${sec.id}: 平均 ${avg.toFixed(2)} m/s が ${MOTION.roomAverageMin}〜${MOTION.cruiseMax} の外`);
   }
 
   // 輪の閉じ具合（脚の終わりの水平の位置）

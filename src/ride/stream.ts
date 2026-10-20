@@ -1,16 +1,16 @@
 // 部屋の先読みの計画（RIDE-7）。今の部屋にいる間に次の部屋を読み込み、2つ前の部屋は解放する。
 // 膜の越しに次の部屋が見え（膜の15秒前から）、通り抜けた後に振り返っても前の部屋が空にならない（膜の10秒後まで）。
 // 夜明けの岸では朝日の誘導（見どころの3秒前）から、降車の乗り場を遠くに描く（遠くに最初の乗り場が見える）。
-import { LURE_LEAD_SEC, MOMENT_BARS, RIDE_DURATION, SEC_PER_BAR } from '../config';
+import { LURE_LEAD_SEC, MOMENT_BARS, RIDE_DURATION, SEC_PER_BAR, STREAMING } from '../config';
 import { ROOM_OF_SECTION, SECTION_IDS } from '../contracts/ids';
 import type { RoomId } from '../contracts/ids';
 import type { Ride } from '../contracts/ride';
 import { sectionIndexAt } from './rail';
 
 /** 次の部屋を描き始めるのは膜のこの秒数前 */
-const NEXT_VISIBLE_BEFORE_SEC = 15;
+const NEXT_VISIBLE_BEFORE_SEC = STREAMING.aheadSec;
 /** 前の部屋を描き続けるのは膜のこの秒数後まで */
-const PREV_VISIBLE_AFTER_SEC = 10;
+const PREV_VISIBLE_AFTER_SEC = STREAMING.behindSec;
 /** 朝日の誘導の時刻。夜明けの岸の遠くに乗り場が見え始める */
 const SUNRISE_LURE_T = MOMENT_BARS.dawnSunrise * SEC_PER_BAR - LURE_LEAD_SEC;
 

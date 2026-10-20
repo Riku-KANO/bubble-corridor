@@ -19,8 +19,8 @@ export interface RideData {
    */
   readonly timeline: readonly { readonly t: number; readonly s: number }[];
   /**
-   * 穏やかモードで使う高さの点列（rail.points と同じ数）。なければ standard と同じ。
-   * いまは持たない（レールは1本。標準の動きを穏やかの上限以内に設計する。ADR-0008）
+   * 使わない（ADR-0008: レールは1本。標準の動きを穏やかの上限以内に設計する）。
+   * 古いデータとの互換のために型だけ残す。createRide は読まない。
    */
   readonly gentleY?: readonly number[];
   /** 区間ごとのレール上の範囲（m） */
