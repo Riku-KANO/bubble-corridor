@@ -3,6 +3,7 @@
 //   ?mode=follow   追従モードで始める       ?dwell=0.8      見つめる秒（0.8 / 1.2 / 2.0）
 //   ?gyro          端末の傾きで見回す       ?move=0         ゴンドラを止める
 //   ?t=20          乗車の 20 秒の位置から   ?webgl         WebGL2 で描く
+//   ?fov=90        視野角（60〜90）。ドラッグの感度がこれに合う
 import * as THREE from 'three/webgpu';
 import { dot, float, normalView, positionViewDirection, pow, saturate, uniform } from 'three/tsl';
 import { CAMERA, INTERACTION } from '../../config';
@@ -26,6 +27,7 @@ const startMode = oneOf(q.get('mode'), ['drag', 'follow'] as const, 'drag');
 const startDwell = oneOf(Number(q.get('dwell')), INTERACTION.gazeDwellChoices, INTERACTION.gazeDwellSec);
 const startGyro = q.has('gyro') && q.get('gyro') !== '0';
 const startMove = q.get('move') !== '0';
+const startFov = num(Number(q.get('fov')), CAMERA.fovDeg, CAMERA.fovMinDeg, CAMERA.fovMaxDeg);
 const startT = num(Number(q.get('t')), 0, 0, CORRIDOR_LENGTH / SPEED);
 
 // ── 描画 ──
@@ -40,7 +42,7 @@ document.body.prepend(canvas);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1b2230);
 scene.fog = new THREE.Fog(0x1b2230, 30, 90);
-const camera = new THREE.PerspectiveCamera(CAMERA.fovDeg, innerWidth / innerHeight, 0.05, 200);
+const camera = new THREE.PerspectiveCamera(startFov, innerWidth / innerHeight, 0.05, 200);
 const grid = new THREE.GridHelper(160, 80, 0x4a5a78, 0x2c3850);
 grid.position.y = -2.2;
 scene.add(grid);
@@ -142,6 +144,8 @@ const ring: [string, number, number, number][] = [
 for (const [name, yaw, pitch, color] of ring) {
   addBall({ id: `ring/${name}`, kind: 'hanging-bubble', section: 'platform', pos: around(yaw, pitch, 4.5), radius: 0.5, color, idleChime: false, enabled: true });
 }
+// 遠くの物（22m）。見つめて触れる距離（物の表面まで gazeMaxDistance）には入るが、縁は光らない
+addBall({ id: 'far/22', kind: 'bud', section: 'platform', pos: around(25, 12, 22), radius: 1.2, color: 0xffd0a0, idleChime: false, enabled: true });
 // 回廊: ゴンドラが進むと順に近づく（縁の光 → 自分で鳴る合図）。奇数番は idleChime なし
 const palette = [0xffd89a, 0x9ad8ff, 0xff9ac8, 0xb8ff9a, 0xd09aff, 0xffb38a, 0x8affd9, 0xfff29a, 0x9ab4ff, 0xffa0a0];
 for (let i = 0; i < 10; i++) {
@@ -177,7 +181,7 @@ let rideT = startT;
 /** ゴンドラが進んだ距離（m） */
 let travel = startT * SPEED;
 const deps = { element: canvas, events: bus, now: () => rideT };
-const look = createLookControl(deps, { mode: startMode, gyro: false });
+const look = createLookControl(deps, { mode: startMode, gyro: false, fovDeg: startFov });
 const touch = createTouchInput(deps);
 touch.setGazeDwell(startDwell);
 look.setEnabled(true);
@@ -257,9 +261,17 @@ function addButton(label: string, id: string, onClick: () => void) {
 
 let mode = startMode;
 let gyro = false;
+let fov: number = startFov;
+const applyLook = () => look.setOptions({ mode, gyro, fovDeg: fov });
 addSelect('見回し', 'mode', [['drag', 'ドラッグ'], ['follow', 'マウスに追従']] as const, startMode, (v) => {
   mode = v;
-  look.setOptions({ mode, gyro });
+  applyLook();
+});
+addSelect('視野角', 'fov', [['60', '60°'], ['75', '75°'], ['90', '90°']] as const, String(startFov), (v) => {
+  fov = Number(v);
+  camera.fov = fov;
+  camera.updateProjectionMatrix();
+  applyLook();
 });
 addSelect('見つめる', 'dwell', INTERACTION.gazeDwellChoices.map((s) => [String(s), `${s} 秒`] as const), String(startDwell), (v) => touch.setGazeDwell(Number(v)));
 panel.append(document.createElement('br'));
@@ -278,7 +290,7 @@ const gyroBox = addCheck('端末の傾き', 'gyro', false, (on) => {
     }
     gyro = on;
     gyroBox.checked = on;
-    look.setOptions({ mode, gyro });
+    applyLook();
   })();
 });
 addCheck('ゴンドラが進む', 'move', startMove, (v) => (moving = v));
@@ -295,14 +307,37 @@ panel.append(status);
 if (startGyro) {
   gyro = true;
   gyroBox.checked = true;
-  look.setOptions({ mode, gyro });
+  applyLook();
 }
 
 // ── 確認用の窓口（Playwright から使う） ──
 const projected = new THREE.Vector3();
 const ballOf = (id: string) => balls.find((b) => b.touchable.id === id);
+/** 毎フレームの向きの記録（急な振れの確認用。dt はそのフレームで look.update に渡した秒） */
+const traceLog: { dt: number; yaw: number; pitch: number }[] = [];
+let tracing = false;
 const hook = {
   ready: true,
+  /** 記録を始める（毎フレームの yaw・pitch・dt） */
+  traceStart() {
+    traceLog.length = 0;
+    tracing = true;
+  },
+  /** 記録を止めて、フレームごとの向きの変化の最大（度）と、角速度の最大（度/秒）を返す */
+  traceStop() {
+    tracing = false;
+    let maxStepYaw = 0;
+    let maxStepPitch = 0;
+    let maxSpeed = 0;
+    for (let i = 1; i < traceLog.length; i++) {
+      const dy = Math.abs(traceLog[i].yaw - traceLog[i - 1].yaw) / DEG;
+      const dp = Math.abs(traceLog[i].pitch - traceLog[i - 1].pitch) / DEG;
+      maxStepYaw = Math.max(maxStepYaw, dy);
+      maxStepPitch = Math.max(maxStepPitch, dp);
+      if (traceLog[i].dt > 0) maxSpeed = Math.max(maxSpeed, Math.hypot(dy, dp) / traceLog[i].dt);
+    }
+    return { frames: traceLog.length, maxStepYaw, maxStepPitch, maxSpeed };
+  },
   backend,
   look: look.look,
   touchLog,
@@ -373,6 +408,7 @@ renderer.setAnimationLoop(() => {
   const z = -travel;
   camera.position.set(0, EYE_HEIGHT, z);
   look.update(dt);
+  if (tracing) traceLog.push({ dt, yaw: look.look.yaw, pitch: look.look.pitch });
   camera.rotation.set(look.look.pitch, look.look.yaw, 0, 'YXZ');
   camera.updateMatrixWorld();
   touch.update(rideT, dt, camera, [0, 0, z]);

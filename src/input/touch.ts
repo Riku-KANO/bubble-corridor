@@ -18,14 +18,16 @@ const REWIND_SEC = 0.5;
 const MAX_DT = 0.25;
 /** setHighlight を呼び直す最小の変化量（毎フレーム呼ばないため） */
 const HIGHLIGHT_STEP = 0.005;
+/** 見つめている物から視線が外れても、この秒数までは数え直さない（手の震えや傾きのゆらぎで途切れないように） */
+const GAZE_GRACE_SEC = 0.15;
 
 /** 触れられる物 1 つぶんの、入力側で覚えておく状態 */
 interface Entry {
   readonly t: Touchable;
   /** 最後に setHighlight した値 */
   level: number;
-  /** ゴンドラから近い（縁が光る・見つめて触れられる）か。update で毎フレーム決める */
-  near: boolean;
+  /** 見つめて触れられる距離（gazeMaxDistance、物の表面まで）にあるか。update で毎フレーム決める */
+  gazeable: boolean;
   touched: boolean;
   chimed: boolean;
   /** 最後に触れた乗車の秒 */
@@ -67,6 +69,8 @@ export function createTouchInput(deps: InputDeps): TouchInput {
   let gazeEntry: Entry | null = null;
   let gazeTime = 0;
   let gazeFired = false;
+  /** 見つめていた物から視線が外れている時間 */
+  let gazeAway = 0;
 
   // ── 押している指（またはマウス） ──
   let press: { id: number; x: number; y: number; moved: boolean } | null = null;
@@ -82,7 +86,7 @@ export function createTouchInput(deps: InputDeps): TouchInput {
 
   /**
    * 設定済みの光線で、有効な物のうち最も手前の物を探す（見つかった点は hitPoint に入る）。
-   * onlyNear のときは、ゴンドラから近い物だけに当てる（見つめるは毎フレーム呼ぶので先に絞る）。
+   * onlyNear のときは、見つめて触れられる距離にある物だけに当てる（見つめるは毎フレーム呼ぶので先に絞る）。
    */
   function pick(onlyNear: boolean): Entry | null {
     let best: Entry | null = null;
@@ -90,7 +94,7 @@ export function createTouchInput(deps: InputDeps): TouchInput {
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
       if (!e.t.enabled) continue;
-      if (onlyNear && !e.near) continue;
+      if (onlyNear && !e.gazeable) continue;
       if (!isVisible(e.t.object)) continue;
       hits.length = 0;
       raycaster.intersectObject(e.t.object, true, hits);
@@ -172,7 +176,15 @@ export function createTouchInput(deps: InputDeps): TouchInput {
     gazeEntry = null;
     gazeTime = 0;
     gazeFired = false;
+    gazeAway = 0;
   }
+
+  // 新しい乗車の区切り。update の時刻の巻き戻しでも気づくが、乗車が終わった時点で確実に捨てる
+  const offRideEnd = events.on('rideEnd', () => {
+    epoch++;
+    lastT = -Infinity;
+    resetGaze();
+  });
 
   return {
     setTouchables(list) {
@@ -181,9 +193,11 @@ export function createTouchInput(deps: InputDeps): TouchInput {
       for (const t of list) {
         let e = states.get(t);
         if (!e) {
-          e = { t, level: 0, near: false, touched: false, chimed: false, lastTouchAt: -Infinity, epoch };
+          e = { t, level: 0, gazeable: false, touched: false, chimed: false, lastTouchAt: -Infinity, epoch };
           states.set(t, e);
         }
+        // 最初の update（描画より前）でも距離が正しく出るよう、いまの位置を matrixWorld に反映しておく
+        t.object.updateWorldMatrix(true, false);
         next.push(e);
       }
       entries = next;
@@ -209,56 +223,61 @@ export function createTouchInput(deps: InputDeps): TouchInput {
       const gy = gondola[1];
       const gz = gondola[2];
       const hd = INTERACTION.highlightDistance;
-      const hd2 = hd * hd;
-      const cd2 = INTERACTION.idleChimeDistance * INTERACTION.idleChimeDistance;
-      let anyNear = false;
+      const cd = INTERACTION.idleChimeDistance;
+      const gd = INTERACTION.gazeMaxDistance;
+      let anyGazeable = false;
 
       for (let i = 0; i < entries.length; i++) {
         const e = entries[i];
         entryFresh(e);
         const te = e.t;
-        // 物の原点（ワールド）までの距離。matrixWorld は直近の描画で更新済み
+        // 物の原点（ワールド）から物の表面までの距離。matrixWorld は直近の描画で更新済み
         const m = te.object.matrixWorld.elements;
         const dx = m[12] - gx;
         const dy = m[13] - gy;
         const dz = m[14] - gz;
-        const d2 = dx * dx + dy * dy + dz * dz;
-        const live = te.enabled;
+        const d = Math.max(0, Math.sqrt(dx * dx + dy * dy + dz * dz) - te.radius);
+        // 無効な物、祖先ごと見えない物は、光らせず・鳴らさず・見つめても触れない。見えるかどうかは、関わる距離のときだけ調べる
+        let live = te.enabled;
+        if (live && (d < gd || e.level !== 0)) live = isVisible(te.object);
 
-        const near = live && d2 < hd2;
-        e.near = near;
-        if (near) anyNear = true;
+        e.gazeable = live && d <= gd;
+        if (e.gazeable) anyGazeable = true;
         // 縁の光: 近いほど強く、遠い端ではかすかに
-        const level = near ? 1 - smoothstep(0, hd, Math.sqrt(d2)) : 0;
+        const level = live && d < hd ? 1 - smoothstep(0, hd, d) : 0;
         if (Math.abs(level - e.level) >= HIGHLIGHT_STEP || (level === 0 && e.level !== 0)) {
           e.level = level;
           te.setHighlight(level);
         }
 
         // 触れられないまま近づいた物は、一度だけ自分で鳴る
-        if (live && te.idleChime && !e.touched && !e.chimed && d2 < cd2) {
+        if (live && te.idleChime && !e.touched && !e.chimed && d < cd) {
           e.chimed = true;
           idleHandler?.(te);
         }
       }
 
-      // 見つめて触れる: 画面の中央の光線で当たる、近くの有効な物にだけ時間をためる
+      // 見つめて触れる: 画面の中央の光線で当たる、見つめて触れられる距離の有効な物にだけ時間をためる
       let target: Entry | null = null;
-      if (anyNear) {
+      if (anyGazeable) {
         raycaster.setFromCamera(center, cam);
         target = pick(true);
       }
-      if (target === null || target !== gazeEntry) {
+      const step = Math.min(Math.max(dt, 0), MAX_DT);
+      if (target !== null && target === gazeEntry) {
+        gazeAway = 0;
+        gazeTime += step;
+      } else if (target === null && gazeEntry !== null && gazeAway + step < GAZE_GRACE_SEC) {
+        gazeAway += step; // 視線が少し外れただけ。時間は保ったまま、外れている間は進めない
+      } else {
         gazeEntry = target;
-        gazeTime = 0;
+        gazeTime = target ? step : 0;
         gazeFired = false;
+        gazeAway = 0;
       }
-      if (gazeEntry) {
-        gazeTime += Math.min(Math.max(dt, 0), MAX_DT);
-        if (!gazeFired && gazeTime >= dwellSec) {
-          gazeFired = true; // 見つめ続けても繰り返さない。外れて戻れば再び触れる
-          fire(gazeEntry, 'gaze', hitPoint);
-        }
+      if (gazeEntry && target === gazeEntry && !gazeFired && gazeTime >= dwellSec) {
+        gazeFired = true; // 見つめ続けても繰り返さない。外れて戻れば再び触れる
+        fire(gazeEntry, 'gaze', hitPoint);
       }
     },
 
@@ -284,6 +303,7 @@ export function createTouchInput(deps: InputDeps): TouchInput {
       el.removeEventListener('pointerup', onPointerUp);
       el.removeEventListener('pointercancel', onPointerCancel);
       el.removeEventListener('lostpointercapture', onPointerCancel);
+      offRideEnd();
       entries = [];
       press = null;
       camera = null;
