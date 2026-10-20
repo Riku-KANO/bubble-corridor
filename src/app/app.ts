@@ -126,7 +126,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
   // ── 入力 ──
   const inputDeps = { element: canvas, events: bus, now: () => clock.time };
-  const look = createLookControl(inputDeps, { mode: settings.lookMode, gyro: settings.gyro });
+  const look = createLookControl(inputDeps, { mode: settings.lookMode, gyro: settings.gyro, fovDeg: settings.fov });
   const touch = createTouchInput(inputDeps);
   touch.setGazeDwell(settings.gazeDwellSec);
   touch.onIdleChime((t) => audio.chime({ id: t.id, kind: t.kind, section: t.section, position: worldPos(t.object) }));
@@ -241,7 +241,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   function applySettings() {
     camera.fov = settings.fov;
     camera.updateProjectionMatrix();
-    look.setOptions({ mode: settings.lookMode, gyro: settings.gyro });
+    look.setOptions({ mode: settings.lookMode, gyro: settings.gyro, fovDeg: settings.fov });
     touch.setGazeDwell(settings.gazeDwellSec);
     audio.setVolumes(settings.volumes);
     xr.setVignette(settings.vignette);
@@ -293,7 +293,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
     dispatcher.reset(t0);
     rooms.forEachReady((m) => m.setDoor?.(door ?? DEFAULT_DOOR));
     clock.start(t0);
-    look.recenter();
+    // 乗車の頭は即座に正面へ（前の乗車の向きを引きずらない）
+    look.recenter(undefined, 0);
   }
 
   async function endRide() {
@@ -502,7 +503,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
     fx.state.membrane = membraneAt(t);
     fx.state.brightness = riding ? blackoutBrightness(t) : 1;
     fx.state.kaleidoscope = riding ? kaleidoscopeAmount(t) : 0;
-    if (settings.comfort === 'standard' && riding) fx.state.kaleidoscopeAngle += dt * 0.15;
+    // 模様の回転は時刻から決める（穏やかモードでは止める）
+    fx.state.kaleidoscopeAngle = riding && settings.comfort === 'standard' ? Math.max(0, t - sectionStart('kaleidoscope')) * 0.15 : 0;
 
     // 音の聞き手
     camera.getWorldPosition(camWorld);
