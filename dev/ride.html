@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ride 確認ページ</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0e13;
+        --panel: #121722;
+        --line: #2a3345;
+        --text: #dfe6f2;
+        --muted: #8b97ab;
+        --accent: #ffd479;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 'Noto Sans JP', system-ui, sans-serif;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .sub {
+        margin: 0 0 12px;
+        color: var(--muted);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 640px) minmax(320px, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .controls input[type='range'] {
+        width: 100%;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        align-items: center;
+      }
+      button,
+      select {
+        background: #1c2433;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 4px 10px;
+        font: inherit;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      td,
+      th {
+        padding: 2px 8px 2px 0;
+        text-align: left;
+        font-weight: 400;
+        white-space: nowrap;
+      }
+      th {
+        color: var(--muted);
+      }
+      .num {
+        font-variant-numeric: tabular-nums;
+      }
+      .ok {
+        color: #7fe0a8;
+      }
+      .ng {
+        color: #ff8a8a;
+      }
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ride 確認ページ</h1>
+    <p class="sub">レールの上から見た地図（区間ごとの色）、速度と高さのグラフ、時刻のスライダー。?t=秒 &amp; mode=gentle で開ける。</p>
+    <div class="layout">
+      <div class="stack">
+        <div class="panel">
+          <h2>地図（上から。上が北 = -Z、右が東 = +X）</h2>
+          <canvas id="map" width="640" height="640"></canvas>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="panel">
+          <div class="controls">
+            <input id="time" type="range" min="0" max="780" step="0.1" value="0" />
+            <span class="num" id="timeLabel">0:00.0</span>
+          </div>
+          <div class="row">
+            <button id="play" type="button">再生</button>
+            <label>速さ <select id="rate"><option value="1">×1</option><option value="10" selected>×10</option><option value="30">×30</option></select></label>
+            <label>モード <select id="mode"><option value="standard">標準</option><option value="gentle">穏やか</option></select></label>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>いま</h2>
+          <table id="now"></table>
+        </div>
+        <div class="panel">
+          <h2>速度（m/s）。帯は 1.0〜2.0、点線は見どころの 0.5</h2>
+          <canvas id="speed" width="640" height="210"></canvas>
+        </div>
+        <div class="panel">
+          <h2>高さ（m）。実線は標準、点線は穏やか</h2>
+          <canvas id="height" width="640" height="190"></canvas>
+        </div>
+        <div class="panel">
+          <h2>動きの上限の検査</h2>
+          <table id="comfort"></table>
+        </div>
+        <div class="panel">
+          <h2>区間（脚）</h2>
+          <table id="legs"></table>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/dev/ride/main.ts"></script>
+  </body>
+</html>
