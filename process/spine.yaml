@@ -178,8 +178,8 @@ slices:
   depends_on: [S-10, S-14, S-15, S-16, S-23]
   paths: [src/app/**, src/main.ts, src/contracts/xr.ts, src/contracts/ui.ts, scripts/dev/**]
   tests: [src/app/timeline.test.ts, src/app/idle-chime.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト（timeline 7件、idle-chime 3件）を作成。赤の証跡: ./timeline・./idle-chime が未実装で読み込み失敗。実装 消費 1/3'
 - id: S-25
   title: 統合・後半（部屋ごとのガラスの擬似照明、UiState の viewMode、音の時計と映像の確認、13分の通しの e2e、関門1・2の計測）
   wave: 3
