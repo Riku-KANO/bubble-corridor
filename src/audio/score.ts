@@ -213,16 +213,32 @@ const rawScore = raw as unknown as {
   sections: Record<string, RawSection | Record<DoorChoice, RawSection>>;
 };
 
+const GLASS_TIMBRES: ReadonlySet<string> = new Set<GlassTimbre>(['harp', 'bell', 'chime', 'bottle', 'drop', 'bowl', 'tap']);
+const PAD_TIMBRES: ReadonlySet<string> = new Set<PadTimbre>(['strings', 'choir', 'warm', 'air']);
+const REVERB_SIZES: ReadonlySet<string> = new Set<ReverbSize>(['dry', 'small', 'medium', 'large', 'huge']);
+const BEDS: ReadonlySet<string> = new Set<AmbientBed>(['water', 'air', 'rain', 'prism', 'space', 'waves']);
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isInt = (v: unknown): v is number => isNum(v) && Number.isInteger(v);
+
 const toCurve = (c: RawCurve, where: string): Curve => {
-  if (c.length === 0) fail(where, 'level が空');
+  if (!Array.isArray(c) || c.length === 0) fail(where, 'level が空');
   for (let i = 0; i < c.length; i++) {
-    if (c[i].length !== 2) fail(where, 'level は [小節, 強さ] の並び');
+    if (!Array.isArray(c[i]) || c[i].length !== 2 || !isNum(c[i][0]) || !isNum(c[i][1])) fail(where, 'level は [小節, 強さ] の並び');
+    if (c[i][1] < 0 || c[i][1] > 1) fail(where, `level の強さは 0〜1（${c[i][1]}）`);
     if (i > 0 && c[i][0] < c[i - 1][0]) fail(where, 'level の小節が昇順でない');
   }
   return c.map((p) => [p[0], p[1]] as const);
 };
 
+/**
+ * 層を検査して読む。ここで間違いを止めておく: 演奏の予定は区間ごとの小節の繰り返しで作るので、
+ * 歩幅が 0 や負だと止まらなくなり、音色の名前の打ち間違いは鳴らす段になって初めて落ちる。
+ */
 function buildLayer(r: RawLayer, bars: number, where: string): Layer {
+  if (!GLASS_TIMBRES.has(r.timbre) && !PAD_TIMBRES.has(r.timbre)) fail(where, `音色が読めない（${String(r.timbre)}）`);
+  if (!isNum(r.from) || !isNum(r.to) || !(r.from >= 0 && r.to <= bars && r.from < r.to)) fail(where, `from/to が区間（${bars} 小節）に収まらない`);
+  if (!isNum(r.vel) || !(r.vel > 0 && r.vel <= 1)) fail(where, `vel は 0 より大きく 1 以下（${String(r.vel)}）`);
   const base = {
     kind: r.kind,
     timbre: r.timbre,
@@ -231,37 +247,73 @@ function buildLayer(r: RawLayer, bars: number, where: string): Layer {
     level: toCurve(r.level, where),
     vel: r.vel,
   };
-  if (!(r.from >= 0 && r.to <= bars && r.from < r.to)) fail(where, `from/to が区間（${bars} 小節）に収まらない`);
   const num = (k: string, d?: number): number => {
     const v = r[k];
-    if (typeof v === 'number') return v;
-    if (d !== undefined) return d;
-    return fail(where, `${k} が必要`);
+    if (isNum(v)) return v;
+    if (v === undefined && d !== undefined) return d;
+    return fail(where, `${k} が必要（数）`);
   };
-  const arr = (k: string): number[] => {
+  const midi = (k: string, d?: number): number => {
+    const v = num(k, d);
+    return v >= 0 && v <= 127 ? v : fail(where, `${k} は MIDI の範囲（0〜127）`);
+  };
+  const ints = (k: string, min: number): number[] => {
     const v = r[k];
-    if (Array.isArray(v) && v.every((x) => typeof x === 'number')) return v as number[];
-    return fail(where, `${k} は数の並び`);
+    if (Array.isArray(v) && v.length > 0 && v.every((x) => isInt(x) && x >= min)) return v as number[];
+    return fail(where, `${k} は ${min} 以上の整数の並び（空にしない）`);
   };
   switch (r.kind) {
-    case 'drone':
-      return { ...base, kind: 'drone', base: num('base'), pick: arr('pick'), chunk: typeof r.chunk === 'number' ? r.chunk : undefined };
-    case 'bass': {
-      const trigger = r.trigger === 'bar' ? 'bar' : 'chord';
-      return { ...base, kind: 'bass', base: num('base'), pick: arr('pick'), trigger };
+    case 'drone': {
+      const chunk = r.chunk === undefined ? undefined : num('chunk');
+      if (chunk !== undefined && !(chunk > 0)) fail(where, 'chunk は正の数');
+      return { ...base, kind: 'drone', base: midi('base'), pick: ints('pick', 0), chunk };
     }
-    case 'arpeggio':
-      return { ...base, kind: 'arpeggio', base: num('base'), rate: num('rate'), steps: arr('steps'), dur: num('dur', num('rate') * 1.5), keep: num('keep', 1) };
-    case 'melody':
-      return { ...base, kind: 'melody', at: arr('at'), octave: num('octave', 0), stretch: num('stretch', 1), take: num('take', 99) };
+    case 'bass': {
+      if (r.trigger !== 'chord' && r.trigger !== 'bar') fail(where, `trigger は chord か bar（${String(r.trigger)}）`);
+      return { ...base, kind: 'bass', base: midi('base'), pick: ints('pick', 0), trigger: r.trigger };
+    }
+    case 'arpeggio': {
+      const rate = num('rate');
+      // 1小節（4拍）を割り切る歩幅だけ（0 や負、割り切れない値だと位置の数え方が狂う）
+      if (!(rate > 0 && rate <= 4 && Number.isInteger(4 / rate))) fail(where, `rate は 4 を割り切る正の数（${rate}）`);
+      const keep = num('keep', 1);
+      if (!(keep > 0 && keep <= 1)) fail(where, 'keep は 0 より大きく 1 以下');
+      const dur = num('dur', rate * 1.5);
+      if (!(dur > 0)) fail(where, 'dur は正の数');
+      return { ...base, kind: 'arpeggio', base: midi('base'), rate, steps: ints('steps', -1), dur, keep };
+    }
+    case 'melody': {
+      const stretch = num('stretch', 1);
+      if (!(stretch > 0)) fail(where, 'stretch は正の数');
+      const take = num('take', 99);
+      if (!(isInt(take) && take >= 1)) fail(where, 'take は 1 以上の整数');
+      const at = ints('at', 0);
+      for (const a of at) if (a < base.from || a >= base.to) fail(where, `at の小節が from/to の外（${a}）`);
+      const octave = num('octave', 0);
+      if (!isInt(octave)) fail(where, 'octave は整数');
+      return { ...base, kind: 'melody', at, octave, stretch, take };
+    }
     case 'rhythm': {
       const parts = r.parts as RhythmPart[] | undefined;
-      if (!parts || parts.length === 0) fail(where, 'parts が必要');
-      for (const p of parts) for (const s of p.steps) if (s.length !== 16) fail(where, `steps は16文字（${s}）`);
+      if (!Array.isArray(parts) || parts.length === 0) fail(where, 'parts が必要');
+      for (const p of parts) {
+        if (!GLASS_TIMBRES.has(p.timbre)) fail(where, `parts の音色が読めない（${String(p.timbre)}）`);
+        if (!isInt(p.midi) || p.midi < 0 || p.midi > 127) fail(where, 'parts の midi は MIDI の範囲');
+        if (!Array.isArray(p.steps) || p.steps.length === 0) fail(where, 'parts の steps が空');
+        for (const st of p.steps) if (!/^[0-9.]{16}$/.test(st)) fail(where, `steps は 0〜9 と . の16文字（${String(st)}）`);
+      }
       return { ...base, kind: 'rhythm', parts };
     }
-    case 'sparkle':
-      return { ...base, kind: 'sparkle', low: num('low'), high: num('high'), perBar: num('perBar'), seed: num('seed', 1) };
+    case 'sparkle': {
+      const low = midi('low');
+      const high = midi('high');
+      if (!(low <= high)) fail(where, 'low は high 以下');
+      const perBar = num('perBar');
+      if (!(perBar >= 0 && perBar <= 8)) fail(where, 'perBar は 0〜8');
+      const seed = num('seed', 1);
+      if (!isInt(seed)) fail(where, 'seed は整数');
+      return { ...base, kind: 'sparkle', low, high, perBar, seed };
+    }
     default:
       return fail(where, `層の種類が読めない（${String(r.kind)}）`);
   }
@@ -271,6 +323,7 @@ function buildSection(id: SectionId, variant: DoorChoice | undefined, r: RawSect
   const where = variant ? `${id}.${variant}` : specOverride ? 'lobby' : id;
   const spec = specOverride ?? SECTIONS.find((s) => s.id === id);
   if (!spec) fail(where, '区間が config にない');
+  if (!REVERB_SIZES.has(r.reverb)) fail(where, `reverb が読めない（${String(r.reverb)}）`);
   const key = parseKey(r.key, `${where}.key`);
   const chords = r.chords.map(([bar, name]) => ({ bar, chord: parseChord(name, `${where}.chords`) }));
   if (chords.length === 0 || chords[0].bar !== 0) fail(where, '和音は小節 0 から始める');
@@ -278,6 +331,7 @@ function buildSection(id: SectionId, variant: DoorChoice | undefined, r: RawSect
     if (chords[i].bar >= spec.bars) fail(where, `和音の小節が区間の外（${chords[i].bar}）`);
     if (i > 0 && chords[i].bar <= chords[i - 1].bar) fail(where, '和音の小節が昇順でない');
   }
+  if (r.theme && !isInt(r.theme.octave)) fail(where, 'theme.octave は整数');
   const theme: ThemeNote[] = r.theme
     ? rawScore.theme.map(([bar, beat, degree, beats]) => ({ bar, beat, midi: degreeToMidi(key, degree) + 12 * r.theme!.octave, beats }))
     : [];
@@ -291,8 +345,16 @@ function buildSection(id: SectionId, variant: DoorChoice | undefined, r: RawSect
     theme,
     layers: r.layers.map((l, i) => buildLayer(l, spec.bars, `${where}.layers[${i}]`)),
     reverb: r.reverb,
-    ambient: r.ambient.map((a, i) => ({ bed: a.bed, level: toCurve(a.level, `${where}.ambient[${i}]`) })),
+    ambient: r.ambient.map((a, i) => {
+      if (!BEDS.has(a.bed)) fail(`${where}.ambient[${i}]`, `床の名前が読めない（${String(a.bed)}）`);
+      return { bed: a.bed, level: toCurve(a.level, `${where}.ambient[${i}]`) };
+    }),
   };
+}
+
+for (const [i, n] of rawScore.theme.entries()) {
+  if (!Array.isArray(n) || n.length !== 4 || !n.every(isNum)) fail(`theme[${i}]`, '[小節, 拍, 度数, 長さ（拍）] の4つの数');
+  if (!(n[0] >= 0 && n[1] >= 0 && n[1] < 4 && Number.isInteger(n[2]) && n[3] > 0)) fail(`theme[${i}]`, '小節・拍・度数・長さの範囲が不正');
 }
 
 export const SCORE = {

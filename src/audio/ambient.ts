@@ -102,10 +102,10 @@ export function createBed(ctx: BaseAudioContext, bed: AmbientBed, dest: AudioNod
       layer(5.2, [filter(ctx, 'bandpass', 7200, 10)], 0.25, [[0.29, 0.18]]);
       break;
     case 'space': {
-      // 天球の低い響き: 深い2つの正弦波と、ごく低い雑音
+      // 天球の低い響き: 深い2つの正弦波（天球の調 E 長調の主音 E1 と5度上の B1）と、ごく低い雑音
       for (const [freq, amp] of [
-        [55, 0.5],
-        [82.5, 0.3],
+        [41.2, 0.55],
+        [61.7, 0.35],
       ] as const) {
         const o = ctx.createOscillator();
         o.frequency.value = freq;
@@ -114,7 +114,7 @@ export function createBed(ctx: BaseAudioContext, bed: AmbientBed, dest: AudioNod
         o.connect(g).connect(out);
         o.start();
         sources.push(o);
-        wobble(ctx, g.gain, 0.07 + freq / 2000, amp * 0.3, sources);
+        wobble(ctx, g.gain, 0.05 + freq / 3000, amp * 0.3, sources);
       }
       layer(3.9, [filter(ctx, 'lowpass', 220)], 0.35, [[0.05, 0.15]]);
       break;

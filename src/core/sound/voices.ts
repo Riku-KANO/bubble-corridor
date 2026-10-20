@@ -41,6 +41,8 @@ export interface Voice {
   readonly endsAt: number;
   /** 早めに止める（滑らかに消す） */
   release(when: number): void;
+  /** now（AudioContext の秒）の時点でまだ鳴っている音源（オシレーターなど）の数。同時発音の予算の数え方に使う */
+  liveSources(now: number): number;
 }
 
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
@@ -77,20 +79,39 @@ function clickBuffer(ctx: BaseAudioContext): AudioBuffer {
   return b;
 }
 
-/** 1つの音を作るための入れ物。包絡線の出口（out）→ 解除用の門（gate）→ 出力先、の順に繋ぐ */
+/** 音を鳴らす前に、使い回す雑音を作っておく（最初の1音の発音で、雑音の生成のぶん止まらないように） */
+export function prepareVoices(ctx: BaseAudioContext): void {
+  clickBuffer(ctx);
+}
+
+/** これより小さい倍音は作らない（出力が約 -42dB 以下で、曲の中ではほかの音に隠れて聞こえない。音源の数を減らす） */
+const MIN_AMP = 0.008;
+/** 減衰する倍音は、時定数の何倍で止めるか（e^-5 = 約 -43dB まで下がってから止める。止める瞬間の段差は -60dBFS 以下で聞こえない） */
+const STOP_TAUS = 5;
+
+/** 1つの音を作るための入れ物。音源 → 包絡線の出口（out）→ 出力先。解除用の門は、止めるときに初めて挟む */
 class Rig {
   readonly ctx: BaseAudioContext;
   readonly out: GainNode;
-  private readonly gate: GainNode;
+  private readonly dest: AudioNode;
   private readonly sources: AudioScheduledSourceNode[] = [];
+  /** sources と同じ並びの、止める時刻。まだ決まっていないもの（finish で一括）は Infinity */
+  private readonly stops: number[] = [];
+  private latestStop = 0;
 
   // Node で直接読めるよう、TypeScript のパラメータプロパティ（constructor(readonly x)）は使わない
   constructor(ctx: BaseAudioContext, dest: AudioNode) {
     this.ctx = ctx;
+    this.dest = dest;
     this.out = ctx.createGain();
-    this.gate = ctx.createGain();
-    this.out.connect(this.gate);
-    this.gate.connect(dest);
+    this.out.connect(dest);
+  }
+
+  private add<T extends AudioScheduledSourceNode>(s: T, stopAt = Infinity): T {
+    this.sources.push(s);
+    this.stops.push(stopAt);
+    if (stopAt !== Infinity && stopAt > this.latestStop) this.latestStop = stopAt;
+    return s;
   }
 
   osc(type: OscillatorType, freq: number, when: number): OscillatorNode {
@@ -98,8 +119,7 @@ class Rig {
     o.type = type;
     o.frequency.value = freq;
     o.start(when);
-    this.sources.push(o);
-    return o;
+    return this.add(o);
   }
 
   /** 雑音の短い打音（start の offset を音ごとに変えて、毎回同じ波形にならないようにする） */
@@ -107,8 +127,7 @@ class Rig {
     const s = this.ctx.createBufferSource();
     s.buffer = clickBuffer(this.ctx);
     s.start(when, offset % 1.5, seconds);
-    this.sources.push(s);
-    return s;
+    return this.add(s, when + seconds + 0.01);
   }
 
   /** 鳴っている間ずっと続く雑音（繰り返し再生する） */
@@ -117,39 +136,69 @@ class Rig {
     s.buffer = clickBuffer(this.ctx);
     s.loop = true;
     s.start(when, offset % 1.5);
-    this.sources.push(s);
-    return s;
+    return this.add(s);
   }
 
-  /** 減衰する倍音 1 本: 発音 → 急な立ち上がり → 指数的に減衰 */
-  partial(type: OscillatorType, freq: number, when: number, amp: number, tau: number, attack = 0.003): OscillatorNode {
-    const o = this.osc(type, freq, when);
+  /**
+   * 減衰する倍音 1 本: 発音 → 急な立ち上がり → 指数的に減衰し、減衰し切る頃（tau の7倍）に自分で止まる。
+   * 小さすぎて聞こえない倍音は作らず null を返す。
+   */
+  partial(type: OscillatorType, freq: number, when: number, amp: number, tau: number, attack = 0.003): OscillatorNode | null {
+    if (amp < MIN_AMP) return null;
+    const o = this.ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    o.start(when);
+    const stopAt = when + attack + tau * STOP_TAUS;
+    o.stop(stopAt);
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0, when);
     g.gain.linearRampToValueAtTime(amp, when + attack);
     g.gain.setTargetAtTime(0, when + attack, tau);
+    // 止める直前の 60ms でさらに絞る（残っている音を止める段差を、静かな場所でも聞こえない大きさにする）
+    g.gain.setTargetAtTime(0, stopAt - 0.06, 0.012);
     o.connect(g).connect(this.out);
-    return o;
+    return this.add(o, stopAt);
   }
 
-  /** すべての音源を stopAt に止めて、Voice を返す */
-  finish(stopAt: number, endsAt: number): Voice {
-    for (const s of this.sources) s.stop(stopAt);
-    const { ctx, gate, sources } = this;
+  /** 止まる時刻が決まっていない音源（LFO、持続する雑音など）を stopAt に止めて、Voice を返す。endsAt は最も遅い音源が止まる時刻 */
+  finish(stopAt: number, minEndsAt = 0): Voice {
+    for (let i = 0; i < this.sources.length; i++) {
+      if (this.stops[i] === Infinity) {
+        this.sources[i].stop(stopAt);
+        this.stops[i] = stopAt;
+        if (stopAt > this.latestStop) this.latestStop = stopAt;
+      }
+    }
+    const { ctx, out, dest, sources, stops } = this;
+    let released = false;
     return {
-      endsAt,
+      endsAt: Math.max(this.latestStop, minEndsAt),
       release(when) {
+        if (released) return;
+        released = true;
         const t = Math.max(when, ctx.currentTime);
-        gate.gain.cancelScheduledValues(t);
+        // 止めるときだけ門を挟んで滑らかに消す（ふだんは門を持たず、ノードが1つ少ない）
+        const gate = ctx.createGain();
+        out.disconnect();
+        out.connect(gate).connect(dest);
         gate.gain.setTargetAtTime(0, t, 0.02);
-        // 遅れて止める（0.02 秒の時定数で消え切るまで）
-        for (const s of sources) {
-          try {
-            s.stop(t + 0.15);
-          } catch {
-            // すでに止まっている音源
+        for (let i = 0; i < sources.length; i++) {
+          // 0.02 秒の時定数で消え切るまで待って止める（まだ始まっていない音源は、始まらない）
+          if (stops[i] > t + 0.15) {
+            try {
+              sources[i].stop(t + 0.15);
+              stops[i] = t + 0.15;
+            } catch {
+              // すでに止まっている音源
+            }
           }
         }
+      },
+      liveSources(now) {
+        let n = 0;
+        for (let i = 0; i < stops.length; i++) if (stops[i] > now) n++;
+        return n;
       },
     };
   }
@@ -200,7 +249,7 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
         [3, 0.09, 3],
       ];
       for (const [ratio, amp, cents] of partials) {
-        if (f * ratio > maxHz) continue;
+        if (f * ratio > maxHz || level * amp < MIN_AMP * 1.5) continue;
         const o = rig.osc('sine', f * ratio, t0);
         o.detune.value = cents;
         lfoDepth.connect(o.detune);
@@ -208,7 +257,7 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
         g.gain.value = amp;
         o.connect(g).connect(rig.out);
       }
-      return rig.finish(end + release * 2.2, end + release * 1.5);
+      return rig.finish(end + release * 2.2);
     }
     case 'bell': {
       const tau = 1.4 * pitchDecay(p.midi, 1.1) * (0.7 + 0.3 * v);
@@ -219,7 +268,7 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
         if (f * ratios[i] > maxHz) continue;
         rig.partial('sine', f * ratios[i], t0, level * amps[i], tau * taus[i]);
       }
-      return rig.finish(t0 + tau * 7, t0 + tau * 5);
+      return rig.finish(t0);
     }
     case 'chime': {
       // 風鈴: 打たれた瞬間は音程がわずかに高く、すぐに落ち着く
@@ -231,10 +280,11 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
         const fr = f * ratios[i];
         if (fr > maxHz) continue;
         const o = rig.partial('sine', fr, t0, level * amps[i], tau * taus[i]);
+        if (!o) continue;
         o.frequency.setValueAtTime(fr * 1.012, t0);
         o.frequency.exponentialRampToValueAtTime(fr, t0 + 0.02);
       }
-      return rig.finish(t0 + tau * 7, t0 + tau * 5);
+      return rig.finish(t0);
     }
     case 'bottle': {
       // 瓶をマレットで叩いたような、丸くて少しこもった音
@@ -251,20 +301,23 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
       g.gain.setValueAtTime(level * 0.55, t0);
       g.gain.setTargetAtTime(0, t0 + 0.002, 0.012);
       click.connect(bp).connect(g).connect(rig.out);
-      return rig.finish(t0 + tau * 7, t0 + tau * 5);
+      return rig.finish(t0);
     }
     case 'drop': {
       // 水滴: 音程が一瞬で上がり、ガラスに当たる高い音が重なる
       const tau = 0.13 * pitchDecay(p.midi, 0.5);
       const body = rig.partial('sine', f, t0, level, tau, 0.002);
-      body.frequency.setValueAtTime(f * 0.78, t0);
-      body.frequency.exponentialRampToValueAtTime(f, t0 + 0.035);
+      if (body) {
+        body.frequency.setValueAtTime(f * 0.78, t0);
+        body.frequency.exponentialRampToValueAtTime(f, t0 + 0.035);
+      }
       if (f * 2.5 < maxHz) rig.partial('sine', f * 2.5, t0, level * 0.26, tau * 0.45, 0.002);
       if (f * 4.3 < maxHz) rig.partial('sine', f * 4.3, t0, level * 0.12, tau * 0.25, 0.001);
-      return rig.finish(t0 + tau * 8, t0 + tau * 6);
+      return rig.finish(t0);
     }
     case 'bowl': {
-      const tau = 3.6 * pitchDecay(p.midi, 0.4);
+      // 低い音ほど長く響くが、3 秒を超えると次の和音の低音と重なって濁り、音源も長く残る
+      const tau = Math.min(3, 3.6 * pitchDecay(p.midi, 0.4));
       const attack = 0.04;
       const ratios = [1, 1.004, 2.71, 5.18];
       const amps = [1, 0.8, 0.26, 0.08];
@@ -273,14 +326,17 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
         if (f * ratios[i] > maxHz) continue;
         rig.partial('sine', f * ratios[i], t0, level * amps[i] * 0.7, tau * taus[i], attack);
       }
-      return rig.finish(t0 + tau * 7, t0 + tau * 5);
+      return rig.finish(t0);
     }
     case 'tap': {
       const low = p.midi < 60;
       const tau = low ? 0.16 : 0.05;
-      const body = rig.partial('sine', f, t0, level * (low ? 1 : 0.35), tau, 0.001);
-      body.frequency.setValueAtTime(f * 2.2, t0);
-      body.frequency.exponentialRampToValueAtTime(f, t0 + 0.045);
+      // 高い音は「ちっ」という雑音だけで足りる（胴鳴りの音程は聞こえない）ので、オシレーターを作らない
+      const body = low ? rig.partial('sine', f, t0, level, tau, 0.001) : null;
+      if (body) {
+        body.frequency.setValueAtTime(f * 2.2, t0);
+        body.frequency.exponentialRampToValueAtTime(f, t0 + 0.045);
+      }
       const click = rig.click(t0, 0.08, p.midi * 0.53);
       const filter = ctx.createBiquadFilter();
       filter.type = low ? 'bandpass' : 'highpass';
@@ -290,7 +346,7 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
       g.gain.setValueAtTime(level * (low ? 0.4 : 0.9), t0);
       g.gain.setTargetAtTime(0, t0 + 0.001, low ? 0.01 : 0.022);
       click.connect(filter).connect(g).connect(rig.out);
-      return rig.finish(t0 + tau * 8 + 0.1, t0 + tau * 6 + 0.1);
+      return rig.finish(t0);
     }
   }
 }
@@ -367,8 +423,7 @@ export function playPad(
       sum.gain.value = 0.5;
       const formants: [number, number, number][] = [
         [730, 6, 1],
-        [1090, 7, 0.55],
-        [2440, 9, 0.25],
+        [1090, 7, 0.6],
       ];
       for (const [fc, q, amp] of formants) {
         const bp = ctx.createBiquadFilter();
@@ -376,7 +431,7 @@ export function playPad(
         bp.frequency.value = fc;
         bp.Q.value = q;
         const g = ctx.createGain();
-        g.gain.value = amp * 2.2;
+        g.gain.value = amp * 2.6;
         sum.connect(bp).connect(g).connect(rig.out);
       }
       for (const m of p.midis) {
@@ -419,5 +474,5 @@ export function playPad(
       break;
     }
   }
-  return rig.finish(end + release * 2.4, end + release * 1.6);
+  return rig.finish(end + release * 2.4);
 }

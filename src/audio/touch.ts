@@ -6,6 +6,7 @@ import { nextGridTime } from '../core/sound/grid';
 import { nearestPitch, touchCandidates } from '../core/sound/scale';
 import type { GlassTimbre } from '../core/sound/voices';
 import { hash01 } from './conductor';
+import { touchDuckAt } from './cues';
 import { harmonyAt } from './score';
 import type { Harmony } from './score';
 
@@ -68,7 +69,8 @@ export function planTouch(
   const slot = Math.round(at / GRID_SEC);
   const around = profile.center + (hash01(slot, kindCode(e.kind), 3) * 2 - 1) * profile.spread;
   const midi = nearestPitch(cands, around, TOUCH_LOW, TOUCH_HIGH);
-  const velocity = Math.min(1, profile.velocity * (0.9 + 0.1 * hash01(slot, kindCode(e.kind), 5)));
+  // 見どころの数秒間は控えめにして重ねる（設計書「応え方のルール」4）
+  const velocity = Math.min(1, profile.velocity * (0.9 + 0.1 * hash01(slot, kindCode(e.kind), 5)) * touchDuckAt(at));
   return { at, midi, velocity, timbre: profile.timbre, duration: profile.duration };
 }
 
@@ -89,7 +91,7 @@ export function planHiddenChord(_section: SectionId, now: number, door: DoorChoi
     const midi = pool[Math.min(pool.length - 1, start + i * stride)];
     if (notes.some((n) => n.midi === midi)) continue;
     // 下の2音は持続するグラスハープ、上の2音は鐘。ふつうの触れた音より少し大きく長く
-    notes.push({ at, midi, velocity: profile.velocity, timbre: i < 2 ? 'harp' : 'bell', duration: profile.duration });
+    notes.push({ at, midi, velocity: profile.velocity * Math.sqrt(touchDuckAt(at)), timbre: i < 2 ? 'harp' : 'bell', duration: profile.duration });
   }
   return notes;
 }
@@ -101,9 +103,13 @@ function kindCode(kind: TouchKind): number {
 export interface TouchGate {
   /**
    * 音を鳴らしてよければ true を返して数え始める。
-   * at は鳴らす時刻（乗車の秒）、duration はその音の長さ。同時に鳴る数の上限と、同じ物の再発音の間隔を守る。
+   * at は鳴らす時刻、duration はその音が「鳴っている」と数える長さ（実際の音の減衰の長さではない）。
+   * 同時に鳴る数の上限と、同じ物の再発音の間隔を守る。limit を渡すと、その場だけ上限をそれ以下に絞る
+   * （見どころの数秒間に、触れた音を重ねすぎない）。
    */
-  tryAcquire(id: string, at: number, duration: number): boolean;
+  tryAcquire(id: string, at: number, duration: number, limit?: number): boolean;
+  /** at の時点で鳴っていると数えている音の数（ほかの種類の音が枠を譲る判断に使う） */
+  busy(at: number): number;
 }
 
 export function createTouchGate(opts: { readonly maxVoices?: number; readonly retriggerSec?: number } = {}): TouchGate {
@@ -112,16 +118,23 @@ export function createTouchGate(opts: { readonly maxVoices?: number; readonly re
   /** 鳴っている音の終わる時刻 */
   const live: number[] = [];
   const last = new Map<string, number>();
+  const sweep = (at: number) => {
+    for (let i = live.length - 1; i >= 0; i--) if (live[i] <= at) live.splice(i, 1);
+  };
   return {
-    tryAcquire(id, at, duration) {
-      for (let i = live.length - 1; i >= 0; i--) if (live[i] <= at) live.splice(i, 1);
-      if (live.length >= maxVoices) return false;
+    tryAcquire(id, at, duration, limit = maxVoices) {
+      sweep(at);
+      if (live.length >= Math.min(maxVoices, limit)) return false;
       const prev = last.get(id);
       if (prev !== undefined && Math.abs(at - prev) < retrigger) return false;
       if (last.size > 256) for (const [k, v] of last) if (at - v > retrigger * 4) last.delete(k);
       live.push(at + duration);
       last.set(id, at);
       return true;
+    },
+    busy(at) {
+      sweep(at);
+      return live.length;
     },
   };
 }

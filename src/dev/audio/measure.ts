@@ -5,7 +5,7 @@ import type { DoorChoice } from '../../contracts/ids';
 import { createBed } from '../../audio/ambient';
 import { planNotes } from '../../audio/conductor';
 import { createGraph } from '../../audio/graph';
-import { performNotes, VoiceSet } from '../../audio/performer';
+import { performNotes, SpatialPool, VoiceSet } from '../../audio/performer';
 import { ambientKeys, ambientLevelAt, sectionScore } from '../../audio/score';
 import type { AmbientBed } from '../../audio/score';
 import { playGlass, playPad } from '../../core/sound/voices';
@@ -79,7 +79,7 @@ export async function measureRide(door: DoorChoice, onProgress?: (done: number, 
     performNotes(
       ctx,
       notes,
-      (n) => graph.reverbs[sectionScore(n.section, door).reverb].input,
+      (n) => graph.reverb(sectionScore(n.section, door).reverb).input,
       (t) => t - start,
       voices,
       100000,
@@ -101,6 +101,38 @@ export async function measureRide(door: DoorChoice, onProgress?: (done: number, 
       rows.push({ label: `${String(Math.floor(a / 60)).padStart(2, '0')}:${String(Math.floor(a % 60)).padStart(2, '0')} ${sec}`, ...levels(buf, a - start, b - start) });
     }
     onProgress?.(++done, chunks.length);
+  }
+  return rows;
+}
+
+/**
+ * 吊られた泡に触れた音（bowl、鳴り終わりは約 15 秒後）を立体音響の出口に通して鳴らし、出口を外す時刻の前後の大きさを測る。
+ * 旧: 出口を「鳴っていると数える長さ（3秒）+ 2 秒」で外していた → 減衰の途中でぶつっと切れる。
+ * 新: 出口は鳴らした音の鳴り終わり（Voice.endsAt）+ 0.5 秒まで外さない。
+ */
+export async function measureTouchTail(): Promise<LevelRow[]> {
+  const sr = 44100;
+  const rows: LevelRow[] = [];
+  for (const mode of ['旧（3 + 2 秒で外す）', '新（Voice.endsAt + 0.5 秒で外す）'] as const) {
+    const ctx = new OfflineAudioContext(2, sr * 30, sr);
+    const pool = new SpatialPool();
+    const out = pool.create(ctx, [1, 0, -2], ctx.destination, null, 0, 0.1 + 3 + 2);
+    const voice = playGlass(ctx, out, 'bowl', { midi: 55, when: 0.1, velocity: 0.75, duration: 3 });
+    if (mode.startsWith('新')) pool.extend(out, voice.endsAt + 0.5);
+    // 出口を外す時刻（エンジンでは tick の sweep が行う）まで描いて、そこで止めて sweep を呼ぶ
+    const cutAt = mode.startsWith('新') ? voice.endsAt + 0.5 : 0.1 + 3 + 2;
+    const sweepAt = Math.ceil(cutAt * sr / 128) * 128 / sr + 0.01;
+    ctx.suspend(sweepAt).then(() => {
+      pool.sweep(ctx.currentTime);
+      return ctx.resume();
+    });
+    const buf = await ctx.startRendering();
+    rows.push({ label: `${mode} 外す時刻 ${sweepAt.toFixed(2)}s`, rmsDb: 0, peak: 0 });
+    const at = 0.1 + 3 + 2;
+    rows.push({ label: `  ${(at - 0.5).toFixed(1)}〜${at.toFixed(1)}s（旧の切れる直前）`, ...levels(buf, at - 0.5, at) });
+    rows.push({ label: `  ${at.toFixed(1)}〜${(at + 0.5).toFixed(1)}s（旧の切れた直後）`, ...levels(buf, at, at + 0.5) });
+    rows.push({ label: `  ${(at + 4).toFixed(1)}〜${(at + 4.5).toFixed(1)}s`, ...levels(buf, at + 4, at + 4.5) });
+    rows.push({ label: `  鳴り終わり ${voice.endsAt.toFixed(1)}s の直前 0.5s`, ...levels(buf, Math.max(0, voice.endsAt - 0.5), voice.endsAt) });
   }
   return rows;
 }

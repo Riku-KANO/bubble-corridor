@@ -198,10 +198,12 @@ function lowerBound(notes: readonly PlannedNote[], from: number): number {
 
 /**
  * 乗車の秒 [t0, t1) に鳴らす音を時刻順に返す。扉は万華鏡（6:00〜8:00）だけを変える。
- * 返す音の物は使い回しの読み取り専用（変更しない）。
+ * 返す音の物は使い回しの読み取り専用（変更しない）。into を渡すと、その配列を空にして詰めて返す
+ * （先読みのたびに配列を作らないため）。
  */
-export function planNotes(t0: number, t1: number, door: DoorChoice): PlannedNote[] {
-  const out: PlannedNote[] = [];
+export function planNotes(t0: number, t1: number, door: DoorChoice, into?: PlannedNote[]): PlannedNote[] {
+  const out = into ?? [];
+  if (into) into.length = 0;
   if (!(t1 > t0)) return out;
   for (const spec of SECTIONS) {
     const s0 = spec.startBar * SEC_PER_BAR;

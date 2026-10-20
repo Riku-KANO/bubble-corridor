@@ -2,16 +2,17 @@
 // 耳で確かめるための道具: 区間を選んで頭から再生、シーク、扉の切り替え、触れた音のパッド、出来事の効果音、
 // 入口の音楽、音量。数字で確かめる道具: 音色ごと・曲全体の大きさ（measure.ts）。
 import { MOMENT_BARS, SECTIONS, SEC_PER_BAR, RIDE_DURATION } from '../../config';
-import type { Cue, RideEvents, Vec3Tuple } from '../../contracts/events';
+import type { RideEvents, Vec3Tuple } from '../../contracts/events';
 import type { SfxId } from '../../contracts/audio';
-import type { DoorChoice, SectionId, TouchKind } from '../../contracts/ids';
+import type { DoorChoice, TouchKind } from '../../contracts/ids';
 import { SECTION_IDS } from '../../contracts/ids';
-import { createAudioEngine } from '../../audio';
+import { auditionCue, createAudioEngine } from '../../audio';
+import { audioCues } from '../../audio/cues';
 import type { AudioClock } from '../../audio/clock';
 import { harmonyAt, sectionScore } from '../../audio/score';
 import { SFX } from '../../audio/effects';
 import { createBus } from '../../core/events';
-import { measureRide, measureTimbres } from './measure';
+import { measureRide, measureTimbres, measureTouchTail } from './measure';
 import type { LevelRow } from './measure';
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -37,45 +38,9 @@ const engine = createAudioEngine(bus);
 const clock = engine.clock as AudioClock;
 let door: DoorChoice = 'lapis';
 
-// ── 出来事の一覧（ride 担当のキューシートが本実装になるまで、確認ページで同じ内容を組み立てる） ──
+// 見どころ・膜の効果音は、エンジンが先読みの中で乗車の秒から予約して鳴らす（cues.ts の一覧）。ここでは一覧を使うだけ
+const cues = audioCues();
 const barSec = (bar: number) => bar * SEC_PER_BAR;
-const sectionAtBar = (bar: number): SectionId => [...SECTIONS].reverse().find((s) => bar >= s.startBar)?.id ?? 'platform';
-function cueSheet(): Cue[] {
-  const cues: Cue[] = [];
-  const add = (name: Cue['name'], bar: number, data?: Cue['data']) => cues.push({ id: `${name}@${bar}`, name, t: barSec(bar), bar, section: sectionAtBar(bar), data });
-  add('hint.touch', MOMENT_BARS.hintTouch);
-  SECTIONS.slice(1).forEach((s) => add('membrane', s.startBar, { to: s.id }));
-  add('greenhouse.bloom', MOMENT_BARS.greenhouseBloom);
-  add('greenhouse.dewfall', MOMENT_BARS.greenhouseBloom + 1);
-  add('rain.freeze', MOMENT_BARS.rainFreeze);
-  add('rain.doors', MOMENT_BARS.rainDoors);
-  add('kaleidoscope.flower', MOMENT_BARS.kaleidoscopeFlower);
-  add('celestial.blackout', 144);
-  cues.push({ id: 'celestial.stars@144.6', name: 'celestial.stars', t: barSec(144) + 2, bar: 144 + 2 / SEC_PER_BAR, section: 'celestial' });
-  add('celestial.constellation', MOMENT_BARS.celestialConstellation);
-  add('dawn.sunrise', MOMENT_BARS.dawnSunrise);
-  return cues.sort((a, b) => a.t - b.t);
-}
-const cues = cueSheet();
-let cueIndex = 0;
-let lastJumps = clock.jumps;
-let lastT = 0;
-
-/** 時計を見て、通り過ぎた出来事を一度だけ流す（位置が飛んだら、その位置から数え直す） */
-function dispatchCues(): void {
-  const t = clock.time;
-  if (clock.jumps !== lastJumps || t < lastT) {
-    lastJumps = clock.jumps;
-    cueIndex = cues.findIndex((c) => c.t >= t);
-    if (cueIndex < 0) cueIndex = cues.length;
-  }
-  lastT = t;
-  if (!clock.running) return;
-  while (cueIndex < cues.length && cues[cueIndex].t <= t) {
-    bus.emit('cue', cues[cueIndex]);
-    cueIndex++;
-  }
-}
 
 // ── 画面 ──
 const statusEl = $('status');
@@ -109,7 +74,6 @@ function updateNow(): void {
 }
 
 function frame(): void {
-  dispatchCues();
   updateNow();
   requestAnimationFrame(frame);
 }
@@ -193,7 +157,7 @@ const cuesEl = $('cues');
 for (const c of cues) {
   cuesEl.append(
     button(c.id, () => {
-      void enable().then(() => bus.emit('cue', { ...c, t: clock.running ? clock.time : c.t }));
+      void enable().then(() => auditionCue(engine, { ...c, t: clock.running ? clock.time : c.t }));
     }),
   );
 }
@@ -278,6 +242,7 @@ Object.assign(window, {
     },
     measureTimbres,
     measureRide,
+    measureTouchTail,
     get lastRows() {
       return lastRows;
     },

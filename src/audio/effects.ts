@@ -17,10 +17,24 @@ export type Ev =
   | { readonly dt: number; readonly pad: PadTimbre; readonly midis: readonly number[]; readonly vel: number; readonly dur: number }
   | { readonly dt: number; readonly sweep: { readonly dur: number; readonly f0: number; readonly f1: number; readonly q: number; readonly gain: number } };
 
-/** 出来事を when（AudioContext の秒）から鳴らす */
-export function playEvents(ctx: BaseAudioContext, dest: AudioNode, evs: readonly Ev[], when: number): void {
+/** 予約がこれ以内の遅れなら、そのまま鳴らす（秒） */
+const LATE_OK = 0.08;
+
+/**
+ * 出来事を when（AudioContext の秒）から鳴らす。dt が負の前ぶれ（風切りなど）は when より前に始まる。
+ * 間に合わなかった出来事（minWhen より前）は、持続する音だけ今から鳴らし、短い音と風切りは見送る
+ * （包絡線の途中から鳴ると聞こえ方が変わる）。鳴らした音がすべて鳴り終わる時刻（AudioContext の秒）を返す。
+ */
+export function playEvents(ctx: BaseAudioContext, dest: AudioNode, evs: readonly Ev[], when: number, minWhen = ctx.currentTime): number {
+  let endsAt = when;
   for (const ev of evs) {
-    const t = when + ev.dt;
+    let t = when + ev.dt;
+    const late = minWhen - t;
+    if (late > 0) {
+      const sustained = ('glass' in ev && ev.glass === 'harp') || 'pad' in ev;
+      if (late <= LATE_OK || sustained) t = minWhen;
+      else continue;
+    }
     if ('glass' in ev) {
       let out: AudioNode = dest;
       if (ev.pan !== undefined && typeof ctx.createStereoPanner === 'function') {
@@ -29,9 +43,11 @@ export function playEvents(ctx: BaseAudioContext, dest: AudioNode, evs: readonly
         p.connect(dest);
         out = p;
       }
-      playGlass(ctx, out, ev.glass, { midi: ev.midi, when: t, velocity: ev.vel, duration: ev.dur });
+      const voice = playGlass(ctx, out, ev.glass, { midi: ev.midi, when: t, velocity: ev.vel, duration: ev.dur });
+      if (voice.endsAt > endsAt) endsAt = voice.endsAt;
     } else if ('pad' in ev) {
-      playPad(ctx, dest, ev.pad, { midis: ev.midis, when: t, duration: ev.dur, velocity: ev.vel });
+      const voice = playPad(ctx, dest, ev.pad, { midis: ev.midis, when: t, duration: ev.dur, velocity: ev.vel });
+      if (voice.endsAt > endsAt) endsAt = voice.endsAt;
     } else {
       const { dur, f0, f1, q, gain } = ev.sweep;
       const src = ctx.createBufferSource();
@@ -39,6 +55,7 @@ export function playEvents(ctx: BaseAudioContext, dest: AudioNode, evs: readonly
       src.loop = true;
       src.start(t, Math.abs(ev.dt * 1.7 + f0 * 0.001) % 6);
       src.stop(t + dur + 0.1);
+      if (t + dur + 0.1 > endsAt) endsAt = t + dur + 0.1;
       const f = ctx.createBiquadFilter();
       f.type = 'bandpass';
       f.Q.value = q;
@@ -51,6 +68,7 @@ export function playEvents(ctx: BaseAudioContext, dest: AudioNode, evs: readonly
       src.connect(f).connect(g).connect(dest);
     }
   }
+  return endsAt;
 }
 
 const g = (dt: number, glass: GlassTimbre, midi: number, vel: number, dur?: number, pan?: number): Ev => ({ dt, glass, midi, vel, dur, pan });

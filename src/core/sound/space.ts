@@ -26,10 +26,6 @@ export function createSpatialPanner(ctx: BaseAudioContext, position?: readonly [
   const p = ctx.createPanner();
   p.panningModel = 'HRTF';
   p.distanceModel = 'inverse';
-  // 既定のままだと 1m を超えると急に小さくなる。ゴンドラの周り数 m〜十数 m の音を聞かせたいので、緩やかに減らす
-  p.refDistance = 2;
-  p.rolloffFactor = 0.6;
-  p.maxDistance = 60;
   if (position) {
     if (p.positionX) {
       p.positionX.value = position[0];
@@ -60,19 +56,28 @@ export function setListenerPose(listener: AudioListener, pose: SpacePose, when?:
   const uy = cp;
   const uz = cy * sp;
   if (listener.positionX) {
-    const set = (param: AudioParam, v: number) => {
-      if (when === undefined) param.value = v;
-      else param.setValueAtTime(v, when);
-    };
-    set(listener.positionX, pose.x);
-    set(listener.positionY, pose.y);
-    set(listener.positionZ, pose.z);
-    set(listener.forwardX, fx);
-    set(listener.forwardY, fy);
-    set(listener.forwardZ, fz);
-    set(listener.upX, ux);
-    set(listener.upY, uy);
-    set(listener.upZ, uz);
+    // 毎フレーム呼ばれる。関数や配列を作らず、AudioParam に直接書く
+    if (when === undefined) {
+      listener.positionX.value = pose.x;
+      listener.positionY.value = pose.y;
+      listener.positionZ.value = pose.z;
+      listener.forwardX.value = fx;
+      listener.forwardY.value = fy;
+      listener.forwardZ.value = fz;
+      listener.upX.value = ux;
+      listener.upY.value = uy;
+      listener.upZ.value = uz;
+    } else {
+      listener.positionX.setValueAtTime(pose.x, when);
+      listener.positionY.setValueAtTime(pose.y, when);
+      listener.positionZ.setValueAtTime(pose.z, when);
+      listener.forwardX.setValueAtTime(fx, when);
+      listener.forwardY.setValueAtTime(fy, when);
+      listener.forwardZ.setValueAtTime(fz, when);
+      listener.upX.setValueAtTime(ux, when);
+      listener.upY.setValueAtTime(uy, when);
+      listener.upZ.setValueAtTime(uz, when);
+    }
   } else {
     // AudioParam を持たない古い実装（旧 Safari）
     const legacy = listener as unknown as {
@@ -114,15 +119,17 @@ export function createReverbImpulse(ctx: BaseAudioContext, size: ReverbSize, see
     const data = buffer.getChannelData(ch);
     const rnd = rng(seed * 7919 + SIZE_INDEX[size] * 104729 + ch * 1299709);
     let lp = 0;
+    // 60dB 下がるのが rt60 秒後: 1サンプルごとに掛ける定数（Math.pow を毎サンプル呼ばない）
+    const decay = Math.pow(10, -3 / (rt60 * sr));
+    let env = 1;
     const brightEnd = Math.max(1, Math.floor(sr * rt60 * 0.7));
     const fadeIn = Math.max(1, Math.floor(sr * 0.004));
     for (let i = 0; i < length; i++) {
-      const t = i / sr;
-      const env = Math.pow(10, (-3 * t) / rt60); // 60dB 下がるのが rt60 秒後
       // 高域は早く消える: 一極のローパスの係数を 0.9 → 0.12 へ動かす
       const a = 0.9 - 0.78 * Math.min(1, i / brightEnd);
       lp += a * ((rnd() * 2 - 1) * env - lp);
-      data[i] = lp * Math.min(1, i / fadeIn);
+      env *= decay;
+      data[i] = i < fadeIn ? lp * (i / fadeIn) : lp;
     }
     // 初期反射: 数本の鋭い反射を足して、部屋の壁の位置を感じさせる
     for (let k = 0; k < 6; k++) {
