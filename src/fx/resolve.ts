@@ -4,7 +4,7 @@ import type { ScreenFxState } from '../contracts/fx';
 
 /** 効果ごとの強さ。foldAngle（ラジアン）以外はすべて 0〜1 */
 export interface FxParams {
-  /** 泡越しの視界の縁（0〜0.5。かすかに。中央は澄んだまま） */
+  /** 泡越しの縁の強さそのもの（0〜0.5。かすかに。中央は澄んだまま） */
   readonly edge: number;
   /** 膜の薄膜干渉の縞 */
   readonly stripes: number;
@@ -29,6 +29,9 @@ export interface FxOptions {
   readonly reducedFlash: boolean;
 }
 
+/** 毎フレームの確保を避けるために、書き換えて使い回す出力 */
+export type MutableFxParams = { -readonly [K in keyof FxParams]: FxParams[K] };
+
 /** 泡越しの縁の上限。乗車中ずっと出ているので、気づくか気づかないかの強さに留める */
 export const EDGE_MAX = 0.5;
 /** 膜を通る瞬間にブルームへ足す分（見どころ以外でもブルームは膜でだけ強まる） */
@@ -38,24 +41,32 @@ export const REDUCED_FLASH_SCALE = 0.4;
 
 const clamp01 = (v: number, fallback = 0): number => (Number.isFinite(v) ? (v <= 0 ? 0 : v >= 1 ? 1 : v) : fallback);
 
-export function resolveFx(state: ScreenFxState, options: FxOptions): FxParams {
+/**
+ * 状態 → 効果の強さ。out を渡すと、その object に書いて返す（毎フレーム呼ぶときの確保を避ける）。
+ * 渡さなければ新しい object を返す（テスト用の純粋な使い方）。
+ */
+export function resolveFx(state: ScreenFxState, options: FxOptions, out: MutableFxParams = blank()): FxParams {
   const flash = options.reducedFlash ? REDUCED_FLASH_SCALE : 1;
   const membrane = clamp01(state.membrane);
-  return {
-    edge: EDGE_MAX * clamp01(state.bubble),
-    stripes: membrane * flash,
-    distortion: membrane,
-    // 色収差は膜の瞬間だけ。通過の山で急に立ち上がるよう2乗にする
-    aberration: membrane * membrane,
-    fold: clamp01(state.kaleidoscope),
-    foldAngle: Number.isFinite(state.kaleidoscopeAngle) ? state.kaleidoscopeAngle : 0,
-    bloom: clamp01(clamp01(state.bloom) + MEMBRANE_BLOOM * membrane) * flash,
-    white: clamp01(state.whiteFog),
-    darkness: 1 - clamp01(state.brightness, 1),
-  };
+  out.edge = EDGE_MAX * clamp01(state.bubble);
+  out.stripes = membrane * flash;
+  out.distortion = membrane;
+  // 色収差は膜の瞬間だけ。通過の山で急に立ち上がるよう2乗にする
+  out.aberration = membrane * membrane;
+  out.fold = clamp01(state.kaleidoscope);
+  out.foldAngle = Number.isFinite(state.kaleidoscopeAngle) ? state.kaleidoscopeAngle : 0;
+  out.bloom = clamp01(clamp01(state.bloom) + MEMBRANE_BLOOM * membrane) * flash;
+  out.white = clamp01(state.whiteFog);
+  out.darkness = 1 - clamp01(state.brightness, 1);
+  return out;
 }
 
-/** どの効果も働いていない（後処理を通さず素通しで描いてよい） */
-export function isNeutral(p: FxParams): boolean {
-  return p.edge === 0 && p.stripes === 0 && p.distortion === 0 && p.aberration === 0 && p.fold === 0 && p.bloom === 0 && p.white === 0 && p.darkness === 0;
+/** 使い回す出力の入れ物 */
+export function blank(): MutableFxParams {
+  return { edge: 0, stripes: 0, distortion: 0, aberration: 0, fold: 0, foldAngle: 0, bloom: 0, white: 0, darkness: 0 };
+}
+
+/** 画面全体にかける効果（暗さ、白い霧）だけが働いているか。後処理を外すときも、これだけは出す */
+export function hasScreenTint(p: FxParams): boolean {
+  return p.white > 0 || p.darkness > 0;
 }

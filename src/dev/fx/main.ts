@@ -5,6 +5,7 @@
 //   ?still                  場面の動きを止める（撮影用。時刻 0 の絵になる）
 //   ?panel=0                操作パネルを隠す
 //   ?bench                  1フレームごとに GPU の完了を待って連続で描く（WebGPU のみ。負荷の比較用。fps が GPU 時間の逆数になる）
+//   ?gondola=0              ゴンドラに似た近景（カメラの子の真鍮の輪と手すり、薄い泡の殻）を出さない
 //   ?nofx                   後処理を通さず renderer.render で描く（負荷の比較用）
 //   ?pulse                  読み込み後に「膜を通る」を1回流す
 import * as THREE from 'three/webgpu';
@@ -109,6 +110,35 @@ scene.add(arch);
 const archInner = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.035, 12, 96, Math.PI), brass);
 archInner.position.set(0, 0.0, -5);
 scene.add(archInner);
+
+// ゴンドラに似た近景。カメラの子にして、視点から 1.1〜1.2m に真鍮の縁・手すり・薄い泡の殻を置く。
+// 万華鏡の折り返しでも消えず、回らないこと（設計書「万華鏡の間」）を確かめる。
+if (param('gondola', 0, 1, 1) !== 0) {
+  const proxy = new THREE.Group();
+  const gold = new THREE.MeshStandardNodeMaterial({ color: 0xd8b062, roughness: 0.45, metalness: 0.3, emissive: new THREE.Color(0x3a2a10), emissiveIntensity: 0.6 });
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.03, 8, 72), gold);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = -0.5;
+  proxy.add(rim);
+  const rail = new THREE.Mesh(new THREE.TorusGeometry(1.06, 0.018, 8, 72), gold);
+  rail.rotation.x = Math.PI / 2;
+  rail.position.y = -0.27;
+  proxy.add(rail);
+  for (const deg of [-60, -30, 0, 30, 60]) {
+    const a = (deg * Math.PI) / 180;
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.23, 8), gold);
+    post.position.set(Math.sin(a) * 1.08, -0.385, -Math.cos(a) * 1.08);
+    proxy.add(post);
+  }
+  const shell = new THREE.Mesh(
+    new THREE.SphereGeometry(1.2, 32, 16),
+    new THREE.MeshStandardNodeMaterial({ color: 0xcfe6ff, roughness: 0.1, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  shell.renderOrder = 10;
+  proxy.add(shell);
+  camera.add(proxy);
+  scene.add(camera);
+}
 
 // 星のような小さな発光玉
 const starGeo = new THREE.SphereGeometry(0.032, 12, 8);
@@ -241,7 +271,7 @@ const frame = (): void => {
     fpsAt = now;
     info.textContent = `${backend}  ${fps.toFixed(0)} fps  calls ${renderer.info.render.calls}`;
   }
-  (globalThis as unknown as { __fxdev?: unknown }).__fxdev = { backend, fps, frames: total, values, setEnabled: (on: boolean) => fx.setEnabled(on) };
+  (globalThis as unknown as { __fxdev?: unknown }).__fxdev = { backend, fps, frames: total, renderer, values, setEnabled: (on: boolean) => fx.setEnabled(on) };
 };
 
 if (q.has('bench')) {
