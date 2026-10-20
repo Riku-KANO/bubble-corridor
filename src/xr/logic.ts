@@ -3,8 +3,8 @@
 import type { Vec3Tuple } from '../contracts/events';
 import type { XRPosture } from '../contracts/ids';
 import type { Touchable } from '../contracts/room';
-import { CAMERA, INTERACTION, MOTION, UI, XR } from '../config';
-import { wrapAngle } from '../core/easing';
+import { CAMERA, INTERACTION, MOTION, TRANSITION_SEC, UI, XR } from '../config';
+import { smoothstep, wrapAngle } from '../core/easing';
 import { XR_TUNING } from './tuning';
 
 const clamp01 = (v: number) => (v <= 0 ? 0 : v >= 1 ? 1 : v);
@@ -98,17 +98,25 @@ export function fingertipHits(tips: readonly Vec3Tuple[], list: readonly Touchab
   return hits;
 }
 
-export interface RayHit {
-  index: number;
-  /** 光線に沿った距離（m） */
-  along: number;
+/** 光線が通る物の候補（手前から数個）。表面の確かめは呼び出し側が Raycaster で行う */
+export interface RayCandidates {
+  count: number;
+  /** 一覧の番号（手前から） */
+  readonly index: number[];
+  /** 光線に沿った、物の中心までの距離（m） */
+  readonly along: number[];
+}
+
+export function createRayCandidates(capacity: number): RayCandidates {
+  return { count: 0, index: new Array<number>(capacity).fill(-1), along: new Array<number>(capacity).fill(Infinity) };
 }
 
 /**
- * 光線（origin と単位ベクトルの dir）が当たる有効な物のうち、最も手前のもの。
- * 当たりは物の半径に、距離に比例する余裕（slackDeg）を足した球で見る。見つめる・トリガーで指す用。
+ * 光線（origin と単位ベクトルの dir）が通る有効な物のうち、表面までの距離が maxSurface 以内のものを、手前から
+ * out の容量まで集める（毎フレーム使うので確保しない）。当たりは、物の原点を中心にした半径 radius の球に、
+ * 距離に比例する余裕（slackDeg）を足したもので見る。これは前段の絞り込みで、表面の点は Raycaster で取る。
  */
-export function rayTouchable(
+export function rayCandidates(
   ox: number,
   oy: number,
   oz: number,
@@ -117,10 +125,11 @@ export function rayTouchable(
   dz: number,
   list: readonly Touchable[],
   slackDeg: number,
-  out: RayHit,
-): boolean {
-  out.index = -1;
-  out.along = Infinity;
+  maxSurface: number,
+  out: RayCandidates,
+): number {
+  out.count = 0;
+  const cap = out.index.length;
   const slack = Math.tan((slackDeg * Math.PI) / 180);
   for (let i = 0; i < list.length; i++) {
     const t = list[i];
@@ -130,15 +139,28 @@ export function rayTouchable(
     const vy = e[13] - oy;
     const vz = e[14] - oz;
     const along = vx * dx + vy * dy + vz * dz;
-    if (along <= 0.05 || along >= out.along) continue;
+    if (along <= 0.05 || along - t.radius > maxSurface) continue;
     const perp2 = vx * vx + vy * vy + vz * vz - along * along;
     const tol = t.radius + along * slack;
-    if (perp2 <= tol * tol) {
-      out.index = i;
-      out.along = along;
+    if (perp2 > tol * tol) continue;
+    let k: number;
+    if (out.count < cap) {
+      k = out.count;
+      out.count++;
+    } else if (along < out.along[cap - 1]) {
+      k = cap - 1;
+    } else {
+      continue;
     }
+    while (k > 0 && out.along[k - 1] > along) {
+      out.index[k] = out.index[k - 1];
+      out.along[k] = out.along[k - 1];
+      k--;
+    }
+    out.index[k] = i;
+    out.along[k] = along;
   }
-  return out.index >= 0;
+  return out.count;
 }
 
 // ── 移動中の外周の暗さ ──────────────────────────────────────────
@@ -165,7 +187,8 @@ export interface MenuPose {
 }
 
 /**
- * 曇りガラスのメニューの置き場所。頭の前方 XR.menuDistance、目より少し下、頭の方を向く。
+ * 曇りガラスのメニューの置き場所（板の上端の中央）。頭の前方 XR.menuDistance、目より少し下、頭の方を向く。
+ * 板はここから下へ伸びる。目の高さには板の上の余白が来るので、開いた直後に前を見ていても項目に当たらない。
  * 向き（yaw）は three.js の rotation.y。板の表（+Z）が頭を向くよう、頭の向きと同じ yaw にする。
  */
 export function menuPose(head: MenuPose): MenuPose {
@@ -184,4 +207,14 @@ export function menuPose(head: MenuPose): MenuPose {
 export function menuTextHeight(): number {
   const screenDeg = (UI.minFontPx / 1080) * CAMERA.fovDeg;
   return XR.menuDistance * Math.tan(((screenDeg * XR.textScale) * Math.PI) / 180);
+}
+
+// ── 画面 → VR の白い霧 ─────────────────────────────────────────
+
+/**
+ * 白い霧の不透明度。セッションが始まったとき 1 で、TRANSITION_SEC.screenToVR（1.0秒）かけて晴れる。
+ * 霧は「セッション開始からの時刻」で決める（フレームの積み上げで状態を作らない）。
+ */
+export function whiteoutOpacity(sinceStartSec: number): number {
+  return 1 - smoothstep(0, TRANSITION_SEC.screenToVR, sinceStartSec);
 }

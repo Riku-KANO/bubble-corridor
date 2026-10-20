@@ -17,6 +17,13 @@ export interface MenuPanel {
   setHover(index: number): void;
   /** 選んだ項目を一瞬強く光らせる */
   flash(index: number): void;
+  /**
+   * 見つめた進み具合（0〜1）を、その項目の上に塗りで見せる（-1 か 0 で消す）。
+   * 板は描き直さず、項目に重ねた細長い板の長さだけを変える（毎フレーム呼んでよい）。
+   */
+  setProgress(index: number, progress: number): void;
+  /** 不透明度 0 のまま見えるようにする（開始前の compileAsync 用）。false で元に戻す */
+  prewarm(on: boolean): void;
   /** 板の座標の点が当たる項目の番号（なければ -1） */
   hit(x: number, y: number): number;
   readonly width: number;
@@ -25,6 +32,14 @@ export interface MenuPanel {
 }
 
 const CANVAS_W = 1024;
+/**
+ * canvas の大きさは最初から最後まで固定にする（項目の数で変えない）。
+ * 一度 GPU に上げたテクスチャの大きさは変えられず、canvas を大きくすると
+ * 「Offset overflows texture dimensions」の警告が出て描けないため。板は上の一部を使い、UV で切り出す。
+ */
+const CANVAS_H = 1280;
+/** 板に出せる項目の最大（canvas の高さに収まる数）。超えた分は出さない */
+const MAX_ITEMS = 8;
 const FONT = '"Noto Sans JP", "Zen Old Mincho", "Hiragino Sans", sans-serif';
 
 export function createMenu(): MenuPanel {
@@ -35,6 +50,8 @@ export function createMenu(): MenuPanel {
   const pad = font * 1.0;
 
   const canvas = document.createElement('canvas');
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
@@ -50,19 +67,37 @@ export function createMenu(): MenuPanel {
   mesh.renderOrder = 9_000;
   mesh.visible = false;
 
+  // 見つめた進み具合の塗り。項目の左端から伸びる細長い板（板の子なので、板と一緒に動く）
+  const fillMaterial = new THREE.MeshBasicNodeMaterial({
+    color: 0xf2cf94,
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  });
+  const fillGeometry = new THREE.PlaneGeometry(1, 1);
+  const fill = new THREE.Mesh(fillGeometry, fillMaterial);
+  fill.name = 'xr-menu-progress';
+  fill.renderOrder = 9_001;
+  fill.frustumCulled = false;
+  fill.visible = false;
+  mesh.add(fill);
+
   let items: readonly MenuItem[] = [];
   let hover = -1;
   let flashIndex = -1;
   let height = 0.1;
 
-  // 曇りのざらつきは固定の乱数で描く（開くたびに模様が変わらない）
-  const noise = (() => {
-    let s = 12345;
+  // 曇りのざらつきは、描き直すたびに同じ種から始める（ホバーで描き直しても模様が変わらず、ちらつかない）
+  const NOISE_SEED = 12345;
+  function createNoise() {
+    let s = NOISE_SEED;
     return () => {
       s = (s * 1664525 + 1013904223) >>> 0;
       return s / 4294967296;
     };
-  })();
+  }
 
   function rowTop(i: number): number {
     return height / 2 - pad - i * (rowH + gap);
@@ -71,17 +106,19 @@ export function createMenu(): MenuPanel {
   function draw() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    const noise = createNoise();
     const ppm = CANVAS_W / W; // 1m あたりの画素
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
+    const w = CANVAS_W;
+    const h = Math.min(CANVAS_H, Math.ceil(height * ppm)); // 板が使う上の部分
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // 板: 青灰の曇りガラス。上の左から光が差す
     const r = font * 0.9 * ppm;
     roundRect(ctx, 2, 2, w - 4, h - 4, r);
     const base = ctx.createLinearGradient(0, 0, w, h);
-    base.addColorStop(0, 'rgba(58,78,106,0.72)');
-    base.addColorStop(1, 'rgba(30,44,66,0.78)');
+    // 不透明度は 0.85 前後（背景が透けても文字が読める）
+    base.addColorStop(0, 'rgba(58,78,106,0.84)');
+    base.addColorStop(1, 'rgba(30,44,66,0.88)');
     ctx.fillStyle = base;
     ctx.fill();
     ctx.save();
@@ -138,14 +175,17 @@ export function createMenu(): MenuPanel {
   return {
     mesh,
     setItems(next) {
-      items = next;
+      items = next.slice(0, MAX_ITEMS);
       hover = -1;
       flashIndex = -1;
       height = pad * 2 + items.length * rowH + Math.max(0, items.length - 1) * gap;
-      canvas.width = CANVAS_W;
-      canvas.height = Math.max(64, Math.ceil((height / W) * CANVAS_W));
       mesh.geometry.dispose();
-      mesh.geometry = new THREE.PlaneGeometry(W, height);
+      const geometry = new THREE.PlaneGeometry(W, height);
+      // 板は canvas の上の部分だけを使うので、UV の縦をその範囲に縮める（画像の上端が v=1）
+      const used = Math.min(1, Math.ceil(height * (CANVAS_W / W)) / CANVAS_H);
+      const uv = geometry.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - (1 - uv.getY(i)) * used);
+      mesh.geometry = geometry;
       draw();
     },
     setHover(index) {
@@ -164,6 +204,23 @@ export function createMenu(): MenuPanel {
         }
       }, 180);
     },
+    setProgress(index, progress) {
+      if (index < 0 || index >= items.length || progress <= 0) {
+        fill.visible = false;
+        return;
+      }
+      const rw = W - 2 * pad;
+      const p = progress >= 1 ? 1 : progress;
+      fill.visible = true;
+      fill.scale.set(Math.max(rw * p, 1e-4), rowH * 0.94, 1);
+      fill.position.set(-rw / 2 + (rw * p) / 2, rowTop(index) - rowH / 2, 0.003);
+    },
+    prewarm(on) {
+      material.opacity = on ? 0 : 1;
+      fillMaterial.opacity = on ? 0 : 0.42;
+      mesh.visible = on;
+      fill.visible = on;
+    },
     hit(x, y) {
       if (Math.abs(x) > W / 2 - pad) return -1;
       for (let i = 0; i < items.length; i++) {
@@ -181,6 +238,8 @@ export function createMenu(): MenuPanel {
     dispose() {
       mesh.geometry.dispose();
       material.dispose();
+      fillGeometry.dispose();
+      fillMaterial.dispose();
       texture.dispose();
     },
   };

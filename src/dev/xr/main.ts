@@ -22,7 +22,7 @@ const num = (key: string, fallback: number) => {
 interface Shared {
   xr: ReturnType<typeof createXRSystem>;
   frames: () => number;
-  touches: () => { id: string; source: string }[];
+  touches: () => { id: string; source: string; position: readonly number[] }[];
   moving: boolean;
   scene: THREE.Scene;
   camera: THREE.Camera;
@@ -113,8 +113,8 @@ async function main() {
 
   // ── 触れられる物: 手の届く輪（ゴンドラの子）と、見つめて触れる遠くの物 ──
   const bus = createBus<RideEvents>();
-  const touched: { id: string; source: string }[] = [];
-  bus.on('touch', (e) => touched.push({ id: e.touchableId, source: e.source }));
+  const touched: { id: string; source: string; position: readonly number[] }[] = [];
+  bus.on('touch', (e) => touched.push({ id: e.touchableId, source: e.source, position: e.position }));
   interface Item {
     readonly touchable: Touchable;
     readonly mesh: THREE.Mesh;

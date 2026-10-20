@@ -7,6 +7,8 @@ export interface Vignette {
   readonly mesh: THREE.Mesh;
   /** 強さ（0〜1）。0 なら描かない */
   set(strength: number): void;
+  /** 不透明度 0 のまま見えるようにする。開始前に compileAsync でシェーダを作るため（set(0) で隠れる） */
+  prewarm(): void;
   dispose(): void;
 }
 
@@ -69,6 +71,11 @@ export function createVignette(): Vignette {
       material.opacity = s;
       // 強いほど輪の内側が狭まり、視界の端から暗くなる
       mesh.scale.setScalar(1 - XR_TUNING.vignetteShrink * s);
+    },
+    prewarm() {
+      material.opacity = 0;
+      mesh.scale.setScalar(1);
+      mesh.visible = true;
     },
     dispose() {
       geometry.dispose();
