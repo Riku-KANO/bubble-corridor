@@ -160,7 +160,10 @@ export async function startApp(root: HTMLElement): Promise<void> {
       if (mode === 'vr') {
         audio.sfx('vr.fog');
         void xr.enter(settings.xrPosture).then(
-          () => dispatch({ type: 'ride', mode }),
+          // 始まった直後にセッションが終わっていたら（すぐにヘッドセットを外した）、乗車へ進まない
+          () => {
+            if (xr.active) dispatch({ type: 'ride', mode });
+          },
           (err) => console.error('[xr] VR を始められませんでした', err),
         );
         return;
