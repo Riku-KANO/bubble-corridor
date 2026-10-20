@@ -1,13 +1,15 @@
 // 拍への合わせ。案1と共有する（音の仕組み。案2では必須）。
-// STUB: 署名は確定。中身は audio 担当が本実装に置き換える。
 
 /**
- * now（秒）より後で最も近い拍の格子点（秒）を返す。
+ * now（秒）以降で最も近い拍の格子点（秒）を返す（ちょうど格子点なら now そのもの）。
  * 格子は origin を 0 として、1拍 = 60/bpm 秒を subdivisionBeats ごとに刻む。
  * 格子点までが minLead 秒未満なら、その次の格子点にする（予約が間に合わないのを避ける）。
  */
-export function nextGridTime(now: number, _origin: number, _bpm: number, _subdivisionBeats: number, _minLead = 0): number {
-  return now; // STUB
+export function nextGridTime(now: number, origin: number, bpm: number, subdivisionBeats: number, minLead = 0): number {
+  const step = (60 / bpm) * subdivisionBeats;
+  // 浮動小数点の誤差（格子点ちょうどの入力が 1 ulp 手前になる）で 1 格子ぶん遅らせないよう、格子の 1e-9 倍だけ許す
+  const k = Math.ceil((now + minLead - origin) / step - 1e-9);
+  return origin + k * step;
 }
 
 /** 小節 → 秒（origin = 0） */

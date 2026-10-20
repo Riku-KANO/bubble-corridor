@@ -1,7 +1,7 @@
 // 部屋の契約テストの道具（統合担当。部屋の担当は変更しない）。各部屋の room.test.ts から使う。
 // 部屋を本物のレールと偽のイベントで読み込み、設計書の決まり（物との最短距離、見どころが前にある、
 // 隠れた泡、描画の予算、部屋の空気）を部屋の実装に頼らずに確かめる。
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { expect } from 'vitest';
@@ -9,7 +9,7 @@ import type { Cue, EventBus, RideEvents, Vec3Tuple } from '../contracts/events';
 import type { ComfortMode, DoorChoice, SectionId } from '../contracts/ids';
 import type { RideData, RidePose } from '../contracts/ride';
 import type { AssetLoader, RoomContext, RoomFactory, RoomFrame, RoomModule } from '../contracts/room';
-import { GONDOLA_DIAMETER, MOTION } from '../config';
+import { GONDOLA_DIAMETER, MOTION, PERF } from '../config';
 import { presetFor, type QualityTier } from '../core/quality';
 import { buildCueSheet, createRide, generateRideData } from '../ride';
 
@@ -56,7 +56,13 @@ export interface RoomHarness {
 
 export async function loadRoom(
   factory: RoomFactory,
-  opts: { tier?: QualityTier; comfort?: ComfortMode; reducedFlash?: boolean; suggestedDoor?: DoorChoice | null } = {},
+  opts: {
+    tier?: QualityTier;
+    comfort?: ComfortMode;
+    reducedFlash?: boolean;
+    suggestedDoor?: DoorChoice | null;
+    assets?: AssetLoader;
+  } = {},
 ): Promise<RoomHarness> {
   const emitted: { type: keyof RideEvents; payload: unknown }[] = [];
   const bus: EventBus = {
@@ -67,7 +73,7 @@ export async function loadRoom(
   };
   const ctx: RoomContext = {
     ride,
-    assets: nodeAssets,
+    assets: opts.assets ?? nodeAssets,
     events: bus,
     quality: presetFor(opts.tier ?? 'high', { isMobile: false, isXR: false }),
     comfort: () => opts.comfort ?? 'standard',
@@ -307,4 +313,90 @@ export function reachableFraction(room: RoomModule, kind: string, sections: read
     if (samples.some((p) => p.distanceTo(c) <= dist)) ok++;
   }
   return ok / list.length;
+}
+
+interface GltfNodeJson {
+  name?: string;
+  mesh?: number;
+  extras?: Record<string, unknown>;
+}
+
+/** glb の JSON の部分（12 バイトの頭の後の最初のチャンク） */
+function glbJson(buf: Buffer): { nodes?: GltfNodeJson[]; images?: unknown[]; extensionsUsed?: string[] } {
+  expect(buf.toString('ascii', 0, 4), 'glb の頭').toBe('glTF');
+  const len = buf.readUInt32LE(12);
+  expect(buf.toString('ascii', 16, 20), 'glb の最初のチャンク').toBe('JSON');
+  return JSON.parse(buf.toString('utf8', 20, 20 + len));
+}
+
+/**
+ * BLD-4〜7 Blender で造形した部屋（blender/scripts/rooms/<name>.py → public/assets/rooms/<name>.glb）。
+ * - glb は 15MB（10進）以下、画像を埋め込まない、圧縮の拡張（Draco など）を使わない
+ * - 物の名前は `<name>.<部品>[.<番号>]`（小文字。BLD-6）
+ * - 光を焼き込んだ物（extras の lightmap と lightmap_scale）が1つ以上あり、PNG があり、glb との合計が 15MB 以下
+ * - 部屋は load で ctx.assets からこの glb とライトマップを読み、焼き込んだ物に lightMap を付ける
+ *   （sRGB、2つ目の UV、強さ > 0、その物のライトマップ。材質を共有して上書きしない）
+ */
+export async function expectBlenderRoom(factory: RoomFactory, name: string): Promise<void> {
+  const glbPath = `rooms/${name}.glb`;
+  const file = new URL(glbPath, ASSETS);
+  expect(existsSync(file), `${glbPath} がない（blender/scripts/rooms/${name}.py で書き出す）`).toBe(true);
+  const buf = readFileSync(file);
+  const limit = PERF.roomLoadMB * 1e6;
+  expect(buf.length, 'glb の大きさ').toBeLessThanOrEqual(limit);
+  const json = glbJson(buf);
+  expect(json.images ?? [], 'glb に画像を入れない（ライトマップは外の PNG）').toEqual([]);
+  expect(json.extensionsUsed ?? [], 'glb の拡張（node のテストと同じ GLTFLoader で読めること）').toEqual([]);
+  const nodes = json.nodes ?? [];
+  expect(nodes.filter((n) => n.mesh !== undefined).length, 'メッシュの物').toBeGreaterThan(0);
+  const re = new RegExp(`^${name}\\.[a-z][a-z0-9_]*(\\.[0-9]+)?$`);
+  expect(nodes.map((n) => n.name ?? '(名前なし)').filter((n) => !re.test(n)), '物の名前は <部屋>.<部品>[.<番号>]').toEqual([]);
+
+  const baked = nodes.filter((n) => typeof n.extras?.lightmap === 'string');
+  expect(baked.length, '光を焼き込んだ物（extras.lightmap）').toBeGreaterThan(0);
+  let total = buf.length;
+  for (const m of new Set(baked.map((n) => n.extras!.lightmap as string))) {
+    const f = new URL(`rooms/${m}`, ASSETS);
+    expect(existsSync(f), `ライトマップ rooms/${m}`).toBe(true);
+    total += statSync(f).size;
+  }
+  for (const n of baked) expect(Number(n.extras!.lightmap_scale), `${n.name} の lightmap_scale`).toBeGreaterThan(0);
+  expect(total, 'glb とライトマップの合計（部屋の読み込み）').toBeLessThanOrEqual(limit);
+
+  const gltfAsked: string[] = [];
+  const textures = new Map<string, THREE.Texture[]>();
+  const spy: AssetLoader = {
+    gltf(path) {
+      gltfAsked.push(path);
+      return nodeAssets.gltf(path);
+    },
+    async texture(path) {
+      const t = await nodeAssets.texture(path);
+      textures.set(path, [...(textures.get(path) ?? []), t]);
+      return t;
+    },
+  };
+  const { room } = await loadRoom(factory, { assets: spy });
+  expect(gltfAsked, '部屋は glb を ctx.assets から読む').toContain(glbPath);
+  const byName = new Map<string, THREE.Object3D>();
+  room.root.traverse((o) => {
+    if (typeof o.userData.name === 'string') byName.set(o.userData.name, o);
+  });
+  for (const n of baked) {
+    const o = byName.get(n.name!);
+    expect(o, `焼き込んだ ${n.name} が部屋にある`).toBeDefined();
+    // 材質が複数の物は GLTFLoader が Group の下にメッシュを並べる
+    const meshes = (o as THREE.Mesh).isMesh ? [o as THREE.Mesh] : o!.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh && c.userData.name === undefined);
+    const mats = meshes.flatMap((m) => ([] as THREE.Material[]).concat(m.material));
+    expect(mats.length, `${n.name} の材質`).toBeGreaterThan(0);
+    const own = textures.get(`rooms/${n.extras!.lightmap as string}`) ?? [];
+    for (const m of mats as THREE.MeshStandardMaterial[]) {
+      expect(m.lightMap, `${n.name} の lightMap`).toBeTruthy();
+      expect(own, `${n.name} の lightMap はその物のライトマップ（材質を共有して上書きしない）`).toContain(m.lightMap);
+      expect(m.lightMap!.colorSpace, `${n.name} の lightMap は sRGB`).toBe(THREE.SRGBColorSpace);
+      expect(m.lightMap!.channel, `${n.name} の lightMap は2つ目の UV`).toBe(1);
+      expect(m.lightMapIntensity, `${n.name} の lightMapIntensity`).toBeGreaterThan(0);
+    }
+  }
+  room.dispose();
 }
