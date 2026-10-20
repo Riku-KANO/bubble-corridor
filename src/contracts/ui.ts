@@ -57,6 +57,8 @@ export interface Progress {
 
 export interface UiState {
   readonly screen: ScreenId;
+  /** 画面で乗るか VR で乗るか（入口の「乗る」「VRで乗る」で決まる。入口へ戻ると画面に戻る）。UI は VR の案内などの出し分けに使う */
+  readonly viewMode: ViewMode;
   /** 待ち列の読み込み（0〜1） */
   readonly loadProgress: number;
   readonly settings: Settings;

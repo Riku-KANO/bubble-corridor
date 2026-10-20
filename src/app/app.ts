@@ -8,25 +8,16 @@ import type { RideClock } from '../contracts/clock';
 import type { RidePose } from '../contracts/ride';
 import type { RoomContext, RoomFrame, RoomModule } from '../contracts/room';
 import type { PhotoRecord } from '../contracts/photo';
-import type { Progress, Settings, UiCommands, UiState } from '../contracts/ui';
-import {
-  CAMERA,
-  CELESTIAL_BLACKOUT_SEC,
-  HIDDEN_BUBBLE_SECTIONS,
-  PHOTO,
-  RIDE_DURATION,
-  SEC_PER_BAR,
-  SECTIONS,
-  TRANSITION_SEC,
-} from '../config';
+import type { Progress, QualitySetting, Settings, UiCommands, UiState } from '../contracts/ui';
+import { CAMERA, HIDDEN_BUBBLE_SECTIONS, PHOTO, RIDE_DURATION, TRANSITION_SEC, UI } from '../config';
 import { createBus } from '../core/events';
-import { smoothstep } from '../core/easing';
+import { lerp, smoothstep } from '../core/easing';
 import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityPreset } from '../core/quality';
 import { createAudioEngine } from '../audio';
 import { createScreenFx } from '../fx';
 import { createGondola } from '../gondola';
 import { createLookControl, createTouchInput } from '../input';
-import { capturePhoto, createPhotoStore, composePhoto, downloadPhoto, photoFileName, sharePhoto, stampText } from '../photo';
+import { capturePhoto, createPhotoStore, composePhoto, downloadPhoto, photoFileName, sharePhoto, stampText, warmUpCapture } from '../photo';
 import { buildCueSheet, createCueDispatcher, createRide, createWallClock, generateRideData, streamingPlan } from '../ride';
 import { ROOM_FACTORIES } from '../rooms';
 import { loadProgress as readProgress, loadSettings, mountUi, saveProgress, saveSettings } from '../ui';
@@ -34,11 +25,14 @@ import { createXRSystem } from '../xr';
 import { createAssetLoader } from './assets';
 import { createDebugOverlay } from './debug';
 import { INITIAL_FLOW, reduceFlow, type FlowAction, type FlowState } from './flow';
+import { createIdleChimer } from './idle-chime';
 import { parseParams } from './params';
 import { RoomManager } from './rooms';
 import { loadRideData } from './ride-data';
+import { BOARD_START_SEC, fxAt, type FxTimeline, type FxTimelineOptions } from './timeline';
 
-const BOARD_START = 0.5; // 殻が閉じ始める乗車の秒（ゴンドラが浮かび上がった後）
+/** 書き換えて使い回す入れ物（毎フレームの確保を避ける）の型 */
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 export async function startApp(root: HTMLElement): Promise<void> {
   const params = parseParams(location.search);
@@ -68,9 +62,12 @@ export async function startApp(root: HTMLElement): Promise<void> {
     hardwareConcurrency: navigator.hardwareConcurrency,
     screenPixels: screen.width * screen.height * devicePixelRatio * devicePixelRatio,
   };
-  const qualitySetting = params.quality ?? settings.quality;
-  const quality: QualityPreset = presetFor(qualitySetting === 'auto' ? detectTier(hints) : qualitySetting, hints);
-  const dynRes = new DynamicResolution(quality);
+  // 品質は設定で変わる（即時に反映する）。?quality があればそれを優先する
+  const wantedQuality = (): QualitySetting => params.quality ?? settings.quality;
+  const presetOf = (setting: QualitySetting): QualityPreset => presetFor(setting === 'auto' ? detectTier(hints) : setting, hints);
+  let appliedQuality = wantedQuality();
+  let quality: QualityPreset = presetOf(appliedQuality);
+  let dynRes = new DynamicResolution(quality);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x14181f);
@@ -81,8 +78,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // 焼き込み前提で動く光源は持たない。仮の部屋のために弱い環境光だけ置く
   scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x30302a, 1.2));
 
-  const fx = createScreenFx(renderer);
-  fx.setEnabled(quality.postFx && !params.nofx);
+  // ブルームは解像度を落として計算する（スマートフォンは更に小さく）。光の点滅を抑えるモードは設定から毎フレーム読む
+  const fx = createScreenFx(renderer, { reducedFlash: () => settings.reducedFlash, bloomResolution: isMobile ? 0.25 : 0.5 });
 
   // ── 進行 ──
   const bus = createBus<RideEvents>();
@@ -93,7 +90,6 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const ride = createRide((await loadRideData()) ?? generateRideData());
   const cues = buildCueSheet();
   const dispatcher = createCueDispatcher(cues, bus);
-  const membraneTimes = cues.filter((c) => c.name === 'membrane').map((c) => c.t);
 
   // ── 乗車ごとの状態 ──
   let door: DoorChoice | null = params.door;
@@ -105,6 +101,10 @@ export async function startApp(root: HTMLElement): Promise<void> {
   let latestPhoto: PhotoRecord | null = null;
   let shelf: PhotoRecord[] = [];
   let hintShown = false;
+  /** 殻が閉じる音を鳴らしたか。時刻（BOARD_START_SEC）を越えたときに一度だけ。?t で越えた後から始めたら鳴らさない */
+  let shellCloseSounded = true;
+  /** 前のフレームの乗車の秒（dt を出す）。新しい乗車の最初のフレームで、?t の位置まで飛んだ長さを dt にしないよう beginRide で合わせる */
+  let lastT = 0;
   const photoStore = createPhotoStore();
   void photoStore.list().then((list) => {
     shelf = list;
@@ -112,7 +112,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
   });
 
   // ── 部屋 ──
-  const roomCtx: RoomContext = {
+  // quality は設定で変わるので書き換えられる型にしておく。作り直さず差し替えるだけなので、読み込み済みの部屋は前の品質のまま、
+  // 次に読み込む部屋から新しい品質が効く（部屋は load の時点で品質を読む）
+  const roomCtx: Mutable<RoomContext> = {
     ride,
     assets: createAssetLoader(),
     events: bus,
@@ -129,8 +131,21 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const look = createLookControl(inputDeps, { mode: settings.lookMode, gyro: settings.gyro, fovDeg: settings.fov });
   const touch = createTouchInput(inputDeps);
   touch.setGazeDwell(settings.gazeDwellSec);
-  touch.onIdleChime((t) => audio.chime({ id: t.id, kind: t.kind, section: t.section, position: worldPos(t.object) }));
+  // 自分で鳴る合図（INT-4）は画面でも VR でも同じ物差しなので、入力の側ではなくここで持つ（touch.onIdleChime は使わない）
+  const chimer = createIdleChimer((t) => audio.chime({ id: t.id, kind: t.kind, section: t.section, position: worldPos(t.object) }));
   const xr = createXRSystem(renderer, { scene, camera, events: bus, now: () => clock.time });
+  // 画面効果を使うか: 品質が許し、VR でないとき。VR は renderer.render で直接描く（速さを優先、カメラを演出で動かさない）
+  const applyFxEnabled = () => fx.setEnabled(!xr.active && quality.postFx && !params.nofx);
+  applyFxEnabled();
+  // 画面 → VR の白い霧。乗車の時計の外の遷移なので壁時計で進める（満ちるのは TRANSITION_SEC.screenToVR）
+  const fog = { from: 0, to: 0, startMs: 0 };
+  const fogAt = (nowMs: number): number => lerp(fog.from, fog.to, smoothstep(0, TRANSITION_SEC.screenToVR * 1000, nowMs - fog.startMs));
+  const fogTo = (to: number, instant = false) => {
+    const nowMs = performance.now();
+    fog.from = instant ? to : fogAt(nowMs);
+    fog.to = to;
+    fog.startMs = nowMs;
+  };
   let xrSupported = false;
   void xr.isSupported().then((ok) => {
     xrSupported = ok;
@@ -159,12 +174,21 @@ export async function startApp(root: HTMLElement): Promise<void> {
       audio.sfx('ticket.punch');
       if (mode === 'vr') {
         audio.sfx('vr.fog');
+        // ブラウザの規則で、VR のセッションはこの操作の中で要求する。画面の霧は同時に始めてよい（満ちる間に VR の準備が進む）
+        fogTo(1);
         void xr.enter(settings.xrPosture).then(
-          // 始まった直後にセッションが終わっていたら（すぐにヘッドセットを外した）、乗車へ進まない
           () => {
-            if (xr.active) dispatch({ type: 'ride', mode });
+            applyFxEnabled(); // VR の間は後処理を使わない（VR の中の霧は xr が引き継ぐ）
+            // 始まった直後にセッションが終わっていたら（すぐにヘッドセットを外した）、乗車へ進まず霧を晴らす
+            if (xr.active) {
+              fogTo(0, true);
+              dispatch({ type: 'ride', mode });
+            } else fogTo(0);
           },
-          (err) => console.error('[xr] VR を始められませんでした', err),
+          (err) => {
+            console.error('[xr] VR を始められませんでした', err);
+            fogTo(0);
+          },
         );
         return;
       }
@@ -222,9 +246,18 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
   const ui = mountUi(root, commands);
   // e2e と snap が操作するための口（?debug のときだけ）
-  debug?.expose({ commands, xr: () => xr.active, xrFrames: () => xrFrames, xrSupported: () => xrSupported, xrExit: () => () => xr.exit() });
+  debug?.expose({
+    commands,
+    xr: () => xr.active,
+    xrFrames: () => xrFrames,
+    xrSupported: () => xrSupported,
+    xrExit: () => () => xr.exit(),
+    /** この乗車で撮った写真の枚数 */
+    photos: () => shots.length,
+  });
   const uiState = (): UiState => ({
     screen: flow.screen,
+    viewMode: flow.viewMode,
     loadProgress,
     settings,
     progress,
@@ -246,21 +279,36 @@ export async function startApp(root: HTMLElement): Promise<void> {
     camera.updateProjectionMatrix();
     look.setOptions({ mode: settings.lookMode, gyro: settings.gyro, fovDeg: settings.fov });
     touch.setGazeDwell(settings.gazeDwellSec);
+    xr.setGazeDwell(settings.gazeDwellSec);
     audio.setVolumes(settings.volumes);
     xr.setVignette(settings.vignette);
     document.documentElement.style.setProperty('--text-scale', String(settings.textScale));
     document.documentElement.lang = settings.lang;
+    // 品質の即時反映: 目標・画素比・後処理の有無・動的な解像度を作り直す（アンチエイリアスは描画器の作成時に決まるので次の起動から）
+    const wanted = wantedQuality();
+    if (wanted !== appliedQuality) {
+      appliedQuality = wanted;
+      quality = presetOf(wanted);
+      roomCtx.quality = quality;
+      dynRes = new DynamicResolution(quality);
+      applyFxEnabled();
+      onResize();
+    }
   }
   applySettings();
 
   // ── 遷移の副作用 ──
+  let guideTimer = 0;
   function onScreenChange(prev: FlowState, next: FlowState) {
     if (next.screen === 'riding' && (prev.screen === 'guide' || prev.screen === 'home' || prev.screen === 'photo')) beginRide();
+    // 案内を出ている間だけ自動進行の見張りを持つ（飛ばしたら止める）
+    if (prev.screen === 'guide' && next.screen !== 'guide') window.clearTimeout(guideTimer);
     if (next.screen === 'guide') {
-      // 案内は6秒で自動的に進む。クリックで飛ばせる。2回目以降は出さない
+      // 案内は UI.preRideGuideSec 秒で自動的に進む。クリックで飛ばせる。2回目以降は出さない
       progress = { ...progress, seenGuide: true };
       saveProgress(progress);
-      window.setTimeout(() => dispatch({ type: 'guideDone' }), 6000);
+      window.clearTimeout(guideTimer);
+      guideTimer = window.setTimeout(() => dispatch({ type: 'guideDone' }), UI.preRideGuideSec * 1000);
     }
     if (next.screen === 'pause' && prev.screen === 'riding') {
       clock.pause();
@@ -290,9 +338,13 @@ export async function startApp(root: HTMLElement): Promise<void> {
     hiddenThisRide = [];
     shots = [];
     hintShown = false;
+    chimer.reset();
     audio.stopLobby();
     audio.setDoor(door ?? DEFAULT_DOOR);
     const t0 = params.t ?? 0;
+    // 殻が閉じる音は時刻から一度だけ。?t で閉じ始めの後から始めたときに、過ぎた分を鳴らさない
+    shellCloseSounded = t0 > BOARD_START_SEC;
+    lastT = t0;
     dispatcher.reset(t0);
     rooms.forEachReady((m) => m.setDoor?.(door ?? DEFAULT_DOOR));
     clock.start(t0);
@@ -332,6 +384,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   });
   bus.on('touch', (e) => {
     touches++;
+    chimer.touched(e.touchableId);
     audio.touch({ id: e.touchableId, kind: e.kind, section: e.section, position: e.position });
   });
   bus.on('doorChosen', (e) => {
@@ -380,6 +433,10 @@ export async function startApp(root: HTMLElement): Promise<void> {
         }
         doorDecided = true;
         break;
+      case 'departure.open':
+        // 配信は時刻順に一度だけで、?t で過ぎた分は流れない（過去の分を鳴らさない）
+        audio.sfx('gondola.open');
+        break;
       case 'photo.capture':
         if (cue.data?.shot) void takeShot(cue.data.shot);
         break;
@@ -405,24 +462,36 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // ── 読み込み（待ち列の灯り） ──
   const initialRooms = ['lobby', 'platform', 'greenhouse'] as const;
   let readyCount = 0;
+  let captureWarmed = false;
   for (const id of initialRooms) {
     void rooms.ensure(id).then(() => {
       readyCount++;
       loadProgress = readyCount / initialRooms.length;
-      if (readyCount === initialRooms.length) dispatch({ type: 'loaded' });
+      if (readyCount === initialRooms.length) {
+        dispatch({ type: 'loaded' });
+        // 読み込みが終わった直後（待ち列 → 入口の頃）に、初回の撮影が重いぶんを先に済ませる。乗車中の撮影で画面が詰まらないように
+        if (!captureWarmed) {
+          captureWarmed = true;
+          void warmUpCapture(renderer, scene, camera);
+        }
+      }
       refreshUi();
     });
   }
   rooms.sync({ visible: ['lobby', 'platform'], keep: [...initialRooms] });
 
-  // 確認用: ?t や ?screen で途中から始める
+  // 確認用: ?t や ?screen で途中から始める。?screen=home と ?t が両方あれば入口で止まり、
+  // 「乗る」「VRで乗る」で ?t の時刻から乗る（Quest 3 で天球から VR を確かめるため）
   if (params.t !== null || params.screen) {
-    await Promise.all(initialRooms.map((id) => rooms.ensure(id)));
+    const stopAtHome = params.screen === 'home' && params.t !== null;
+    // 入口で止まる間に、乗る時刻の部屋も読み込んでおく（乗った直後に空の景色を見せない）
+    const ahead = stopAtHome && params.t !== null ? streamingPlan(params.t, ride).keep : [];
+    await Promise.all([...initialRooms, ...ahead].map((id) => rooms.ensure(id)));
     dispatch({ type: 'loaded' });
     dispatch({ type: 'enterHome' });
     if (params.t !== null) {
-      progress = { ...progress, seenGuide: true };
-      dispatch({ type: 'ride', mode: 'screen' });
+      progress = { ...progress, seenGuide: true }; // 途中から乗るので案内は出さない
+      if (!stopAtHome) dispatch({ type: 'ride', mode: 'screen' });
     }
   }
 
@@ -432,10 +501,14 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const camQuat = new THREE.Quaternion();
   const camEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   let lastNow = performance.now();
-  let lastT = 0;
+  const gondolaPos: [number, number, number] = [0, 0, 0];
+  const fxOptions: Mutable<FxTimelineOptions> = { comfort: 'standard', reducedFlash: false, riding: false };
+  const fxTimeline: FxTimeline = { bubble: 0, membrane: 0, brightness: 1, kaleidoscope: 0, kaleidoscopeAngle: 0, bloom: 0 };
   let currentAtmosphere: RoomModule['atmosphere'] | null = null;
 
   function onResize() {
+    // VR の描画は描画器の大きさに依らない。VR の間は触らず、終わったときに合わせ直す
+    if (xr.active) return;
     const w = innerWidth;
     const h = innerHeight;
     renderer.setPixelRatio(Math.min(devicePixelRatio, quality.maxPixelRatio) * dynRes.scale);
@@ -459,11 +532,21 @@ export async function startApp(root: HTMLElement): Promise<void> {
     ride.poseAt(t, settings.comfort, pose);
     gondola.root.position.set(pose.x, pose.y, pose.z);
     gondola.root.rotation.set(0, pose.yaw, 0);
-    // 殻: 乗車の頭で下から上へ閉じ、降車で上から下へ開く
-    const departT0 = sectionStart('departure');
-    const shell = riding ? smoothstep(BOARD_START, BOARD_START + TRANSITION_SEC.boarding, t) * (1 - smoothstep(departT0, departT0 + TRANSITION_SEC.boarding, t)) : 0;
-    gondola.setShell(shell);
+    gondolaPos[0] = pose.x;
+    gondolaPos[1] = pose.y;
+    gondolaPos[2] = pose.z;
+
+    // 殻と画面効果はすべて乗車の時刻から決める（乗車の頭で殻が下から上へ閉じ、降車で上から下へ開く）
+    fxOptions.comfort = settings.comfort;
+    fxOptions.reducedFlash = settings.reducedFlash;
+    fxOptions.riding = riding;
+    fxAt(t, cues, fxOptions, fxTimeline);
+    gondola.setShell(fxTimeline.bubble);
     gondola.update(nowMs / 1000, frameMs / 1000);
+    if (riding && !shellCloseSounded && t >= BOARD_START_SEC) {
+      shellCloseSounded = true;
+      audio.sfx('gondola.close');
+    }
 
     if (!xr.active) {
       look.update(frameMs / 1000);
@@ -485,7 +568,11 @@ export async function startApp(root: HTMLElement): Promise<void> {
     }
     const frame: RoomFrame = { t, dt, pose, camera, comfort: settings.comfort, reducedFlash: settings.reducedFlash };
     rooms.update(frame);
-    if (riding && !xr.active) touch.update(t, dt, camera, [pose.x, pose.y, pose.z]);
+    if (riding) {
+      if (!xr.active) touch.update(t, dt, camera, gondolaPos);
+      // 触れられないまま近づいた物が一度だけ自分で鳴る（画面でも VR でも）
+      chimer.update(gondolaPos, rooms.touchables());
+    }
 
     // 部屋の空気（膜を通る瞬間に切り替える。部屋が時刻で差し替えたときも反映する）
     const roomId = riding ? ROOM_OF_SECTION[pose.section] : 'lobby';
@@ -501,13 +588,15 @@ export async function startApp(root: HTMLElement): Promise<void> {
       }
     }
 
-    // 画面効果（すべて時刻から決める）
-    fx.state.bubble = shell;
-    fx.state.membrane = membraneAt(t);
-    fx.state.brightness = riding ? blackoutBrightness(t) : 1;
-    fx.state.kaleidoscope = riding ? kaleidoscopeAmount(t) : 0;
-    // 模様の回転は時刻から決める（穏やかモードでは止める）
-    fx.state.kaleidoscopeAngle = riding && settings.comfort === 'standard' ? Math.max(0, t - sectionStart('kaleidoscope')) * 0.15 : 0;
+    // 画面効果（乗車の時刻から決めた値をそのまま渡す。白い霧だけは乗車の外の遷移なので壁時計）
+    const state = fx.state;
+    state.bubble = fxTimeline.bubble;
+    state.membrane = fxTimeline.membrane;
+    state.brightness = fxTimeline.brightness;
+    state.kaleidoscope = fxTimeline.kaleidoscope;
+    state.kaleidoscopeAngle = fxTimeline.kaleidoscopeAngle;
+    state.bloom = fxTimeline.bloom;
+    state.whiteFog = fogAt(nowMs);
 
     // 音の聞き手
     camera.getWorldPosition(camWorld);
@@ -521,9 +610,11 @@ export async function startApp(root: HTMLElement): Promise<void> {
     }
     else fx.render(scene, camera);
 
-    // 動的な解像度
-    const prevScale = dynRes.scale;
-    if (dynRes.sample(frameMs) !== prevScale) onResize();
+    // 動的な解像度（VR の描画は描画器の大きさに依らないので調整しない）
+    if (!xr.active) {
+      const prevScale = dynRes.scale;
+      if (dynRes.sample(frameMs) !== prevScale) onResize();
+    }
     debug?.update({ frameMs, t, section: pose.section, info: renderer.info, screen: flow.screen, scale: dynRes.scale });
   });
 
@@ -534,37 +625,19 @@ export async function startApp(root: HTMLElement): Promise<void> {
       else if (flow.screen === 'pause') commands.resume();
     }
   });
-  addEventListener('pointermove', () => {
-    if (flow.screen === 'riding') ui.flashPauseDrop();
+  // 雫（ポーズ）はマウスを動かしたときだけ。タッチのドラッグ（見回し）では出さない
+  addEventListener('pointermove', (e) => {
+    if (flow.screen === 'riding' && e.pointerType === 'mouse') ui.flashPauseDrop();
   });
-  xr.onSessionEnd(() => dispatch({ type: 'xrEnded' }));
+  xr.onSessionEnd(() => {
+    // VR が終わった: 画面の品質に戻す（後処理・画素比）。霧は残さない
+    fogTo(0, true);
+    applyFxEnabled();
+    onResize();
+    dispatch({ type: 'xrEnded' });
+  });
 
   refreshUi();
-
-  function membraneAt(t: number): number {
-    const half = TRANSITION_SEC.membrane / 2;
-    let m = 0;
-    for (const tm of membraneTimes) {
-      const d = Math.abs(t - tm);
-      if (d < half) m = Math.max(m, 1 - d / half);
-    }
-    return m;
-  }
-
-  function blackoutBrightness(t: number): number {
-    const t0 = sectionStart('celestial');
-    if (t < t0 || t > t0 + 30) return 1;
-    // 唯一の暗闇。光の点滅を抑えるモードでは点灯をゆっくりにする
-    const ramp = settings.reducedFlash ? 6 : 2.5;
-    return smoothstep(t0 + CELESTIAL_BLACKOUT_SEC, t0 + CELESTIAL_BLACKOUT_SEC + ramp, t);
-  }
-
-  function kaleidoscopeAmount(t: number): number {
-    const t0 = sectionStart('kaleidoscope');
-    const t1 = sectionStart('celestial');
-    return smoothstep(t0, t0 + 6, t) * (1 - smoothstep(t1 - 8, t1, t));
-  }
-
 }
 
 async function isImmersiveVrSupported(): Promise<boolean> {
@@ -573,11 +646,6 @@ async function isImmersiveVrSupported(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function sectionStart(id: SectionId): number {
-  const s = SECTIONS.find((x) => x.id === id);
-  return s ? s.startBar * SEC_PER_BAR : 0;
 }
 
 function worldPos(o: THREE.Object3D): Vec3Tuple {

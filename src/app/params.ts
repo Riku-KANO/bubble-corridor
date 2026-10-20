@@ -5,6 +5,7 @@
 //   ?webgl            WebGPU があっても WebGL2 で描く
 //   ?lang=en          言語を上書きする
 //   ?screen=home      最初の画面（queue / home / photo）
+//   ?screen=home&t=588  入口で止まり、「乗る」「VRで乗る」で 588 秒から乗る（Quest 3 で天球から VR を確かめる）
 //   ?door=amber       扉の選択を固定する
 //   ?quality=low      品質を上書きする
 //   ?nofx             後処理を切る
