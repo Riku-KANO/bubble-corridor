@@ -6,7 +6,7 @@ import type { DoorChoice, Lang, SectionId, ShotId } from '../contracts/ids';
 import { DEFAULT_DOOR, ROOM_OF_SECTION } from '../contracts/ids';
 import type { RideClock } from '../contracts/clock';
 import type { RidePose } from '../contracts/ride';
-import type { RoomContext, RoomFrame } from '../contracts/room';
+import type { RoomContext, RoomFrame, RoomModule } from '../contracts/room';
 import type { PhotoRecord } from '../contracts/photo';
 import type { Progress, Settings, UiCommands, UiState } from '../contracts/ui';
 import {
@@ -31,6 +31,7 @@ import { buildCueSheet, createCueDispatcher, createRide, createWallClock, genera
 import { ROOM_FACTORIES } from '../rooms';
 import { loadProgress as readProgress, loadSettings, mountUi, saveProgress, saveSettings } from '../ui';
 import { createXRSystem } from '../xr';
+import { createAssetLoader } from './assets';
 import { createDebugOverlay } from './debug';
 import { INITIAL_FLOW, reduceFlow, type FlowAction, type FlowState } from './flow';
 import { parseParams } from './params';
@@ -50,7 +51,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
   let progress: Progress = readProgress();
 
   // ── 描画 ──
-  const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: params.webgl });
+  // VR で乗れる端末（ヘッドセットのブラウザ）では最初から WebGL2 の経路で描く（ADR-0001。VR は WebGL2 の経路）
+  const xrCapable = await isImmersiveVrSupported();
+  const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: params.webgl || xrCapable });
   await renderer.init();
   const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'WebGPU' : 'WebGL2';
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -111,6 +114,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // ── 部屋 ──
   const roomCtx: RoomContext = {
     ride,
+    assets: createAssetLoader(),
     events: bus,
     quality,
     comfort: () => settings.comfort,
@@ -143,6 +147,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   };
 
   const debug = params.debug ? createDebugOverlay(root, backend) : null;
+  let xrFrames = 0;
 
   const commands: UiCommands = {
     enterHome() {
@@ -213,6 +218,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   };
 
   const ui = mountUi(root, commands);
+  // e2e と snap が操作するための口（?debug のときだけ）
+  debug?.expose({ commands, xr: () => xr.active, xrFrames: () => xrFrames, xrSupported: () => xrSupported, xrExit: () => () => xr.exit() });
   const uiState = (): UiState => ({
     screen: flow.screen,
     loadProgress,
@@ -422,7 +429,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const camEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   let lastNow = performance.now();
   let lastT = 0;
-  let currentAtmosphereRoom = '';
+  let currentAtmosphere: RoomModule['atmosphere'] | null = null;
 
   function onResize() {
     const w = innerWidth;
@@ -476,13 +483,13 @@ export async function startApp(root: HTMLElement): Promise<void> {
     rooms.update(frame);
     if (riding && !xr.active) touch.update(t, dt, camera, [pose.x, pose.y, pose.z]);
 
-    // 部屋の空気（膜を通る瞬間に切り替える）
+    // 部屋の空気（膜を通る瞬間に切り替える。部屋が時刻で差し替えたときも反映する）
     const roomId = riding ? ROOM_OF_SECTION[pose.section] : 'lobby';
-    if (roomId !== currentAtmosphereRoom) {
-      const m = rooms.get(roomId);
-      if (m) {
-        currentAtmosphereRoom = roomId;
-        const a = m.atmosphere;
+    const atmosphere = rooms.get(roomId)?.atmosphere ?? null;
+    if (atmosphere && atmosphere !== currentAtmosphere) {
+      {
+        currentAtmosphere = atmosphere;
+        const a = atmosphere;
         scene.background = new THREE.Color(a.background);
         scene.fog = a.fog ? new THREE.Fog(a.fog.color, a.fog.near, a.fog.far) : null;
         renderer.toneMappingExposure = a.exposure;
@@ -503,7 +510,10 @@ export async function startApp(root: HTMLElement): Promise<void> {
     camEuler.setFromQuaternion(camQuat, 'YXZ');
     audio.setListener({ x: camWorld.x, y: camWorld.y, z: camWorld.z, yaw: camEuler.y, pitch: camEuler.x });
 
-    if (xr.active) renderer.render(scene, camera);
+    if (xr.active) {
+      xrFrames++;
+      renderer.render(scene, camera);
+    }
     else fx.render(scene, camera);
 
     // 動的な解像度
@@ -550,6 +560,14 @@ export async function startApp(root: HTMLElement): Promise<void> {
     return smoothstep(t0, t0 + 6, t) * (1 - smoothstep(t1 - 8, t1, t));
   }
 
+}
+
+async function isImmersiveVrSupported(): Promise<boolean> {
+  try {
+    return (await navigator.xr?.isSessionSupported('immersive-vr')) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 function sectionStart(id: SectionId): number {

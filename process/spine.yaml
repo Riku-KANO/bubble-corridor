@@ -35,8 +35,8 @@ slices:
   depends_on: [S-00]
   paths: [src/ride/**, scripts/build-ride-data.ts, scripts/comfort.ts, public/assets/rail.json, public/assets/cues.json, dev/ride.html, src/dev/ride/**]
   tests: [src/ride/ride.test.ts, src/ride/cues.test.ts, src/ride/comfort.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト49件（ride 22、cues 14、comfort 13）を作成。赤の証跡: vitest run src/ride → 23 failed（STUB: 直線のレール、空のキューシート、analyzeComfort が空、先読みが今の部屋だけ）。実装 消費 1/3（委任前に記録）'
 - id: S-11
   title: 音楽と音（構成データ、演奏、触れた音、立体音響と残響、ガラスの音源の合成）
   wave: 1
@@ -46,8 +46,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/sound/**, src/audio/**, dev/audio.html, src/dev/audio/**]
   tests: [src/core/sound/sound.test.ts, src/audio/audio.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3'
 - id: S-12
   title: 共通部品（ガラスの材質ライブラリ、曇りと指の文字、品質プリセットと動的な解像度）
   wave: 1
@@ -57,8 +57,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/materials/**, src/core/fog/**, src/core/quality.ts, dev/core.html, src/dev/core/**]
   tests: [src/core/quality.test.ts, src/core/fog/condensation.test.ts, src/core/materials/glass.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト（quality 13、condensation 8、glass 7）を作成。赤の証跡: 9 failed。glass の7件は STUB が契約を満たすため初めから緑 → CORE-3 の受け入れは dev/core.html の snap と reviewer の目視で行う。実装 消費 1/3'
 - id: S-13
   title: 画面（待ち列・入口・案内・ポーズ・ライドフォト・記録・棚・設定・乗り方・クレジット）と言語・保存
   wave: 1
@@ -68,8 +68,8 @@ slices:
   depends_on: [S-00]
   paths: [src/ui/**, src/styles/**, dev/ui.html, src/dev/ui/**]
   tests: [src/ui/store.test.ts, src/ui/i18n.test.ts, src/ui/screens.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト（store 10、i18n 6、screens 17）を作成。赤の証跡: i18n 未実装で読み込み失敗、store 5 failed。実装 消費 1/3'
 - id: S-14
   title: ライドフォト（高解像度の撮影、額縁と刻印の合成、IndexedDB、保存と共有）
   wave: 1
@@ -79,8 +79,8 @@ slices:
   depends_on: [S-00]
   paths: [src/photo/**, dev/photo.html, src/dev/photo/**]
   tests: [src/photo/photo.test.ts]
-  status: todo
-  notes: ''
+  status: green
+  notes: '2026-10-20 親がテスト16件を作成。赤の証跡: 8 failed（frameTierFor・stampText・doorTint・cropFor・保存の上限）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（photo 12件、全体35件、check.sh --quick ALL OK）。親のテストの型の誤り（share.mock.calls の型）を親が修正。WebGPU と WebGL2 で撮影・合成・保存を確認（画像 .snaps/photo/）。レビュー 消費 1/2'
 - id: S-15
   title: 見回すと触れる（ドラッグ・追従・傾き、光線の交差判定、見つめて触れる、縁の光、自分で鳴る合図）
   wave: 1
@@ -90,8 +90,8 @@ slices:
   depends_on: [S-00]
   paths: [src/input/**, dev/input.html, src/dev/input/**]
   tests: [src/input/look.test.ts, src/input/touch.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト（look 11、touch 11）を作成。赤の証跡: 12 failed（STUB は見回しも触れるも何もしない）。実装 消費 1/3'
 - id: S-16
   title: 画面効果（泡越しの縁、膜の通過の縞と歪み、万華鏡の折り返し、ブルーム、白い霧、暗転）
   wave: 1
@@ -101,8 +101,8 @@ slices:
   depends_on: [S-00]
   paths: [src/fx/**, dev/fx.html, src/dev/fx/**]
   tests: [src/fx/fx.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト9件を作成。赤の証跡: 9 failed（resolveFx が未実装）。実装 消費 1/3'
 - id: S-20
   title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を完成品質で
   wave: 2
@@ -138,15 +138,15 @@ slices:
   notes: ''
 - id: S-23
   title: VR（immersive-vr、座る/立つ、指先とコントローラーで触れる、外周の暗さ、曇りガラスのメニュー）と描画経路の検証
-  wave: 2
+  wave: 1
   lane: xr
   milestone: M0
   requirements: [CAM-3, INT-2, REN-1]
-  depends_on: [S-15]
+  depends_on: [S-00]
   paths: [src/xr/**, e2e/xr.spec.ts, e2e/render-paths.spec.ts, dev/xr.html, src/dev/xr/**]
   tests: [src/xr/xr.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 親がテスト（xr 単体 12、e2e xr 3・render-paths 2）を作成。main に VR 可能な端末で WebGL2 経路を選ぶ処理と ?debug の操作口（commands、xr、xrFrames、xrExit）を追加して取り込み。赤の証跡: vitest src/xr → 9 failed（referenceSpaceFor など未実装）、e2e は STUB の isSupported=false で失敗。実装 消費 1/3'
 - id: S-24
   title: 統合（誘導・正面へ戻す・案内・膜・暗転・撮影の配線、e2e の通し、snap、関門の計測）
   wave: 3
