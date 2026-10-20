@@ -20,6 +20,8 @@ export interface WriteOptions {
   readonly align?: 'center' | 'left';
   /** 行の間隔（文字の高さに対する倍率） */
   readonly lineHeight?: number;
+  /** 幅に収めるために自動で縮めるときの最小の文字の大きさ（px）。既定 18（設計書の最小の文字サイズ）。収まらなければ縁で切れる */
+  readonly minFontPx?: number;
 }
 
 export interface Condensation {
@@ -159,6 +161,36 @@ function makeDropSprite(): HTMLCanvasElement | null {
   g.beginPath();
   g.ellipse(cx - r * 0.38, cy - r * 0.42, r * 0.2, r * 0.13, -0.6, 0, Math.PI * 2);
   g.fill();
+  return c;
+}
+
+/** 霞と水滴の細かさの上限（dpr）。これ以上は画素を増やしても曇りの見た目は変わらず、作る時間とメモリだけ増える（描くとき引き伸ばす） */
+const FOG_DPR_MAX = 1.5;
+
+/** 中心から広がる曇りの縁の形（中心から内側の 62% は 1、外へ向かって 0 まで）。一度作って、大きさを変えて貼る */
+function makeRadialSprite(): HTMLCanvasElement | null {
+  const size = 256;
+  const c = makeCanvas(size, size);
+  const g = context2d(c);
+  if (!g) return null;
+  const grad = g.createRadialGradient(size / 2, size / 2, size * 0.5 * 0.62, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(0,0,0,1)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return c;
+}
+
+/** 書き進みの先端のぼかし（左が 1、右が 0 の横の帯）。一度作って、行ごとに伸ばして貼る */
+function makeRampSprite(): HTMLCanvasElement | null {
+  const c = makeCanvas(64, 4);
+  const g = context2d(c);
+  if (!g) return null;
+  const grad = g.createLinearGradient(0, 0, 64, 0);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 4);
   return c;
 }
 
@@ -304,7 +336,12 @@ export function createCondensation(opts: CondensationOptions): Condensation {
   let textLayer: HTMLCanvasElement | null = null; // 文字の形（書き終わった姿。文字が変わるまで不変）
   let maskLayer: HTMLCanvasElement | null = null; // 書き進みの形（左から現れる）
   let wipeLayer: HTMLCanvasElement | null = null; // 拭き取りの形（text × mask）
+  let radialSprite: HTMLCanvasElement | null = null; // 広がりの縁の形（一度だけ作る）
+  let rampSprite: HTMLCanvasElement | null = null; // 書き進みの先端のぼかし（一度だけ作る）
   const hasCtx = ctx !== null;
+  /** 拭き取りの形を作り直さなくてよいか調べる鍵（書き進み・残り・配置が同じなら前のまま） */
+  let wipeKey = '';
+  let layoutVersion = 0;
 
   let density = 0;
   let ramp: Ramp | null = null;
@@ -319,10 +356,37 @@ export function createCondensation(opts: CondensationOptions): Condensation {
   const ensureLayers = () => {
     if (!hasCtx || fogLayer) return;
     fogLayer = makeCanvas(canvas.width, canvas.height);
+    // 霞と水滴は dpr 1.5 までの細かさで作り、描くときに引き伸ばす
+    const k = Math.min(1, FOG_DPR_MAX / dpr);
+    fogTex = buildFogTexture(Math.round(canvas.width * k), Math.round(canvas.height * k), dpr * k, tint);
+    radialSprite ??= makeRadialSprite();
+    rampSprite ??= makeRampSprite();
+  };
+
+  /** 文字の canvas は、文字があるあいだだけ持つ（曇りだけの間は解放してメモリを返す） */
+  const ensureTextLayers = () => {
+    if (!hasCtx || textLayer) return;
     textLayer = makeCanvas(canvas.width, canvas.height);
     maskLayer = makeCanvas(canvas.width, canvas.height);
     wipeLayer = makeCanvas(canvas.width, canvas.height);
-    fogTex = buildFogTexture(canvas.width, canvas.height, dpr, tint);
+    wipeKey = '';
+  };
+
+  const releaseTextLayers = () => {
+    for (const c of [textLayer, maskLayer, wipeLayer]) {
+      if (c) {
+        c.width = 0;
+        c.height = 0;
+      }
+    }
+    textLayer = maskLayer = wipeLayer = null;
+    wipeKey = '';
+  };
+
+  /** 文字を捨てる（拭き取りの跡も、canvas も残さない） */
+  const dropText = () => {
+    text = null;
+    releaseTextLayers();
   };
 
   /** 文字を配置して、書き終わった姿を textLayer に描く */
@@ -335,7 +399,6 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     const wantFont = t.opts.font ? resolveCssVars(t.opts.font, host) : null;
     // 大きさ: 指定があればそれを上限に、なければ高さから決める。幅に収まらなければ縮める
     const n = Math.max(1, t.lines.length);
-    // 大きさ: 指定があればそれを上限に、なければ高さから決める。幅に収まらなければ縮める
     let size = Math.min((wantFont && sizeOf(wantFont)) || Infinity, (cssH * 0.66) / (n * lh), cssW * 0.12);
     // font に大きさ（NNpx）がなければ、書体の指定とみなして大きさを足す
     const specFor = (s: number) =>
@@ -354,6 +417,12 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     const widest = Math.max(...widths, 1);
     if (widest > usable) {
       size *= usable / widest;
+      widths = measure(size);
+    }
+    // 小さくなりすぎない（設計書の最小の文字サイズ。収まらないときは縁で切れる方を選ぶ）
+    const minPx = t.opts.minFontPx ?? 18;
+    if (size < minPx) {
+      size = minPx;
       widths = measure(size);
     }
     const fontSpec = g.font;
@@ -386,6 +455,8 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     }
     g.setTransform(1, 0, 0, 1, 0, 0);
     t.layout = { sizePx: size, lineH: size * lh, fontSpec, lines, spans };
+    layoutVersion++;
+    wipeKey = '';
   };
 
   /** 書き進みの形: 各行を左から、先端をやわらかくぼかして現れさせる */
@@ -404,12 +475,11 @@ export function createCondensation(opts: CondensationOptions): Condensation {
       const x0 = l.x - lay.sizePx * 0.4;
       const x1 = l.x + l.width + lay.sizePx * 0.4;
       const front = x0 + (x1 - x0 + soft) * lp; // 先端（右端を越えて抜けきる）
-      const grad = g.createLinearGradient(front - soft, 0, front, 0);
-      grad.addColorStop(0, 'rgba(255,255,255,1)');
-      grad.addColorStop(1, 'rgba(255,255,255,0)');
-      g.fillStyle = grad;
-      // その行の帯だけ（隣の行は別の区間で書く）
-      g.fillRect(0, l.y - lay.lineH / 2, Math.max(0, front), lay.lineH);
+      // その行の帯だけ（隣の行は別の区間で書く）。先端の手前は塗りつぶし、先端はぼかしの帯を伸ばして貼る
+      const top = l.y - lay.lineH / 2;
+      g.fillStyle = '#fff';
+      if (front - soft > 0) g.fillRect(0, top, front - soft, lay.lineH);
+      if (rampSprite) g.drawImage(rampSprite, front - soft, top, soft, lay.lineH);
     });
     g.setTransform(1, 0, 0, 1, 0, 0);
   };
@@ -418,7 +488,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     dirty = false;
     if (!ctx) return;
     ensureLayers();
-    if (!fogLayer || !fogTex || !wipeLayer || !maskLayer || !textLayer) return;
+    if (!fogLayer || !fogTex) return;
     const W = canvas.width;
     const H = canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -428,44 +498,48 @@ export function createCondensation(opts: CondensationOptions): Condensation {
       return;
     }
     const fg = context2d(fogLayer);
-    const wg = context2d(wipeLayer);
-    if (!fg || !wg) return;
+    if (!fg) return;
 
     // 1. 曇りの下地を、密度に応じた濃さで置く
     fg.globalCompositeOperation = 'source-over';
     fg.clearRect(0, 0, W, H);
     fg.globalAlpha = smoothstep(0, 0.3, density);
-    fg.drawImage(fogTex, 0, 0);
+    fg.drawImage(fogTex, 0, 0, W, H);
     fg.globalAlpha = 1;
 
-    // 2. 中心から広がる（縁は蒸発が早いので、晴れるときは縁から消える）
-    if (density < 0.999) {
+    // 2. 中心から広がる（縁は蒸発が早いので、晴れるときは縁から消える）。縁の形の絵を大きさを変えて貼る
+    if (density < 0.999 && radialSprite) {
       const maxR = Math.hypot(W, H) / 2;
-      const r = maxR * 1.18 * Math.pow(density, 0.85);
-      const soft = maxR * 0.45;
-      const mask = fg.createRadialGradient(W / 2, H / 2, Math.max(0, r - soft), W / 2, H / 2, Math.max(1, r));
-      mask.addColorStop(0, `rgba(0,0,0,${smoothstep(0, 0.2, density)})`);
-      mask.addColorStop(1, 'rgba(0,0,0,0)');
+      // 内側の 62% が完全に覆うので、密度 1 に近づいたとき四隅まで届く大きさ（maxR / 0.62 より大きく）
+      const r = Math.max(1, maxR * 1.65 * Math.pow(density, 0.85));
       fg.globalCompositeOperation = 'destination-in';
-      fg.fillStyle = mask;
-      fg.fillRect(0, 0, W, H);
+      fg.globalAlpha = smoothstep(0, 0.2, density);
+      fg.drawImage(radialSprite, W / 2 - r, H / 2 - r, r * 2, r * 2);
+      fg.globalAlpha = 1;
       fg.globalCompositeOperation = 'source-over';
     }
 
     // 3. 指でなぞった所を拭き取る
-    if (text?.layout && text.progress > 0 && text.amount > 0.002) {
-      drawMask(text);
-      wg.setTransform(1, 0, 0, 1, 0, 0);
-      wg.globalCompositeOperation = 'source-over';
-      wg.clearRect(0, 0, W, H);
-      // 曇りに溶けていくときは、輪郭もにじませる（ctx.filter が使える環境だけ）
-      const melt = 1 - text.amount;
-      if (melt > 0.01 && 'filter' in wg) (wg as CanvasRenderingContext2D & { filter: string }).filter = `blur(${(melt * text.layout.sizePx * 0.35 * dpr).toFixed(1)}px)`;
-      wg.drawImage(textLayer, 0, 0);
-      if ('filter' in wg) (wg as CanvasRenderingContext2D & { filter: string }).filter = 'none';
-      wg.globalCompositeOperation = 'destination-in';
-      wg.drawImage(maskLayer, 0, 0);
-      wg.globalCompositeOperation = 'source-over';
+    if (text?.layout && text.progress > 0 && text.amount > 0.002 && textLayer && maskLayer && wipeLayer) {
+      const wg = context2d(wipeLayer);
+      if (!wg) return;
+      // 書き進みも残りも配置も変わっていなければ、拭き取りの形は前のまま使う（曇りだけが動く間は作り直さない）
+      const key = `${layoutVersion}|${text.progress.toFixed(4)}|${text.amount.toFixed(4)}`;
+      if (key !== wipeKey) {
+        wipeKey = key;
+        drawMask(text);
+        wg.setTransform(1, 0, 0, 1, 0, 0);
+        wg.globalCompositeOperation = 'source-over';
+        wg.clearRect(0, 0, W, H);
+        // 曇りに溶けていくときは、輪郭もにじませる（ctx.filter が使える環境だけ）
+        const melt = 1 - text.amount;
+        if (melt > 0.01 && 'filter' in wg) (wg as CanvasRenderingContext2D & { filter: string }).filter = `blur(${(melt * text.layout.sizePx * 0.35 * dpr).toFixed(1)}px)`;
+        wg.drawImage(textLayer, 0, 0);
+        if ('filter' in wg) (wg as CanvasRenderingContext2D & { filter: string }).filter = 'none';
+        wg.globalCompositeOperation = 'destination-in';
+        wg.drawImage(maskLayer, 0, 0);
+        wg.globalCompositeOperation = 'source-over';
+      }
 
       // 拭いた縁に水が寄って白くなる（文字のまわりが少し白く縁取られ、澄んだ線が読みやすくなる）
       const reach = text.layout.sizePx * 0.07 * dpr;
@@ -506,7 +580,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
         if (density === 0 && text) {
           text.written?.();
           text.erasing?.done();
-          text = null;
+          dropText();
         }
         done();
       }
@@ -530,7 +604,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
         tx.amount = e.from * (1 - easeInOutSine(p));
         changed = true;
         if (p >= 1) {
-          if (text === tx) text = null;
+          if (text === tx) dropText();
           e.done();
         }
       }
@@ -564,7 +638,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
         if (to === 0 && text) {
           text.written?.();
           text.erasing?.done();
-          text = null;
+          dropText();
         }
         dirty = true;
         advance(lastNow);
@@ -606,6 +680,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
         text = t;
         if (hasCtx && !disposed) {
           ensureLayers();
+          ensureTextLayers();
           layoutText(t);
           // フォントが読み込まれてから描き直す（読み込み前は代わりの書体で出てしまう）
           const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
@@ -637,7 +712,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
         t.written = null;
         t.erasing?.done();
         if (durationSec <= 0) {
-          text = null;
+          dropText();
           dirty = true;
           advance(lastNow);
           resolve();
@@ -662,11 +737,13 @@ export function createCondensation(opts: CondensationOptions): Condensation {
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
       // 作り直し（canvas の大きさを変えると中身は消える）
-      fogTex = fogLayer = textLayer = maskLayer = wipeLayer = null;
+      fogTex = fogLayer = null;
+      releaseTextLayers();
       if (text) {
         text.layout = null;
         if (hasCtx) {
           ensureLayers();
+          ensureTextLayers();
           layoutText(text);
         }
       }
@@ -683,11 +760,11 @@ export function createCondensation(opts: CondensationOptions): Condensation {
       const r = ramp;
       ramp = null;
       const t = text;
-      text = null;
+      dropText();
       r?.done();
       t?.written?.();
       t?.erasing?.done();
-      fogTex = fogLayer = textLayer = maskLayer = wipeLayer = null;
+      fogTex = fogLayer = radialSprite = rampSprite = null;
     },
   };
 }

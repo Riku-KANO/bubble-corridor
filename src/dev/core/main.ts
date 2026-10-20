@@ -8,7 +8,17 @@ import './dev.css';
 import * as THREE from 'three/webgpu';
 import { float, length, mix, screenSize, screenUV, smoothstep, vec2, vec3 } from 'three/tsl';
 import { createCondensation, type Condensation } from '../../core/fog/condensation';
-import { createBrass, createGlass, type GlassHandle, type GlassKind } from '../../core/materials/glass';
+import {
+  createBrass,
+  createGlass,
+  resetGlassLighting,
+  setDefaultGlassTier,
+  setGlassFlashScale,
+  setGlassLighting,
+  type GlassHandle,
+  type GlassKind,
+  type GlassParams,
+} from '../../core/materials/glass';
 import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityTier } from '../../core/quality';
 
 const KINDS: readonly GlassKind[] = ['clear', 'frosted', 'tinted', 'iridescent', 'milky', 'mirror'];
@@ -67,8 +77,9 @@ const hints: DeviceHints = {
 };
 const tierParam = params.get('tier');
 let tier: QualityTier = tierParam === 'low' || tierParam === 'medium' || tierParam === 'high' ? tierParam : detectTier(hints);
-const preset = presetFor(tier, hints);
-const dynRes = new DynamicResolution(preset);
+let preset = presetFor(tier, hints);
+let dynRes = new DynamicResolution(preset);
+setDefaultGlassTier(tier);
 
 // ── 背景: 夜明け前の青 → 朝の色。ぼんやりした灯りを置く ──
 const scene = new THREE.Scene();
@@ -143,6 +154,29 @@ scene.environmentIntensity = 1.25;
 
 const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
 
+// ── 擬似反射の照明: 部屋の空気に合わせて変える（天球は藍と星の白金、温室は若葉と朝日） ──
+const lightParam = params.get('light') ?? 'dawn';
+function applyLighting(name: string): void {
+  if (name === 'celestial') {
+    setGlassLighting({ sky: 0x1b2a66, ground: 0x0a0d24, keyDir: { x: 0.1, y: 1, z: 0.2 }, keyColor: 0xffe9b0, keyIntensity: 0.9 });
+  } else if (name === 'greenhouse') {
+    setGlassLighting({ sky: 0xcfe9b8, ground: 0x7a8a4a, keyDir: { x: 0.55, y: 0.75, z: 0.35 }, keyColor: 0xfff2c8, keyIntensity: 1 });
+  } else {
+    resetGlassLighting();
+  }
+}
+applyLighting(lightParam);
+
+// ── 霧: ?mist=近,遠（例 ?mist=5,26）。ガラスが霧に溶けるかを確かめる ──
+const mistParam = params.get('mist');
+if (mistParam) {
+  const [near, far] = mistParam.split(',').map(Number);
+  const color = new THREE.Color(0xdfe9d8); // 温室の霧の色
+  scene.backgroundNode = null;
+  scene.background = color;
+  scene.fog = new THREE.Fog(color, near || 5, far || 26);
+}
+
 // ── ガラスの並び: 球（上段）・板（中段）・泡（下段）。真鍮の枠付き ──
 function roundedPlate(w: number, hgt: number, depth: number, r: number): THREE.BufferGeometry {
   const s = new THREE.Shape();
@@ -166,6 +200,7 @@ interface Piece {
   readonly kind: GlassKind;
   readonly mesh: THREE.Mesh;
   readonly double: boolean;
+  readonly params: GlassParams;
   handle: GlassHandle;
 }
 const pieces: Piece[] = [];
@@ -189,14 +224,15 @@ const barH = new THREE.CapsuleGeometry(0.016, 1.27, 6, 12);
 
 kinds.forEach((kind, i) => {
   const x = (i - (kinds.length - 1) / 2) * colSpacing;
-  const add = (geo: THREE.BufferGeometry, y: number, double: boolean, parent: THREE.Object3D = world, pos?: THREE.Vector3): Piece => {
-    const handle = createGlass(kind, double ? { doubleSided: true } : {}, { tier });
+  const add = (geo: THREE.BufferGeometry, y: number, double: boolean, parent: THREE.Object3D = world, pos?: THREE.Vector3, extra: GlassParams = {}): Piece => {
+    const params: GlassParams = { ...extra, ...(double ? { doubleSided: true } : {}) };
+    const handle = createGlass(kind, params, { tier });
     const mesh = new THREE.Mesh(geo, handle.material);
     mesh.renderOrder = 1;
     if (pos) mesh.position.copy(pos);
     else mesh.position.set(x, y, 0);
     parent.add(mesh);
-    const piece: Piece = { kind, mesh, double, handle };
+    const piece: Piece = { kind, mesh, double, params, handle };
     pieces.push(piece);
     return piece;
   };
@@ -213,7 +249,8 @@ kinds.forEach((kind, i) => {
   const plateGroup = new THREE.Group();
   plateGroup.position.set(x, rowY[1], 0);
   world.add(plateGroup);
-  const plate = add(plateGeo, 0, false, plateGroup, new THREE.Vector3());
+  // 虹色の板は部屋の境目の「膜」: 面全体に色を出す（face を上げる）。球や泡は既定の、縁だけで見せる
+  const plate = add(plateGeo, 0, false, plateGroup, new THREE.Vector3(), kind === 'iridescent' ? { face: 0.6 } : {});
   for (const [bx, by, geo, rot] of [
     [-0.64, 0, barV, 0],
     [0.64, 0, barV, 0],
@@ -258,6 +295,15 @@ panel.append(
   h('label', {}, '縁の光', highlightInput, highlightValue),
   h('div', { class: 'row' }, h('button', { type: 'button', textContent: '波紋', onclick: () => pulseAll() }), h('label', {}, spinBox, '回す'), h('label', {}, '品質', tierSelect)),
 );
+const lightSelect = h('select');
+for (const [v, label] of [
+  ['dawn', '夜明け（既定）'],
+  ['celestial', '天球'],
+  ['greenhouse', '温室'],
+] as const)
+  lightSelect.append(h('option', { value: v, selected: v === lightParam }, label));
+const flashInput = h('input', { type: 'range', min: '0', max: '1', step: '0.05', value: '1' });
+panel.append(h('div', { class: 'row' }, h('label', {}, '擬似照明', lightSelect), h('label', {}, '閃光', flashInput)));
 const fogButtons = h('div', { class: 'row' });
 panel.append(fogButtons);
 document.body.append(panel);
@@ -345,14 +391,22 @@ function pulseAll(): void {
   for (const p of pieces) p.handle.pulse(t);
 }
 
+lightSelect.addEventListener('change', () => applyLighting(lightSelect.value));
+flashInput.addEventListener('input', () => setGlassFlashScale(Number(flashInput.value)));
 highlightInput.addEventListener('input', () => (highlightValue.textContent = slider().toFixed(2)));
 tierSelect.addEventListener('change', () => {
   tier = tierSelect.value as QualityTier;
+  // 品質を替えたら、プリセットと動的な解像度も作り直す（目標の fps・倍率の範囲が変わる）
+  preset = presetFor(tier, hints);
+  dynRes = new DynamicResolution(preset);
+  appliedScale = dynRes.scale;
+  setDefaultGlassTier(tier);
   for (const p of pieces) {
     p.handle.dispose();
-    p.handle = createGlass(p.kind, p.double ? { doubleSided: true } : {}, { tier });
+    p.handle = createGlass(p.kind, p.params, { tier });
     p.mesh.material = p.handle.material;
   }
+  resize();
 });
 
 const raycaster = new THREE.Raycaster();

@@ -25,3 +25,17 @@ STUB を本実装に置き換えた（版は親が上げる。公開の名前・
   2D が使えない環境（jsdom）でも例外を出さず時間だけ進む。書体は `var(--font-serif)` のような CSS 変数で指定できる。
   足したもの: `CondensationOptions.onDraw`（描き直すたびに呼ぶ。CanvasTexture の `needsUpdate` 用）。
 - dev/core.html（確認ページ）を追加。ガラス6種を球・板・泡で並べ、曇りと指の文字（DOM と 3D のテクスチャ）を見られる。
+- 追加（レビュー1巡目の指摘への対応）:
+  - materials/glass: `GlassParams.face`（正面の虹色の強さ。既定 0.01）、`setGlassLighting` / `resetGlassLighting`（擬似反射の空・地面・光の向きと色。
+    `scene.environment` があれば擬似反射を弱める）、`sharedGlass`（引数の同じガラスを共有。縁の光と波紋は共有している全員に効く）、
+    `setGlassFlashScale`（波紋の閃光の強さ。光の点滅を抑えるモード用）、`setDefaultGlassTier` / `getDefaultGlassTier`。
+  - fog/condensation: `WriteOptions.minFontPx`（自動で縮めるときの最小の文字の大きさ。既定 18）。
+- 修正:
+  - glass: 波紋の距離がカメラと同じ奥行きの物（ゴンドラの殻）で NaN になり、本体色・虹色・縁の光まで消えて全画面が点滅する問題を直した
+    （0 で割らない。カメラが殻の内側のときは視線の正面から広げ、穏やかにする）。
+  - glass: 薄い殻（透明・虹色）の正面の寄与を縁だけに絞り、泡の内側から見た視界の中央が澄んだままになるようにした。標準の鏡面反射の正面も弱めた。
+  - glass: `scene.fog` の中で、遠くのガラスが霧より明るく浮く問題を直した（霧の色に A を掛けて混ぜる）。
+  - quality: `DynamicResolution` の判断を窓の中央値にし、垂直同期で固定された画面（比が約 1.0）でも、倍率が初期値より下なら試しに戻すようにした
+    （一度きりの停止で下がったまま戻らない問題）。戻した直後に重くなったら戻した分だけ下げ、待ちを倍にする。「Apple GPU」は medium（Intel の Mac と区別できないため）。Intel Arc の B シリーズを単体として扱う。
+  - condensation: 描き直しのたびのグラデーションの確保をやめ（縁の形の絵を一度作って貼る）、文字がない間は文字用の canvas を解放し、
+    霞と水滴は dpr 1.5 までの細かさで作って引き伸ばす。
