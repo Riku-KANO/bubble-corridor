@@ -4,10 +4,12 @@ Cycles（Metal があれば GPU）で DIFFUSE の DIRECT+INDIRECT（色は含め
 2つ目の UV（名前 Lightmap）へ焼いて PNG に書く。ゲーム側は動く光源を持たず、この画像を
 ライトマップとして掛ける（three.js では lightMap・channel 1）。
 
-- 焼いた値は線形（float）。高い方の百分位（既定 99.5%）で割って 0〜1 に正規化し、sRGB にして
-  **8bit の PNG（RGB）**で書く。割った倍率を物のカスタムプロパティ `lightmap_scale` に残す
-  （線形の値 = 画像を線形に直した値 × lightmap_scale）。百分位より明るい点は 1.0 で切れる。
-  こうすると光が強い場面でも白く飽和せず、暗い場面でも 8bit を使い切る。
+- 焼いた値は線形（float32）。高い方の百分位（既定 99.99%。`percentile=` で変える）で割って 0〜1 に正規化し、
+  sRGB にして **8bit の PNG（RGB）**で書く。割った倍率を物のカスタムプロパティ `lightmap_scale` に残す
+  （線形の値 = 画像を線形に直した値 × lightmap_scale）。こうすると光が強い場面でも白く飽和せず、
+  暗い場面でも 8bit を使い切る。百分位より明るい点は 1.0 で切れるので、アトラスの 0.01% より小さい
+  極めて小さな明るい所（と、周りより 4 倍以上明るい 1 テクセルだけの突起 = モンテカルロのノイズ）が切れる。
+  切れた画素の割合と max/scale を戻り値とログに出し、max/scale > 1.5 かつ切れた割合 > 0.05% なら WARNING。
 - 保存後に PNG のビット深度を確かめる（8bit でなければエラー）。画像の向きは glTF の UV（v を反転）と
   合うよう上下を直して書く。読む側は flipY = false にする（README 参照）。
 - 画像は glb の外に置く。物のカスタムプロパティ `lightmap`（out_dir からの相対の場所）と
@@ -35,8 +37,13 @@ PROP_SCALE = 'lightmap_scale'
 _NODE = 'lightmap.bake'
 #: 計算機の環境変数（CPU / GPU / AUTO）。GPU（Metal など）が使えれば AUTO は GPU
 DEVICE_ENV = 'BLENDER_BAKE_DEVICE'
-#: 正規化に使う百分位（高い方）
-PERCENTILE = 99.5
+#: 正規化に使う百分位（高い方）。小さな日だまりや星の光を切らないよう、高めにしてある
+PERCENTILE = 99.99
+#: 周りの 8 テクセルの最大のこの倍率を超える 1 テクセルだけの突起は、百分位に数えない（ノイズ）
+SPIKE_RATIO = 4.0
+#: 切れた画素がこの割合を超え、かつ max/scale がこの倍率を超えたら WARNING
+CLIP_WARN_FRAC = 0.0005
+CLIP_WARN_RATIO = 1.5
 
 
 def _select(objs: list, active) -> None:
@@ -144,9 +151,9 @@ def write_png_rgb8(path: str, rgb: np.ndarray) -> None:
     raw = np.empty((h, 1 + w * 3), dtype=np.uint8)
     raw[:, 0] = 2
     raw[0, 0] = 0
-    flat = rgb.reshape(h, w * 3)
+    flat = np.ascontiguousarray(rgb).reshape(h, w * 3)
     raw[0, 1:] = flat[0]
-    raw[1:, 1:] = (flat[1:].astype(np.int16) - flat[:-1].astype(np.int16)).astype(np.uint8)
+    raw[1:, 1:] = flat[1:] - flat[:-1]  # uint8 のまま（256 で回り込む。PNG の Up フィルタと同じ）
     png = (
         b'\x89PNG\r\n\x1a\n'
         + _png_chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
@@ -168,22 +175,55 @@ def png_info(path: str) -> dict:
     return {'width': w, 'height': h, 'depth': depth, 'color_type': ctype}
 
 
-def _save_normalized(img, path: str) -> float:
-    """焼いた float 画像を、高い百分位で割って 8bit の sRGB PNG にし、割った倍率（lightmap_scale）を返す"""
+def _despike(peak: np.ndarray) -> np.ndarray:
+    """周りの 8 テクセルの最大の SPIKE_RATIO 倍を超える 1 テクセルだけの突起（ノイズ）を、周りの最大に置き換えた写し"""
+    h, w = peak.shape
+    padded = np.pad(peak, 1, mode='edge')
+    around = np.zeros_like(peak)
+    for dy in (0, 1, 2):
+        for dx in (0, 1, 2):
+            if (dy, dx) != (1, 1):
+                np.maximum(around, padded[dy:dy + h, dx:dx + w], out=around)
+    spike = peak > SPIKE_RATIO * around + 1e-6
+    return np.where(spike, around, peak)
+
+
+def _save_normalized(img, path: str, percentile: float = PERCENTILE) -> dict:
+    """焼いた float 画像を、高い百分位で割って 8bit の sRGB PNG にする。
+
+    戻り値: scale（割った倍率 = lightmap_scale）、max（焼いた最大）、clipped_frac（焼かれた画素のうち 1.0 で切れた割合）。
+    メモリを抑えるため float32 のまま、符号化は行の塊ごとにする。
+    """
     w, h = img.size
     px = np.empty(w * h * 4, dtype=np.float32)
     img.pixels.foreach_get(px)
-    lin = px.reshape(h, w, 4)[:, :, :3].astype(np.float64)
+    lin = px.reshape(h, w, 4)[:, :, :3]
     peak = lin.max(axis=2)
-    lit = peak[peak > 1e-6]  # 焼かれていない余白（真っ黒）は百分位に入れない
-    scale = float(np.percentile(lit, PERCENTILE)) if lit.size else 1.0
+    lit_mask = peak > 1e-6  # 焼かれていない余白（真っ黒）は百分位に入れない
+    n_lit = int(lit_mask.sum())
+    if n_lit:
+        scale = float(np.percentile(_despike(peak)[lit_mask], percentile))
+        peak_max = float(peak.max())
+        clipped = float((peak[lit_mask] > scale * (1.0 + 1e-6)).sum()) / n_lit
+    else:
+        scale, peak_max, clipped = 1.0, 0.0, 0.0
     scale = max(scale, 1e-4)
-    rgb = np.rint(_srgb_encode(lin / scale) * 255.0).astype(np.uint8)
+    rgb = np.empty((h, w, 3), dtype=np.uint8)
+    inv = np.float32(1.0 / scale)
+    for y0 in range(0, h, 256):
+        rgb[y0:y0 + 256] = np.rint(_srgb_encode(lin[y0:y0 + 256] * inv) * 255.0).astype(np.uint8)
+    del px, lin, peak
     write_png_rgb8(path, rgb[::-1])  # Blender の画像は下の行から。PNG は上の行から
     info = png_info(path)
     if info['depth'] != 8 or info['color_type'] != 2 or (info['width'], info['height']) != (w, h):
         raise RuntimeError(f'ライトマップが 8bit の RGB ではありません: {path} {info}')
-    return float(f'{scale:.6g}')
+    ratio = peak_max / scale
+    if ratio > CLIP_WARN_RATIO and clipped > CLIP_WARN_FRAC:
+        print(
+            f'WARNING: {os.path.basename(path)}: 明るい所が切れています（max/scale = {ratio:.2f}、切れた画素 {clipped * 100:.3f}%）。'
+            f'percentile（既定 {PERCENTILE}）を上げるか、サンプル数を増やしてください'
+        )
+    return {'scale': float(f'{scale:.6g}'), 'max': peak_max, 'clipped_frac': clipped}
 
 
 def _shared_names(objs: list) -> list[str]:
@@ -207,12 +247,15 @@ def bake_lightmaps(
     repack: bool = True,
     margin: int | None = None,
     split_shared: bool = False,
+    percentile: float = PERCENTILE,
 ) -> list[dict]:
     """objects の光と影を Lightmap UV に焼き、8bit の PNG を out_dir に書く。
 
     atlas=True なら全部の物で 1 枚（`<name>.png`。name の既定は `<部屋>.lightmap`）、False なら物ごとに 1 枚（`<物の名前>.png`）。
     メッシュを共有する物があると止まる（split_shared=True で単独のコピーにして焼く）。
-    戻り値: [{'object': 物の名前, 'image': PNG の絶対パス, 'scale': lightmap_scale}, ...]
+    percentile は正規化に使う明るさの百分位（既定 99.99）。それより明るい画素は切れる。
+    戻り値: [{'object': 物の名前, 'image': PNG の絶対パス, 'scale': lightmap_scale,
+              'max_over_scale': 焼いた最大 ÷ scale, 'clipped_frac': 切れた画素の割合}, ...]
     """
     objs = [o for o in objects if o.type == 'MESH']
     if not objs:
@@ -271,7 +314,8 @@ def bake_lightmaps(
                 device = 'CPU'
                 _bake(margin)
             path = os.path.join(out_dir, f'{gname}.png')
-            scale = _save_normalized(img, path)
+            stat = _save_normalized(img, path, percentile)
+            scale = stat['scale']
             for m, node in nodes:
                 m.node_tree.nodes.remove(node)
             bpy.data.images.remove(img)
@@ -281,8 +325,11 @@ def bake_lightmaps(
                     u.active_render = u.name == saved_uv[o.name]
                 o[PROP] = os.path.relpath(path, out_dir)
                 o[PROP_SCALE] = scale
-                results.append({'object': o.name, 'image': path, 'scale': scale})
-            print(f'bake: {gname} {size}px {samples}spp {device} 8bit {os.path.getsize(path)}B scale={scale} -> {path}')
+                results.append({'object': o.name, 'image': path, 'scale': scale, 'max_over_scale': stat['max'] / scale, 'clipped_frac': stat['clipped_frac']})
+            print(
+                f'bake: {gname} {size}px {samples}spp {device} 8bit {os.path.getsize(path)}B scale={scale} '
+                f"max/scale={stat['max'] / scale:.2f} clipped={stat['clipped_frac'] * 100:.3f}% -> {path}"
+            )
     finally:
         scene.render.engine = keep['engine']
         if keep['samples'] is not None:

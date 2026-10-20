@@ -88,3 +88,20 @@ def export_glb(objects: Iterable, path: str, *, max_bytes: int | None = MAX_BYTE
     if max_bytes is not None and size > max_bytes:
         raise ValueError(f'{path} が {size} バイトで上限（{max_bytes}）を超えています')
     return size
+
+
+def room_load_report(objects: Iterable, glb_path: str, lightmap_dir: str, max_bytes: int | None = MAX_BYTES) -> dict:
+    """部屋の読み込みの大きさ: glb と、objects の `lightmap`（out_dir からの画像の場所）が指す PNG の合計を上限と比べる。
+
+    export_glb の検査は glb だけ。ライトマップの PNG は glb の外にあるが、部屋の読み込みには含まれる（PERF.roomLoadMB）。
+    上限を超えたら WARNING を出す（止めない）。戻り値: glb・lightmaps（ファイルごと）・total・limit・over。
+    """
+    names = sorted({o.get('lightmap') for o in objects if o.get('lightmap')})
+    maps = {n: os.path.getsize(os.path.join(lightmap_dir, n)) for n in names}
+    glb = os.path.getsize(glb_path)
+    total = glb + sum(maps.values())
+    over = max_bytes is not None and total > max_bytes
+    print(f'room load: glb {glb}B + ライトマップ {sum(maps.values())}B（{len(maps)} 枚）= {total}B' + (f' / 上限 {max_bytes}B' if max_bytes else ''))
+    if over:
+        print(f'WARNING: 部屋の読み込みが上限を超えています（{total}B > {max_bytes}B）。ライトマップの大きさ（size）か glb を減らしてください')
+    return {'glb': glb, 'lightmaps': maps, 'total': total, 'limit': max_bytes, 'over': over}

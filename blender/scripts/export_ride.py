@@ -139,8 +139,8 @@ def project_to_rail(pts: np.ndarray, positions: np.ndarray, spacing: float) -> n
     return out
 
 
-def read_cues(markers, duration: float, section_at) -> list[tuple[int, dict]]:
-    """タイムラインマーカー → (frame, Cue)。名前・data・in=・時刻を検査し、違反はすべて一覧にして ValueError で止める"""
+def read_cues(markers, duration: float, section_at) -> tuple[list[tuple[int, dict]], list[str]]:
+    """タイムラインマーカー → ((frame, Cue) の一覧, 違反の一覧)。名前・data・in=・時刻を検査する"""
     errors: list[str] = []
     cues: list[tuple[int, dict]] = []
     seen: dict[str, str] = {}
@@ -196,10 +196,8 @@ def read_cues(markers, duration: float, section_at) -> list[tuple[int, dict]]:
         if info['data']:
             cue['data'] = info['data']
         cues.append((m.frame, cue))
-    if errors:
-        raise ValueError(f'タイムラインマーカーに {len(errors)} 件の問題があります。直してからもう一度書き出してください:\n  ' + '\n  '.join(errors))
     cues.sort(key=lambda x: x[0])  # 安定ソート: 同じ時刻は作った順のまま
-    return cues
+    return cues, errors
 
 
 def export(out_dir: str) -> dict:
@@ -265,11 +263,17 @@ def export(out_dir: str) -> dict:
     # 区間
     sec_obj = bpy.data.objects[SECTIONS]
     spans = []
+    errors: list[str] = []
     for key in sec_obj.keys():
         v = sec_obj[key]
         if isinstance(v, str) or not hasattr(v, '__len__') or len(v) != 2:
             continue  # [開始, 終わり] の対だけが区間
-        spans.append((key, float(v[0]), float(v[1])))
+        t0, t1 = float(v[0]), float(v[1])
+        if key not in SECTION_IDS:
+            errors.append(f"{SECTIONS} の '{key}' は区間の id ではありません（{', '.join(SECTION_IDS)}）")
+        elif not 0.0 <= t0 <= t1 <= duration + 1e-9:
+            errors.append(f"{SECTIONS} の '{key}' = [{t0:g}, {t1:g}] が 0 ≤ 開始 ≤ 終わり ≤ {duration:g} 秒ではありません")
+        spans.append((key, t0, t1))
     if not spans:
         raise ValueError(f"'{SECTIONS}' に区間（id → [開始の秒, 終わりの秒]）がありません")
     sections = [{'id': k, 's0': num(s_at(t0), 4), 's1': num(s_at(min(t1, duration)), 4)} for k, t0, t1 in spans]
@@ -281,8 +285,11 @@ def export(out_dir: str) -> dict:
                 cur = k
         return cur
 
-    # キューシート: マーカー → Cue（違反があればここで止まる。何も書かない）
-    cues = read_cues(sc.timeline_markers, duration, section_at)
+    # キューシート: マーカー → Cue。区間とマーカーの違反はすべて一覧にして止まる（何も書かない）
+    cues, cue_errors = read_cues(sc.timeline_markers, duration, section_at)
+    errors += cue_errors
+    if errors:
+        raise ValueError(f'{len(errors)} 件の問題があります。直してからもう一度書き出してください:\n  ' + '\n  '.join(errors))
 
     ride = {
         'version': 1,

@@ -51,7 +51,7 @@ photo.capture@48 in=greenhouse shot=bloom
 
 id は `<出来事の名前>@<通しの小節>`。人が足すときは名前だけでよい（`greenhouse.bloom`、`photo.capture shot=bloom`）。書き出しが id・小節（t ÷ 10/3）・区間（`Sections` の時刻）を決める。マーカーはすべてキューになる（キュー以外のマーカーを置かない）。
 
-書き出しはマーカーを検査し、**違反はすべて一覧にして止める**（何も書かない）: 出来事の名前（`CUE_NAMES`。Blender の自動の名前 `F_9000` や打ち間違いはここで止まる）、data のキーと値（`to` は区間、`target` は出来事の名前、`shot` は撮影の名前）、`in=` の区間名、時刻が 0 〜 duration の中か。マーカーを動かして id の `@小節` や `in=` が時刻と食い違ったときは WARNING（id は時刻から作り直す。`in=` は書かれたものを使う）。名前の一覧は `export_ride.py` の写しで、`scripts/blender-constants.test.ts` が契約と同じかを検査する。
+書き出しは `Sections`（キーは区間の id、`0 ≤ 開始 ≤ 終わり ≤ duration`）とマーカーを検査し、**違反はすべて一覧にして止める**（何も書かない）。マーカーの検査: 出来事の名前（`CUE_NAMES`。Blender の自動の名前 `F_9000` や打ち間違いはここで止まる）、data のキーと値（`to` は区間、`target` は出来事の名前、`shot` は撮影の名前）、`in=` の区間名、時刻が 0 〜 duration の中か。マーカーを動かして id の `@小節` や `in=` が時刻と食い違ったときは WARNING（id は時刻から作り直す。`in=` は書かれたものを使う）。名前の一覧は `export_ride.py` の写しで、`scripts/blender-constants.test.ts` が契約と同じかを検査する。
 
 ### 書き出しの計算（人が直した変更が反映される）
 
@@ -109,7 +109,9 @@ rail = [three_to_blender(p) for p in ride['rail']['points']]   # Blender の座�
 
 ### 焼き込みとライトマップ（three.js 側の使い方）
 
-- 焼くのは光だけ（色は含めない）。**float で焼いて、明るい側の 99.5 百分位で割り、sRGB の 8bit PNG（RGB）で書く**（8bit 以外ならエラー。2048px・128spp の小さな場面で約 1.8MB）。1.0 を超える強い光でも飽和しない。割った倍率を物のカスタムプロパティ `lightmap_scale` に残す（線形の光 = 画像を線形に直した値 × `lightmap_scale`）。`lightmap` に out_dir からの画像の場所。どちらも glb の extras（userData）に入る。
+- 焼くのは光だけ（色は含めない）。**float32 で焼いて、明るい側の 99.99 百分位（`percentile=` で変える）で割り、sRGB の 8bit PNG（RGB）で書く**（8bit 以外ならエラー）。割った倍率を物のカスタムプロパティ `lightmap_scale` に残す（線形の光 = 画像を線形に直した値 × `lightmap_scale`）。`lightmap` に out_dir からの画像の場所。どちらも glb の extras（userData）に入る。
+- 光が強くても全体が白く飽和することはない（倍率で割る）。ただし**百分位より明るい画素は 1.0 で切れて平らになる**。既定の 99.99% なら、アトラスの 0.01% より小さい明るい所と、周りより 4 倍以上明るい 1 テクセルだけの突起（ノイズ）だけが切れる（床の 0.35% の日だまりは最大の約 98〜99% が残る。99.5% だと約 21% しか残らなかった）。光の模様や星の玉の光のような小さな明るい所が多い部屋は、`percentile=100`（最大で割る。ノイズに弱い）や、サンプル数を増やすことを検討する。切れた画素の割合と max/scale は戻り値（`clipped_frac`・`max_over_scale`）とログに出て、max/scale > 1.5 かつ切れた画素 > 0.05% なら WARNING。
+- 容量の実測（8bit PNG）: 2048px で床と箱だけの場面 約 1.8MB、球と箱 13 個の場面 約 3.2MB（128spp）・約 2.5MB（512spp。サンプルが少ないとノイズで大きくなる）。4096px は約 4 倍。glb（15MB 以下の検査）とは別なので、`export.room_load_report(objs, glb, out_dir)` で glb + ライトマップの合計を `PERF.roomLoadMB` と比べる（超えたら WARNING）。
 - ライトマップは 2 つ目の UV（`Lightmap`、glb の TEXCOORD_1）を使う。PNG の上下は glTF の UV に合わせてある。
 
 ```ts
@@ -121,6 +123,8 @@ material.lightMap = tex;
 // Blender で焼いた値は「反射の明るさ（放射輝度）」。three の lightMap は拡散反射に 1/π を掛けて足すので、π を掛けて揃える
 material.lightMapIntensity = Math.PI * node.userData.lightmap_scale;
 ```
+
+  **ライトマップが違う物は、材質を clone して使う**（GLTFLoader は同じ材質を共有する物に同じ材質の実体を渡すので、`lightMap` と `lightMapIntensity` は最後に書いた値が勝ち、ほかの物のライトマップが上書きされる）。
 
   見た目は Blender の描画と並べて合わせる（`lightMapIntensity` は演出の明るさとして調整してよい）。
 - 焼き込みの名前（`name`）の既定は物の名前の `<部屋>` から作る（`greenhouse.lightmap` → `greenhouse.lightmap.png`）。計算機は環境変数 `BLENDER_BAKE_DEVICE`（`CPU` / `GPU` / `AUTO`。既定の AUTO は Metal などの GPU があれば GPU）。
