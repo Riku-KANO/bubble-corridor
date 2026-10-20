@@ -21,7 +21,7 @@ import {
 } from '../config';
 import { createBus } from '../core/events';
 import { smoothstep } from '../core/easing';
-import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityPreset } from '../core/quality';
+import { DynamicResolution, detectTier, presetFor, type DeviceHints, type TierPreset } from '../core/quality-tier';
 import { createAudioEngine } from '../audio';
 import { createScreenFx } from '../fx';
 import { createGondola } from '../gondola';
@@ -69,7 +69,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     screenPixels: screen.width * screen.height * devicePixelRatio * devicePixelRatio,
   };
   const qualitySetting = params.quality ?? settings.quality;
-  const quality: QualityPreset = presetFor(qualitySetting === 'auto' ? detectTier(hints) : qualitySetting, hints);
+  const quality: TierPreset = presetFor(qualitySetting === 'auto' ? detectTier(hints) : qualitySetting, hints);
   const dynRes = new DynamicResolution(quality);
 
   const scene = new THREE.Scene();

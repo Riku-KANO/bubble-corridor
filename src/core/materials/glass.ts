@@ -52,7 +52,7 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
-import type { QualityTier } from '../quality';
+import type { QualityTier } from '../quality-tier';
 
 /** ガラスの種類（設計書のアートディレクションの「主なガラス」） */
 export type GlassKind =
