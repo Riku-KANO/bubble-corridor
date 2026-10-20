@@ -142,3 +142,62 @@ describe('CAM-2 端末の傾き', () => {
     expect(look.look.yaw).toBe(0);
   });
 });
+
+describe('INT-5 追従モードで正面へ戻した後の引き継ぎ（2巡目のレビューで見つかった振れをテストにしたもの）', () => {
+  const DEG2 = Math.PI / 180;
+  const move = (x: number, y: number) => pointer('pointermove', x, y, { buttons: 0 });
+  const recenteredAtRightEdge = () => {
+    look.setOptions({ mode: 'follow', gyro: false });
+    move(790, 300);
+    settle();
+    look.recenter(undefined, 1.2);
+    settle(5);
+    expect(Math.abs(look.look.yaw)).toBeLessThan(1 * DEG2);
+  };
+
+  it('縦だけに動かしても横に振れない（yaw の変化 2° 以内）', () => {
+    recenteredAtRightEdge();
+    const yaw0 = look.look.yaw;
+    let worst = 0;
+    for (let i = 1; i <= 15; i++) {
+      move(790, 300 - i * 10);
+      for (let f = 0; f < 6; f++) {
+        look.update(1 / 60);
+        worst = Math.max(worst, Math.abs(look.look.yaw - yaw0));
+      }
+    }
+    expect(worst).toBeLessThanOrEqual(2 * DEG2);
+  });
+
+  it('左へ動かすと、景色は一度も右へ戻らず左へ進み、左端では左を向く', () => {
+    recenteredAtRightEdge();
+    let prev = look.look.yaw;
+    for (let i = 1; i <= 40; i++) {
+      move(790 - i * 19.5, 300);
+      for (let f = 0; f < 6; f++) {
+        look.update(1 / 60);
+        expect(look.look.yaw, `step ${i}`).toBeGreaterThanOrEqual(prev - 0.5 * DEG2);
+        prev = Math.max(prev, look.look.yaw);
+      }
+    }
+    settle();
+    expect(look.look.yaw).toBeGreaterThan(20 * DEG2);
+  });
+
+  it('戻している途中で大きく動かして打ち切っても、マウスと逆向きに振れない', () => {
+    look.setOptions({ mode: 'follow', gyro: false });
+    move(790, 300);
+    settle();
+    look.recenter(undefined, 1.2);
+    for (let f = 0; f < 18; f++) look.update(1 / 60);
+    let prev = look.look.yaw;
+    for (let i = 1; i <= 20; i++) {
+      move(790 - i * 15, 300);
+      for (let f = 0; f < 6; f++) {
+        look.update(1 / 60);
+        expect(look.look.yaw, `step ${i}`).toBeGreaterThanOrEqual(prev - 0.5 * DEG2);
+        prev = Math.max(prev, look.look.yaw);
+      }
+    }
+  });
+});
