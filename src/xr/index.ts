@@ -1,27 +1,19 @@
-// VR（WebXR）。
-// STUB: 署名は確定。中身は xr 担当が本実装に置き換える。
-import * as THREE from 'three/webgpu';
-import type { XRDeps, XRSystem } from '../contracts/xr';
-
-export function createXRSystem(_renderer: THREE.WebGPURenderer, _deps: XRDeps): XRSystem {
-  const rig = new THREE.Group();
-  rig.name = 'xr-rig';
-  return {
-    async isSupported() {
-      return false;
-    },
-    active: false,
-    async enter() {
-      throw new Error('VR はまだ使えません（STUB）');
-    },
-    async exit() {},
-    rig,
-    update() {},
-    setTouchables() {},
-    recenter() {},
-    setVignette() {},
-    showMenu() {},
-    hideMenu() {},
-    onSessionEnd() {},
-  };
-}
+// VR（WebXR）。純粋な計算は logic.ts、本体は system.ts、外周の暗さは vignette.ts、メニューは menu.ts。
+// 契約は src/contracts/xr.ts。テストと統合担当はここから読む。
+export {
+  fingertipHits,
+  menuPose,
+  menuTextHeight,
+  nearestTouchable,
+  rayTouchable,
+  recenterYaw,
+  referenceSpaceFor,
+  rigHeightOffset,
+  vignetteFor,
+  yawFromQuaternion,
+  type FingertipHit,
+  type MenuPose,
+  type Nearest,
+  type RayHit,
+} from './logic';
+export { createXRSystem, type XRDebugInfo, type XRSystemExtras } from './system';
