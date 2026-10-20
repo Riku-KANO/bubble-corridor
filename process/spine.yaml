@@ -134,8 +134,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**, blender/scripts/rooms/lobby.py, blender/scenes/lobby.blend, public/assets/rooms/lobby*, blender/scripts/rooms/platform.py, blender/scenes/platform.blend, public/assets/rooms/platform*, blender/scripts/rooms/greenhouse.py, blender/scenes/greenhouse.blend, public/assets/rooms/greenhouse*, blender/scripts/rooms/gondola.py, blender/scenes/gondola.blend, public/assets/rooms/gondola*]
   tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts]
-  status: todo
-  notes: ''
+  status: red
+  notes: '2026-10-20 2026-10-21 親がテストを作成（lobby・platform・greenhouse・gondola。BLD-4〜7 は expectBlenderRoom で glb とライトマップの付け方まで確かめる）。赤の証跡: 4 files 20 failed / 8 passed。ゴンドラはコードで作ってよい（同期の createGondola のため。glb は任意）。実装 消費 0/3'
 - id: S-21
   title: 部屋B（雨の回廊と扉の分岐、万華鏡の間の金と青）を Blender で造形・焼き込み
   wave: 2
@@ -145,8 +145,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**, blender/scripts/rooms/rain.py, blender/scenes/rain.blend, public/assets/rooms/rain*, blender/scripts/rooms/kaleidoscope.py, blender/scenes/kaleidoscope.blend, public/assets/rooms/kaleidoscope*]
   tests: [src/rooms/rain/room.test.ts, src/rooms/kaleidoscope/room.test.ts]
-  status: todo
-  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境）'
+  status: red
+  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3'
 - id: S-22
   title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）を Blender で造形・焼き込み
   wave: 2
@@ -156,8 +156,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/celestial/**, src/rooms/dawn/**, dev/rooms-c.html, src/dev/rooms-c/**, blender/scripts/rooms/celestial.py, blender/scenes/celestial.blend, public/assets/rooms/celestial*, blender/scripts/rooms/dawn.py, blender/scenes/dawn.blend, public/assets/rooms/dawn*]
   tests: [src/rooms/celestial/room.test.ts, src/rooms/dawn/room.test.ts]
-  status: todo
-  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒'
+  status: red
+  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒 2026-10-20 2026-10-21 親がテストを作成（celestial・dawn、expectBlenderRoom 込み。ADR-0009: 外殻 62m 以内、暗転が明けたとき殻の外で、球の縁が正面から 30° 以内）。赤の証跡: 2 files 16 failed / 5 passed。実装 消費 0/3'
 - id: S-23
   title: VR（immersive-vr、座る/立つ、指先とコントローラーで触れる、外周の暗さ、曇りガラスのメニュー）と描画経路の検証
   wave: 1
