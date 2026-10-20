@@ -46,8 +46,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/sound/**, src/audio/**, dev/audio.html, src/dev/audio/**]
   tests: [src/core/sound/sound.test.ts, src/audio/audio.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3'
+  status: green
+  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 実装 1/3 で緑（sound 14・audio 21、全体58件、check --quick ALL OK、テスト無変更）。OfflineAudioContext で乗車全体を測定: 5:10 は -55dB、9:50 前後が最大 -14dB、ピーク 0.82。ポーズは suspend ではなく門で止める（UI の音を鳴らすため）。レビュー 消費 1/2'
 - id: S-12
   title: 共通部品（ガラスの材質ライブラリ、曇りと指の文字、品質プリセットと動的な解像度）
   wave: 1
@@ -168,4 +168,4 @@ slices:
   paths: [src/app/**, src/main.ts, e2e/**, scripts/dev/**]
   tests: [e2e/ride.spec.ts]
   status: todo
-  notes: '2026-10-20 S-14 からの申し送り: (1) 撮影の GPU メモリの一時的なピーク PC 約220MB・スマートフォン約130MB（1部屋300MBの予算と合算で計測）、(2) 画面効果が pass() 経由になったら撮影と画面で多重標本と形式が違い、撮影ごとにパイプラインが作られる → 部屋の読み込み時に撮影先で compileAsync、写真に画面効果は入れない、(3) 共有は写真の画面を開いた時に合成しておき、操作の直後に share を呼ぶ、(4) 待ち列で warmUpCapture を呼ぶ 2026-10-20 S-14 から: 待ち列の後で warmUpCapture(renderer, scene, camera) を呼ぶ。スマートフォンで撮影が重ければ撮影の時刻を重い場面の外へずらすか captureMobile を下げる（M3）'
+  notes: '2026-10-20 S-14 からの申し送り: (1) 撮影の GPU メモリの一時的なピーク PC 約220MB・スマートフォン約130MB（1部屋300MBの予算と合算で計測）、(2) 画面効果が pass() 経由になったら撮影と画面で多重標本と形式が違い、撮影ごとにパイプラインが作られる → 部屋の読み込み時に撮影先で compileAsync、写真に画面効果は入れない、(3) 共有は写真の画面を開いた時に合成しておき、操作の直後に share を呼ぶ、(4) 待ち列で warmUpCapture を呼ぶ 2026-10-20 S-14 から: 待ち列の後で warmUpCapture(renderer, scene, camera) を呼ぶ。スマートフォンで撮影が重ければ撮影の時刻を重い場面の外へずらすか captureMobile を下げる（M3） 2026-10-20 S-11 から: sfx(''gondola.close'') を乗車の頭、sfx(''gondola.open'') を departure.open で呼ぶ。core の VERSION を上げ README の状態を更新（S-11 の 0.1.1 と S-12 の未リリースをまとめる）。?t/?rate の開発用の時計ではエンジンの時計が走らず触れた音が鳴らない'
