@@ -10,3 +10,18 @@
 
 - 初版の骨格。events（型つきイベント）、storage（localStorage の安全な読み書き）、easing（ガラスの曲線）を実装。
 - quality、materials/glass、fog/condensation、sound/*（音階・拍・立体音響・残響・ガラスの音源）は署名だけの STUB。M0 の共通の技術検証で本実装に置き換える。
+
+## 未リリース
+
+STUB を本実装に置き換えた（版は親が上げる。公開の名前・引数・戻り値の型は変えず、足したものだけ下に書く）。
+
+- quality: `detectTier`（スマートフォン・VR は low、単体 GPU と Apple M シリーズは high、内蔵 GPU と不明は medium、ソフトウェア描画・2コア以下・2GB 以下は low）、
+  `presetFor`（PC 60fps・スマートフォン 30fps・VR 72fps、VR と low は後処理なし、品質が上がるほど粒子と環境画像が増える）、
+  `DynamicResolution`（約0.5秒の窓の平均で判断。重ければすぐ下げ、軽くなってもしばらく待ってから戻す。1回の変化は 0.1 以下）。
+- materials/glass: 6種（透明・曇り・色・虹色・乳白・鏡）を TSL で実装。透過は使わず、縁の反射（フレネル）と薄膜干渉の虹色で見せる。
+  縁の光・波紋・時刻はすべて uniform で即時に効く。tier（high: ノイズ2段、medium: 1段、low: サイン波）で計算を変える。`createBrass` は環境画像がなくても黒くならない。
+  足したもの: `GlassHandle.pulse(now, origin?)` の省略できる第2引数（世界座標の触れた点。省くと面の中心から広がる）。
+- fog/condensation: 曇り（ノイズの霞と細かい水滴、中心から広がる）・晴れ・指でなぞった文字（左から拭き取るように現れる）・消す（曇りに溶ける）を canvas 2D で実装。
+  2D が使えない環境（jsdom）でも例外を出さず時間だけ進む。書体は `var(--font-serif)` のような CSS 変数で指定できる。
+  足したもの: `CondensationOptions.onDraw`（描き直すたびに呼ぶ。CanvasTexture の `needsUpdate` 用）。
+- dev/core.html（確認ページ）を追加。ガラス6種を球・板・泡で並べ、曇りと指の文字（DOM と 3D のテクスチャ）を見られる。

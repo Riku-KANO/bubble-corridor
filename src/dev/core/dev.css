@@ -1,0 +1,79 @@
+/* core 確認ページの見た目（本番には含まれない） */
+.panel {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  min-width: 220px;
+  border-radius: 16px;
+  background: rgba(8, 14, 28, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+  backdrop-filter: blur(10px);
+  font-size: 13px;
+  line-height: 1.4;
+  z-index: 3;
+}
+.panel h1 {
+  margin: 0;
+  font: 400 15px var(--font-serif);
+  letter-spacing: 0.04em;
+}
+.panel .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.panel label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.panel .stat {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.panel button,
+.panel select {
+  font: inherit;
+  color: inherit;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+.panel button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.panel input[type='range'] {
+  width: 120px;
+}
+.kind {
+  position: fixed;
+  transform: translateX(-50%);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+  pointer-events: none;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+.fog {
+  /* 泡の内側から見た外の景色の代わり（曇りガラスの向こう）。文字の澄んだ線が読めるかを確かめる */
+  background:
+    radial-gradient(circle at 18% 70%, rgba(255, 190, 120, 0.55), transparent 22%),
+    radial-gradient(circle at 78% 35%, rgba(150, 200, 255, 0.5), transparent 20%),
+    radial-gradient(circle at 52% 85%, rgba(255, 150, 110, 0.4), transparent 26%),
+    linear-gradient(180deg, #14275a 0%, #274a86 55%, #6a5f8e 100%);
+  position: fixed;
+  right: 20px;
+  bottom: 14px;
+  border-radius: 26px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.35) inset,
+    0 10px 40px rgba(10, 20, 50, 0.35);
+  z-index: 1;
+}
