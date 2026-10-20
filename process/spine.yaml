@@ -121,10 +121,10 @@ slices:
   milestone: M0
   requirements: [CORE-1, CORE-2, CORE-5]
   depends_on: [S-11, S-12]
-  paths: [src/core/**, src/app/**, src/contracts/room.ts, src/rooms/testing.ts, src/input/look.ts, src/gondola/**, src/rooms/placeholder.ts, scripts/check-core.ts]
-  tests: [scripts/core-union.test.ts]
-  status: todo
-  notes: '2026-10-21 発案者の判断「和集合で統合」。案1のセッションが並行で src/core を 0.3.0（glass/、perf/、transition/、renderer・bench・params・scene・quality）まで作っていた。こちらのリポジトリだけを触る'
+  paths: [src/core/**, src/app/**, src/contracts/room.ts, src/rooms/testing.ts, src/input/look.ts, src/rooms/placeholder.ts, src/dev/core/**, scripts/check-core.ts]
+  tests: [scripts/core-union.test.ts, src/core/quality-tier.test.ts]
+  status: red
+  notes: '2026-10-21 発案者の判断「和集合で統合」。案1のセッションが並行で src/core を 0.3.0（glass/、perf/、transition/、renderer・bench・params・scene・quality）まで作っていた。こちらのリポジトリだけを触る 2026-10-20 2026-10-21 親がテストを作成（scripts/core-union.test.ts: 案1 8aa3a5c の src/core 0.3.0 の30ファイルを git の blob の SHA で照合、版 0.4.0、変更記録、quality と quality-tier、easeGlass = glassEase、core の境界）。こちらの quality のテストを quality-tier.test.ts へ移した（中身は同じ）。赤の証跡: 35 failed / 1 passed。親の試し: 案1の 0.3.0 はこちらの tsc・eslint をそのまま通り、テスト 120件も緑。ぶつかるのは quality の利用側（app・rooms/testing・contracts/room・dev/core・materials/glass）だけ。gondola は和集合で触らないので paths から外し、dev/core を足した。実装 消費 0/3'
 - id: S-20
   title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を Blender で造形・焼き込みし、完成品質で
   wave: 2
@@ -133,7 +133,7 @@ slices:
   requirements: [INT-1, INT-3, INT-4, INT-6, TRN-1, RIDE-8, BLD-4, BLD-5, BLD-6, BLD-7]
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**, blender/scripts/rooms/lobby.py, blender/scenes/lobby.blend, public/assets/rooms/lobby*, blender/scripts/rooms/platform.py, blender/scenes/platform.blend, public/assets/rooms/platform*, blender/scripts/rooms/greenhouse.py, blender/scenes/greenhouse.blend, public/assets/rooms/greenhouse*, blender/scripts/rooms/gondola.py, blender/scenes/gondola.blend, public/assets/rooms/gondola*]
-  tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts]
+  tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts, src/gondola/gondola.test.ts]
   status: red
   notes: '2026-10-20 2026-10-21 親がテストを作成（lobby・platform・greenhouse・gondola。BLD-4〜7 は expectBlenderRoom で glb とライトマップの付け方まで確かめる）。赤の証跡: 4 files 20 failed / 8 passed。ゴンドラはコードで作ってよい（同期の createGondola のため。glb は任意）。実装 消費 0/3'
 - id: S-21
