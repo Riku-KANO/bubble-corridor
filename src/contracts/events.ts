@@ -27,6 +27,27 @@ export type CueName =
   | 'photo.capture' // 撮影（data.shot）
   | 'ride.end'; // 13:00 乗車の終わり → ライドフォトへ
 
+/** CueName の一覧（実行時に検査するため。Blender の書き出しもこの一覧と揃える） */
+export const CUE_NAMES: readonly CueName[] = [
+  'ride.start',
+  'hint.touch',
+  'membrane',
+  'lure',
+  'greenhouse.bloom',
+  'greenhouse.dewfall',
+  'rain.freeze',
+  'rain.doors',
+  'branch.decide',
+  'kaleidoscope.flower',
+  'celestial.blackout',
+  'celestial.stars',
+  'celestial.constellation',
+  'dawn.sunrise',
+  'departure.open',
+  'photo.capture',
+  'ride.end',
+];
+
 export interface Cue {
   /** 一覧の中で一意（例: "greenhouse.bloom@48"） */
   readonly id: string;

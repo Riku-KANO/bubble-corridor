@@ -1,64 +1,43 @@
 // ライドフォト（撮影、額縁と刻印の合成、ブラウザ内の保存、保存と共有）。
-// STUB: 署名は確定。中身は photo 担当が本実装に置き換える。
-import type * as THREE from 'three/webgpu';
-import type { Lang, ShotId } from '../contracts/ids';
-import type { FrameTier, PhotoFormat, PhotoMeta, PhotoRecord, PhotoStore } from '../contracts/photo';
+// 撮影は capture.ts、合成は compose.ts、IndexedDB は store.ts、決まりは rules.ts。
+// ここは受け取り（ダウンロード・共有）を持ち、外から使う名前をまとめて出す。
 
-/** 隠れた泡の総数（0〜5）→ 額縁。0〜1: 通常、2〜3: 銀、4: 金、5: 虹色 */
-export function frameTierFor(_hiddenTotal: number): FrameTier {
-  return 'plain'; // STUB
+export { capturePhoto, warmUpCapture } from './capture';
+export { composePhoto } from './compose';
+export { createPhotoStore } from './store';
+export { cropFor, doorTint, frameTierFor, photoFileName, stampText } from './rules';
+export type { PhotoCrop } from './rules';
+
+/** 解放を遅らせる時間。すぐに解放すると、保存が始まる前に URL が無効になる環境（Safari など）がある */
+const REVOKE_DELAY_MS = 10_000;
+
+/** 画像として保存する（ダウンロード）。使い終わった object URL は解放する */
+export function downloadPhoto(blob: Blob, fileName: string): void {
+  if (typeof document === 'undefined') return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
 }
 
-/** 刻印の文字（例: 「泡沫回廊・第3便・2026.10.20」、"Utakata · Ride No.3 · 2026.10.20"） */
-export function stampText(_meta: Pick<PhotoMeta, 'rideNo' | 'date'>, _lang: Lang): string {
-  return ''; // STUB
-}
-
-/**
- * 画面とは別に高い解像度で描き出す。画面の演出は止めない（裏で別の画像として描く）。
- * size は config の PHOTO.captureDesktop / captureMobile。
- */
-export async function capturePhoto(
-  _renderer: THREE.WebGPURenderer,
-  _scene: THREE.Scene,
-  _camera: THREE.Camera,
-  _size: { readonly width: number; readonly height: number },
-): Promise<Blob> {
-  return new Blob([], { type: 'image/png' }); // STUB
-}
-
-/** 額縁・刻印・扉の色を合成して、保存の形（横長 1920×1080 / 正方形 1080×1080）の画像にする */
-export async function composePhoto(_image: Blob, _meta: PhotoMeta, _format: PhotoFormat): Promise<Blob> {
-  return new Blob([], { type: 'image/png' }); // STUB
-}
-
-/** ブラウザ内のデータベース（IndexedDB）。最新10枚まで */
-export function createPhotoStore(_dbName?: string): PhotoStore {
-  const records: PhotoRecord[] = [];
-  return {
-    async list() {
-      return [...records];
-    },
-    async put(r) {
-      records.unshift(r);
-    },
-    async remove(id) {
-      const i = records.findIndex((r) => r.id === id);
-      if (i >= 0) records.splice(i, 1);
-    },
-  };
-}
-
-/** 画像として保存する（ダウンロード） */
-export function downloadPhoto(_blob: Blob, _fileName: string): void {
-  // STUB
-}
-
-/** 端末の共有機能で送る。使えなければ false */
-export async function sharePhoto(_blob: Blob, _fileName: string, _text: string): Promise<boolean> {
-  return false; // STUB
-}
-
-export function photoFileName(meta: Pick<PhotoMeta, 'rideNo' | 'date'>, shot: ShotId, format: PhotoFormat): string {
-  return `utakata-${meta.date}-ride${meta.rideNo}-${shot}-${format}.png`;
+/** 端末の共有機能で送る。使えない・送れない・途中でやめた場合は false（呼び出し側が保存に切り替える） */
+export async function sharePhoto(blob: Blob, fileName: string, text: string): Promise<boolean> {
+  const nav = globalThis.navigator as Navigator | undefined;
+  if (!nav || typeof nav.share !== 'function' || typeof nav.canShare !== 'function') return false;
+  try {
+    const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+    const data: ShareData = { files: [file], text };
+    if (!nav.canShare(data)) return false;
+    await nav.share(data);
+    return true;
+  } catch {
+    // AbortError（共有シートを閉じた）、NotAllowedError（操作の直後でない）など。どれも「送れなかった」
+    return false;
+  }
 }

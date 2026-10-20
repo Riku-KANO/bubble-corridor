@@ -36,7 +36,7 @@ slices:
   paths: [src/ride/**, scripts/build-ride-data.ts, scripts/comfort.ts, public/assets/rail.json, public/assets/cues.json, dev/ride.html, src/dev/ride/**]
   tests: [src/ride/ride.test.ts, src/ride/cues.test.ts, src/ride/comfort.test.ts]
   status: green
-  notes: '2026-10-20 親がテスト49件（ride 22、cues 14、comfort 13）を作成。赤の証跡: vitest run src/ride → 23 failed（STUB: 直線のレール、空のキューシート、analyzeComfort が空、先読みが今の部屋だけ）。実装 消費 1/3（委任前に記録） 2026-10-20 実装 1/3 で緑（ride 49件、全体72件、check.sh --quick ALL OK、comfort 違反0、テスト無変更）。レール 850m の輪（終点=始点）、普段の速さ 1.06〜1.71 m/s、加速度最大 0.20、上下 0.24 m/s、回転 3.4°/s。レビュー 消費 1/2'
+  notes: '2026-10-20 親がテスト49件（ride 22、cues 14、comfort 13）を作成。赤の証跡: vitest run src/ride → 23 failed（STUB: 直線のレール、空のキューシート、analyzeComfort が空、先読みが今の部屋だけ）。実装 消費 1/3（委任前に記録） 2026-10-20 実装 1/3 で緑（ride 49件、全体72件、check.sh --quick ALL OK、comfort 違反0、テスト無変更）。レール 850m の輪（終点=始点）、普段の速さ 1.06〜1.71 m/s、加速度最大 0.20、上下 0.24 m/s、回転 3.4°/s。レビュー 消費 1/2 2026-10-20 実装 2/3 で緑（ride 61件、全体85件、check --quick ALL OK、comfort 違反0）。全体約700m、最大 速度1.20・加速度0.09・上下0.24・回転3.0°/s。温室 8.2→1.9、万華鏡 水平、天球 1.9→8.3（中心）→1.3、岸 1.3〜1.2。レビュー 消費 2/2'
 - id: S-11
   title: 音楽と音（構成データ、演奏、触れた音、立体音響と残響、ガラスの音源の合成）
   wave: 1
@@ -46,8 +46,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/sound/**, src/audio/**, dev/audio.html, src/dev/audio/**]
   tests: [src/core/sound/sound.test.ts, src/audio/audio.test.ts]
-  status: green
-  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 実装 1/3 で緑（sound 14・audio 21、全体58件、check --quick ALL OK、テスト無変更）。OfflineAudioContext で乗車全体を測定: 5:10 は -55dB、9:50 前後が最大 -14dB、ピーク 0.82。ポーズは suspend ではなく門で止める（UI の音を鳴らすため）。レビュー 消費 1/2'
+  status: red
+  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 実装 1/3 で緑（sound 14・audio 21、全体58件、check --quick ALL OK、テスト無変更）。OfflineAudioContext で乗車全体を測定: 5:10 は -55dB、9:50 前後が最大 -14dB、ピーク 0.82。ポーズは suspend ではなく門で止める（UI の音を鳴らすため）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 吊られた泡（bowl）の音が鳴っている途中で切れる（出口を外す時刻が短い）。P2 chime が触れた音の枠を使う、見どころの効果音が cue の1フレーム後＋負の dt、映像の時計が currentTime の塊で進み出力遅延を補正しない、先読み0.2秒が短い、頂点で同時約305音源、unlock の同期が重い、見どころの間の触れた音を控えめに。core の VERSION は統合で親が上げる。実装 消費 2/3'
 - id: S-12
   title: 共通部品（ガラスの材質ライブラリ、曇りと指の文字、品質プリセットと動的な解像度）
   wave: 1
@@ -57,8 +57,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/materials/**, src/core/fog/**, src/core/quality.ts, dev/core.html, src/dev/core/**]
   tests: [src/core/quality.test.ts, src/core/fog/condensation.test.ts, src/core/materials/glass.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（quality 13、condensation 8、glass 7）を作成。赤の証跡: 9 failed。glass の7件は STUB が契約を満たすため初めから緑 → CORE-3 の受け入れは dev/core.html の snap と reviewer の目視で行う。実装 消費 1/3 2026-10-20 実装 1/3 で緑（quality 12・condensation 8・glass 8、全体51件、check.sh --quick ALL OK、テスト無変更）。確認ページを WebGPU・WebGL2 で撮影（.snaps/core/）。足した契約: GlassHandle.pulse の第2引数 origin、CondensationOptions.onDraw。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 波紋の距離の割り算でカメラと同じ奥行きの物が NaN（ゴンドラの殻の虹色が消える・ちらつく）、P1 内側から見ると全画面の薄紫のヴェール（正面の寄与を下げ縁だけで）、P1 premultiplied のブレンドで霧の中のガラスが白く浮く、P1 垂直同期の画面で動的な解像度が下がったまま戻らない。P2 固定の擬似照明（夜明けの光）が共有部品に入っている → 部屋ごとに設定できる口、P2 材質1つ約5.5ms の組み立て → 共有の道。親が core への足し算を承認（環境の setter、共有の材質、閃光の強さ、既定の品質）。実装 消費 2/3'
+  status: green
+  notes: '2026-10-20 親がテスト（quality 13、condensation 8、glass 7）を作成。赤の証跡: 9 failed。glass の7件は STUB が契約を満たすため初めから緑 → CORE-3 の受け入れは dev/core.html の snap と reviewer の目視で行う。実装 消費 1/3 2026-10-20 実装 1/3 で緑（quality 12・condensation 8・glass 8、全体51件、check.sh --quick ALL OK、テスト無変更）。確認ページを WebGPU・WebGL2 で撮影（.snaps/core/）。足した契約: GlassHandle.pulse の第2引数 origin、CondensationOptions.onDraw。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 波紋の距離の割り算でカメラと同じ奥行きの物が NaN（ゴンドラの殻の虹色が消える・ちらつく）、P1 内側から見ると全画面の薄紫のヴェール（正面の寄与を下げ縁だけで）、P1 premultiplied のブレンドで霧の中のガラスが白く浮く、P1 垂直同期の画面で動的な解像度が下がったまま戻らない。P2 固定の擬似照明（夜明けの光）が共有部品に入っている → 部屋ごとに設定できる口、P2 材質1つ約5.5ms の組み立て → 共有の道。親が core への足し算を承認（環境の setter、共有の材質、閃光の強さ、既定の品質）。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。殻の内側の画面の隅 (53,73,112)→(5,27,72)（殻なし (0,15,60)）。垂直同期で 100ms の停止3回でも倍率 1.00 のまま、重い場面の後は約21秒で回復。足した口: face、setGlassLighting、sharedGlass、setGlassFlashScale、setDefaultGlassTier、minFontPx。レビュー 消費 2/2'
 - id: S-13
   title: 画面（待ち列・入口・案内・ポーズ・ライドフォト・記録・棚・設定・乗り方・クレジット）と言語・保存
   wave: 1
@@ -69,7 +69,7 @@ slices:
   paths: [src/ui/**, src/styles/**, dev/ui.html, src/dev/ui/**]
   tests: [src/ui/store.test.ts, src/ui/i18n.test.ts, src/ui/screens.test.ts]
   status: red
-  notes: '2026-10-20 親がテスト（store 10、i18n 6、screens 17）を作成。赤の証跡: i18n 未実装で読み込み失敗、store 5 failed。実装 消費 1/3'
+  notes: '2026-10-20 親がテスト（store 10、i18n 6、screens 17）を作成。赤の証跡: i18n 未実装で読み込み失敗、store 5 failed。実装 消費 1/3 2026-10-20 実装 1/3 で緑（store・i18n・screens 32件、全体55件、check --quick ALL OK、テスト無変更）。PC・スマートフォン・1080p の全画面を撮影（.snaps/ui/）。app への希望: UiState に viewMode、案内の 6000 を UI.preRideGuideSec に、長押しのポーズは UI が持つ。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes（P1なし）: P2 ダブルクリックで見えない案内が飛ぶ（初回の案内が永久に出なくなる）、案内が読み上げに届かない、スマートフォンでポーズの札とタブが切れる。親の判断: 傾きの許可は乗車前の案内で求める（設計書どおり）。快適モードの切り替えの跳ねは ADR-0008 で解消。実装 消費 2/3'
 - id: S-14
   title: ライドフォト（高解像度の撮影、額縁と刻印の合成、IndexedDB、保存と共有）
   wave: 1
@@ -79,8 +79,8 @@ slices:
   depends_on: [S-00]
   paths: [src/photo/**, dev/photo.html, src/dev/photo/**]
   tests: [src/photo/photo.test.ts]
-  status: green
-  notes: '2026-10-20 親がテスト16件を作成。赤の証跡: 8 failed（frameTierFor・stampText・doorTint・cropFor・保存の上限）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（photo 12件、全体35件、check.sh --quick ALL OK）。親のテストの型の誤り（share.mock.calls の型）を親が修正。WebGPU と WebGL2 で撮影・合成・保存を確認（画像 .snaps/photo/）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 初回の撮影で1〜5フレーム落ちる（下ごしらえの関数で直し計測で示す）、P2 内部の保存を WebP（Safari は JPEG）に、P3 3件（needsFrameBufferTarget の評価、読み出しの検証、円錐グラデーションの代わりの経路）。実装 消費 2/3（2回目の委任前に記録） 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。等倍で初回も2回目も落ちるフレーム0（WebGPU・WebGL2、計24撮影）。CPU 4倍の絞りでは 1920×1080 で 0〜2 → M3 の性能の磨き込みへ。内部の保存は WebP（約85KB）。レビュー 消費 2/2'
+  status: integrated
+  notes: '2026-10-20 親がテスト16件を作成。赤の証跡: 8 failed（frameTierFor・stampText・doorTint・cropFor・保存の上限）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（photo 12件、全体35件、check.sh --quick ALL OK）。親のテストの型の誤り（share.mock.calls の型）を親が修正。WebGPU と WebGL2 で撮影・合成・保存を確認（画像 .snaps/photo/）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 初回の撮影で1〜5フレーム落ちる（下ごしらえの関数で直し計測で示す）、P2 内部の保存を WebP（Safari は JPEG）に、P3 3件（needsFrameBufferTarget の評価、読み出しの検証、円錐グラデーションの代わりの経路）。実装 消費 2/3（2回目の委任前に記録） 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。等倍で初回も2回目も落ちるフレーム0（WebGPU・WebGL2、計24撮影）。CPU 4倍の絞りでは 1920×1080 で 0〜2 → M3 の性能の磨き込みへ。内部の保存は WebP（約85KB）。レビュー 消費 2/2 2026-10-20 統合（main へ --no-ff）。レビュー2巡目 approve。P2（描画先を読み出し直後に解放）と P3 3件を親が修正。実測の言い方は「等倍の初回 0〜1（まれに2）、2回目 0」。所要 約1時間、実装2試行、レビュー2巡'
 - id: S-15
   title: 見回すと触れる（ドラッグ・追従・傾き、光線の交差判定、見つめて触れる、縁の光、自分で鳴る合図）
   wave: 1
@@ -90,8 +90,8 @@ slices:
   depends_on: [S-00]
   paths: [src/input/**, dev/input.html, src/dev/input/**]
   tests: [src/input/look.test.ts, src/input/touch.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（look 11、touch 11）を作成。赤の証跡: 12 failed（STUB は見回しも触れるも何もしない）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（input 20件、全体43件、check.sh --quick ALL OK、テスト無変更を親が確認）。dev/input.html で 26 項目を Playwright で操作確認（.snaps/input/）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P2 傾きの NaN、180°越えの急な振れ、追従で戻した直後の振り戻し、見つめる距離の制限（親の判断: config に gazeMaxDistance 25m を足し半径を引いた距離）。P3 視野角の感度（LookOptions.fovDeg を足した）、radius を使う縁の光、ポーズ後の傾きの基準、見つめる猶予など。親: config に recenterMaxDegPerSec 60 を足し、乗車の頭は即座に正面へ。実装 消費 2/3'
+  status: integrated
+  notes: '2026-10-20 親がテスト（look 11、touch 11）を作成。赤の証跡: 12 failed（STUB は見回しも触れるも何もしない）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（input 20件、全体43件、check.sh --quick ALL OK、テスト無変更を親が確認）。dev/input.html で 26 項目を Playwright で操作確認（.snaps/input/）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P2 傾きの NaN、180°越えの急な振れ、追従で戻した直後の振り戻し、見つめる距離の制限（親の判断: config に gazeMaxDistance 25m を足し半径を引いた距離）。P3 視野角の感度（LookOptions.fovDeg を足した）、radius を使う縁の光、ポーズ後の傾きの基準、見つめる猶予など。親: config に recenterMaxDegPerSec 60 を足し、乗車の頭は即座に正面へ。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。戻しの最大 59.4°/秒、180°越えで張り付き急な振れなし、NaN でも有限。追従モードの素早い動きで 445°/秒になりうる（範囲外、残件）。レビュー 消費 2/2 2026-10-20 レビュー2巡目 request_changes（P2 1件: 追従モードで戻した後の引き継ぎが、縦の動きで横に120°振れる・入力と逆向きに進む）。レビューは 2/2 で使い切り。親が症状を振る舞いテスト3件にした（2件が赤）。実装 消費 3/3（最後。以降は親が確かめる） 2026-10-20 統合。3試行目は親がテスト（追従の引き継ぎ3件）と差分（carry は単調）で確認。振れ (a)(b)(c) すべて 0°。残件 M3: 追従モードの角速度の上限（素早い動きで約450°/秒）'
 - id: S-16
   title: 画面効果（泡越しの縁、膜の通過の縞と歪み、万華鏡の折り返し、ブルーム、白い霧、暗転）
   wave: 1
@@ -101,8 +101,8 @@ slices:
   depends_on: [S-00]
   paths: [src/fx/**, dev/fx.html, src/dev/fx/**]
   tests: [src/fx/fx.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト9件を作成。赤の証跡: 9 failed（resolveFx が未実装）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（fx 9件、全体32件、check.sh --quick ALL OK、テスト無変更）。WebGPU と WebGL2 の両方で確認ページと本アプリの乗車をコンソールエラー0で撮影（.snaps/fx、.snaps/ride）。4K で合成 +1.3ms。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 万華鏡の折り返しがゴンドラの縁を消し視界ごと回す（深さで抑える）、P2 uv の上下の取り違え（殻が上から閉じる）、P2 HDR の描画先が2組残る、P2 低品質で暗転と白い霧が消える（親の判断: 安い重ね描きで残す）、P3 毎フレームの確保、膜の強さ（親も画像で確認: 強すぎる）など。親: app の万華鏡の回転を時刻から決めた。reducedFlash を渡すのは S-16 統合後に親が行う。実装 消費 2/3'
+  status: integrated
+  notes: '2026-10-20 親がテスト9件を作成。赤の証跡: 9 failed（resolveFx が未実装）。実装 消費 1/3 2026-10-20 実装 1/3 で緑（fx 9件、全体32件、check.sh --quick ALL OK、テスト無変更）。WebGPU と WebGL2 の両方で確認ページと本アプリの乗車をコンソールエラー0で撮影（.snaps/fx、.snaps/ride）。4K で合成 +1.3ms。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 万華鏡の折り返しがゴンドラの縁を消し視界ごと回す（深さで抑える）、P2 uv の上下の取り違え（殻が上から閉じる）、P2 HDR の描画先が2組残る、P2 低品質で暗転と白い霧が消える（親の判断: 安い重ね描きで残す）、P3 毎フレームの確保、膜の強さ（親も画像で確認: 強すぎる）など。親: app の万華鏡の回転を時刻から決めた。reducedFlash を渡すのは S-16 統合後に親が行う。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。万華鏡はゴンドラの縁と手すりの 99.9% の画素が折り返しなしと同じ、回転しても動かない。暗さ・白い霧は低品質でも出る。合成は素通しとほぼ同じ負荷。レビュー 消費 2/2 2026-10-20 統合。2巡目 approve。P3 のうち折り返しの境・定数・白い霧の色・try/finally を親が修正。残件: VR の暗転の見せ方（S-24）、VR を抜けた最初のフレームの再コンパイル（M3）、--q low の撮り直し（S-24）'
 - id: S-17
   title: Blender のパイプライン基盤（プレビズの組み立てと書き出し、通しの動画、見えない面の削除、焼き込み、命名と glb の書き出し）
   wave: 1
@@ -113,7 +113,7 @@ slices:
   paths: [blender/scripts/previz.py, blender/scripts/export_ride.py, blender/scripts/render_previz.py, blender/scripts/common/**, blender/README.md]
   tests: [scripts/blender.test.ts]
   status: red
-  notes: '2026-10-20 親がテスト12件（scripts/blender.test.ts、合成のらせんのレールとキューで往復・プレビズ・静止画・面の削除・焼き込み・命名と extras）を作成。赤の証跡: vitest run scripts/blender.test.ts → previz.py がなく beforeAll で失敗（12件 skip 扱い）。SKIP_BLENDER=1 で 12 skipped。実装 消費 1/3'
+  notes: '2026-10-20 親がテスト12件（scripts/blender.test.ts、合成のらせんのレールとキューで往復・プレビズ・静止画・面の削除・焼き込み・命名と extras）を作成。赤の証跡: vitest run scripts/blender.test.ts → previz.py がなく beforeAll で失敗（12件 skip 扱い）。SKIP_BLENDER=1 で 12 skipped。実装 消費 1/3 2026-10-20 実装 1/3 で緑（blender.test 12件 約10秒、check --quick ALL OK、テスト無変更）。往復の誤差: 点 0.03mm、時刻表 0.23mm、区間 0.2mm。マーカーの名前は「<id> in=<区間> [k=v]」。面の削除は実寸で 4.5秒。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 ライトマップが 16bit の PNG（約3.8倍）。P2 gentleY を勝手に作る（ADR-0008 違反）、マーカーの検査なし、フレーム範囲の変更で壊れたデータ、1.0 を超える光が飽和、glass が光線を遮る、共有メッシュを黙ってコピー、config の写しのずれ。親が写しの検査テスト（blender-constants.test.ts、速い検査で回る）を追加し赤を確認。実装 消費 2/3'
 - id: S-20
   title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を Blender で造形・焼き込みし、完成品質で
   wave: 2
@@ -157,7 +157,7 @@ slices:
   paths: [src/xr/**, e2e/xr.spec.ts, e2e/render-paths.spec.ts, dev/xr.html, src/dev/xr/**]
   tests: [src/xr/xr.test.ts]
   status: green
-  notes: '2026-10-20 親がテスト（xr 単体 12、e2e xr 3・render-paths 2）を作成。main に VR 可能な端末で WebGL2 経路を選ぶ処理と ?debug の操作口（commands、xr、xrFrames、xrExit）を追加して取り込み。赤の証跡: vitest src/xr → 9 failed（referenceSpaceFor など未実装）、e2e は STUB の isSupported=false で失敗。実装 消費 1/3 2026-10-20 実装 1/3。単体10件緑、check --quick ALL OK。WebGPURenderer の WebGL2 経路で immersive-vr が動いた（IWER、3秒で181フレーム、エラー0）。three r186 の IWER 限定の不具合（XRWebGLLayer.framebuffer が null → WeakMap の鍵）を enter で回避。親が main で flow の xrEnded（案内中なら入口へ）と playwright の --disable-features=WebXR を直して取り込み。e2e は親が確認する。レビュー 消費 1/2'
+  notes: '2026-10-20 親がテスト（xr 単体 12、e2e xr 3・render-paths 2）を作成。main に VR 可能な端末で WebGL2 経路を選ぶ処理と ?debug の操作口（commands、xr、xrFrames、xrExit）を追加して取り込み。赤の証跡: vitest src/xr → 9 failed（referenceSpaceFor など未実装）、e2e は STUB の isSupported=false で失敗。実装 消費 1/3 2026-10-20 実装 1/3。単体10件緑、check --quick ALL OK。WebGPURenderer の WebGL2 経路で immersive-vr が動いた（IWER、3秒で181フレーム、エラー0）。three r186 の IWER 限定の不具合（XRWebGLLayer.framebuffer が null → WeakMap の鍵）を enter で回避。親が main で flow の xrEnded（案内中なら入口へ）と playwright の --disable-features=WebXR を直して取り込み。e2e は親が確認する。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes（P1なし）: P2 手のつまみで触れる（設計書は作らない）、VR の見つめる距離の上限なし、メニューを開いた直後の見つめ選択、three の内部の差し替えを常に行う（null のときだけに）、foveation が層に当たらない、光線の判定が原点の球、VR の白い霧が出ない。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK、e2e 7件緑、xr.spec repeat 5 で 15/15）。内部の差し替えは getBaseLayer().framebuffer === null のときだけ（renderState は setSession 直後にまだ層がない）。レビュー 消費 2/2'
 - id: S-24
   title: 統合（誘導・正面へ戻す・案内・膜・暗転・撮影の配線、e2e の通し、snap、関門の計測）
   wave: 3
@@ -168,4 +168,4 @@ slices:
   paths: [src/app/**, src/main.ts, e2e/**, scripts/dev/**]
   tests: [e2e/ride.spec.ts]
   status: todo
-  notes: '2026-10-20 S-14 からの申し送り: (1) 撮影の GPU メモリの一時的なピーク PC 約220MB・スマートフォン約130MB（1部屋300MBの予算と合算で計測）、(2) 画面効果が pass() 経由になったら撮影と画面で多重標本と形式が違い、撮影ごとにパイプラインが作られる → 部屋の読み込み時に撮影先で compileAsync、写真に画面効果は入れない、(3) 共有は写真の画面を開いた時に合成しておき、操作の直後に share を呼ぶ、(4) 待ち列で warmUpCapture を呼ぶ 2026-10-20 S-14 から: 待ち列の後で warmUpCapture(renderer, scene, camera) を呼ぶ。スマートフォンで撮影が重ければ撮影の時刻を重い場面の外へずらすか captureMobile を下げる（M3） 2026-10-20 S-11 から: sfx(''gondola.close'') を乗車の頭、sfx(''gondola.open'') を departure.open で呼ぶ。core の VERSION を上げ README の状態を更新（S-11 の 0.1.1 と S-12 の未リリースをまとめる）。?t/?rate の開発用の時計ではエンジンの時計が走らず触れた音が鳴らない'
+  notes: '2026-10-20 S-14 からの申し送り: (1) 撮影の GPU メモリの一時的なピーク PC 約220MB・スマートフォン約130MB（1部屋300MBの予算と合算で計測）、(2) 画面効果が pass() 経由になったら撮影と画面で多重標本と形式が違い、撮影ごとにパイプラインが作られる → 部屋の読み込み時に撮影先で compileAsync、写真に画面効果は入れない、(3) 共有は写真の画面を開いた時に合成しておき、操作の直後に share を呼ぶ、(4) 待ち列で warmUpCapture を呼ぶ 2026-10-20 S-14 から: 待ち列の後で warmUpCapture(renderer, scene, camera) を呼ぶ。スマートフォンで撮影が重ければ撮影の時刻を重い場面の外へずらすか captureMobile を下げる（M3） 2026-10-20 S-11 から: sfx(''gondola.close'') を乗車の頭、sfx(''gondola.open'') を departure.open で呼ぶ。core の VERSION を上げ README の状態を更新（S-11 の 0.1.1 と S-12 の未リリースをまとめる）。?t/?rate の開発用の時計ではエンジンの時計が走らず触れた音が鳴らない 2026-10-20 S-23 から（統合担当の課題）: (F8) INT-4 自分で鳴る合図を入力の種類に依らず app か純粋関数で（VR でも鳴る）、(F9) applySettings で xr.setGazeDwell を呼び契約に足す、(F10) VR の画面効果（膜の縞・暗転・縁）の方式を決める、(F11) ?screen=home&t=588 で入口で止め VR で天球から乗れる入口と xr.spec の天球の1件、(F12) xrCapable なら isXR: true、MSAA・multiview・foveation を実機で比較。ADR-0001 は Quest 3 の実機で投影レイヤーの経路を確かめるまで仮 2026-10-20 S-16 から: createScreenFx(renderer, { reducedFlash, bloomResolution: isMobile ? 0.25 : 0.5 })、VR の開始で fx.setEnabled(false)、fx.state.bloom（見どころ）と whiteFog（VR への切り替え）を時刻から 2026-10-20 S-10 から: src/app/ride-data.ts の読み込みで validateRideData を呼ぶ。天球の殻は中心から 62m 以内（出口の膜まで 62m） 2026-10-20 S-13 から: 画質の変更を即時に（preset の差し替え）、案内の 6000ms を UI.preRideGuideSec に・飛ばしたらタイマーを止める、pointermove の雫はマウスだけ、VR の案内は xr と調整、UiState に viewMode'
