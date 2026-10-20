@@ -156,8 +156,8 @@ slices:
   depends_on: [S-00]
   paths: [src/xr/**, e2e/xr.spec.ts, e2e/render-paths.spec.ts, dev/xr.html, src/dev/xr/**]
   tests: [src/xr/xr.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（xr 単体 12、e2e xr 3・render-paths 2）を作成。main に VR 可能な端末で WebGL2 経路を選ぶ処理と ?debug の操作口（commands、xr、xrFrames、xrExit）を追加して取り込み。赤の証跡: vitest src/xr → 9 failed（referenceSpaceFor など未実装）、e2e は STUB の isSupported=false で失敗。実装 消費 1/3 2026-10-20 実装 1/3。単体10件緑、check --quick ALL OK。WebGPURenderer の WebGL2 経路で immersive-vr が動いた（IWER、3秒で181フレーム、エラー0）。three r186 の IWER 限定の不具合（XRWebGLLayer.framebuffer が null → WeakMap の鍵）を enter で回避。親が main で flow の xrEnded（案内中なら入口へ）と playwright の --disable-features=WebXR を直して取り込み。e2e は親が確認する。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes（P1なし）: P2 手のつまみで触れる（設計書は作らない）、VR の見つめる距離の上限なし、メニューを開いた直後の見つめ選択、three の内部の差し替えを常に行う（null のときだけに）、foveation が層に当たらない、光線の判定が原点の球、VR の白い霧が出ない。実装 消費 2/3'
+  status: green
+  notes: '2026-10-20 親がテスト（xr 単体 12、e2e xr 3・render-paths 2）を作成。main に VR 可能な端末で WebGL2 経路を選ぶ処理と ?debug の操作口（commands、xr、xrFrames、xrExit）を追加して取り込み。赤の証跡: vitest src/xr → 9 failed（referenceSpaceFor など未実装）、e2e は STUB の isSupported=false で失敗。実装 消費 1/3 2026-10-20 実装 1/3。単体10件緑、check --quick ALL OK。WebGPURenderer の WebGL2 経路で immersive-vr が動いた（IWER、3秒で181フレーム、エラー0）。three r186 の IWER 限定の不具合（XRWebGLLayer.framebuffer が null → WeakMap の鍵）を enter で回避。親が main で flow の xrEnded（案内中なら入口へ）と playwright の --disable-features=WebXR を直して取り込み。e2e は親が確認する。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes（P1なし）: P2 手のつまみで触れる（設計書は作らない）、VR の見つめる距離の上限なし、メニューを開いた直後の見つめ選択、three の内部の差し替えを常に行う（null のときだけに）、foveation が層に当たらない、光線の判定が原点の球、VR の白い霧が出ない。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK、e2e 7件緑、xr.spec repeat 5 で 15/15）。内部の差し替えは getBaseLayer().framebuffer === null のときだけ（renderState は setSession 直後にまだ層がない）。レビュー 消費 2/2'
 - id: S-24
   title: 統合（誘導・正面へ戻す・案内・膜・暗転・撮影の配線、e2e の通し、snap、関門の計測）
   wave: 3
