@@ -13,8 +13,16 @@ body {
   background: #0b0e13;
   color: #eef3f8;
   font-family: var(--font-sans);
-  font-size: calc(18px * var(--text-scale));
+  /* 最小 18px（1080p 基準）。それより大きな画面では画面の短い辺に合わせて大きくする */
+  font-size: calc(max(18px, 1.667vmin) * var(--text-scale));
   -webkit-tap-highlight-color: transparent;
+}
+/* スマートフォンでは 16px 相当（最小の文字サイズ。デスクトップは 18px） */
+@media (pointer: coarse), (max-width: 640px) {
+  html,
+  body {
+    font-size: calc(16px * var(--text-scale));
+  }
 }
 #app {
   position: fixed;

@@ -1,0 +1,101 @@
+/* 画面の土台: 色・動き・読み上げ専用の隠し方・動きを控える設定。素材はガラスだけ。
+   色は部屋の光に合わせる（入口は夜明け前の青、ライドフォトは夜明けの金）。 */
+
+/* 指でなぞった文字の現れ方（0 → 1.12 でマスクが左から右へ抜ける） */
+@property --wp {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1.12;
+}
+/* 泡の膜の縁をゆっくり回す */
+@property --rim-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.ui {
+  --ink: #eef4fb;
+  --ink-soft: rgba(238, 244, 251, 0.8);
+  --ink-faint: rgba(238, 244, 251, 0.6);
+  /* 部屋の光（r, g, b）。画面ごとに data-room で変える */
+  --tint: 140, 175, 255;
+  /* 泡の膜: 虹色の薄膜 */
+  --film-flat: linear-gradient(115deg, #8fe3ff 0%, #b9a7ff 24%, #ffb8dd 48%, #ffe3a3 72%, #b6ffd8 100%);
+  --film-ring: conic-gradient(from var(--rim-angle), #8fe3ff, #b9a7ff, #ffb8dd, #ffe3a3, #b6ffd8, #8fe3ff);
+  /* ゆっくり始まって粘りながら止まる曲線（core/easing の easeGlass に合わせる） */
+  --ease-glass: cubic-bezier(0.55, 0, 0.1, 1);
+  /* 入力から 0.1 秒以内に動きで応える */
+  --quick: 90ms;
+
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  overflow: hidden;
+  pointer-events: none;
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+  font-weight: 300;
+  font-size: 1rem;
+  line-height: 1.65;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.ui *,
+.ui *::before,
+.ui *::after {
+  box-sizing: border-box;
+}
+
+.ui :where(button, input, select) {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+.ui :where(h1, h2, h3, p, dl, dd, ul) {
+  margin: 0;
+  padding: 0;
+}
+.ui :where(ul) {
+  list-style: none;
+}
+
+/* hidden 属性は、作者の display 指定より必ず勝たせる */
+.ui [hidden] {
+  display: none !important;
+}
+
+/* 読み上げにだけ届ける */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 動きを控えたい設定、光の点滅を抑える設定。書く演出は即座に出し切る */
+@media (prefers-reduced-motion: reduce) {
+  .ui *,
+  .ui *::before,
+  .ui *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+}
+.ui[data-calm] *,
+.ui[data-calm] *::before,
+.ui[data-calm] *::after {
+  animation-iteration-count: 1 !important;
+}

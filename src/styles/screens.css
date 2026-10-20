@@ -1,0 +1,1108 @@
+/* 画面ごとの見た目と動き。色は部屋の光に合わせる（入口は夜明け前の青、ライドフォトは夜明けの金）。
+   文字は var(--font-serif) と var(--font-sans)。大きさは rem（html の font-size が --text-scale を掛ける）で、
+   どこも 1rem（デスクトップ 18px、スマートフォン 16px）を下回らない。 */
+
+/* ── 画面の枠 ─────────────────────────────────────────────────── */
+.ui .screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  justify-content: safe center;
+  gap: 1.2rem;
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  isolation: isolate;
+  /* 画面が出ている間は、下の 3D に触れさせない */
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity var(--out, 0.35s) var(--ease-glass);
+}
+.ui .screen.is-in {
+  opacity: 1;
+  transition: opacity var(--in, 0.35s) var(--ease-glass) var(--delay, 0s);
+}
+/* 部屋の光を敷く。スクロールしても動かない */
+.ui .screen::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--veil, none);
+}
+
+.ui [data-room='queue'] {
+  --tint: 120, 150, 215;
+  --veil: radial-gradient(120% 95% at 50% 46%, rgba(14, 22, 44, 0.2) 0%, rgba(5, 8, 18, 0.9) 100%);
+}
+/* 入口: 夜明け前の青 */
+.ui :is([data-room='home'], [data-room='settings'], [data-room='howto'], [data-room='credits']) {
+  --tint: 130, 170, 255;
+  --veil: linear-gradient(180deg, rgba(10, 18, 52, 0.66) 0%, rgba(30, 56, 120, 0.4) 50%, rgba(96, 128, 200, 0.28) 100%);
+}
+.ui [data-room='guide'] {
+  --tint: 190, 208, 232;
+  --veil: linear-gradient(180deg, rgba(22, 32, 52, 0.5), rgba(60, 78, 110, 0.3));
+}
+.ui [data-room='pause'] {
+  --tint: 232, 242, 255;
+  /* 息の曇り。明るい部屋の上でも白い文字が読めるよう、青みのある灰色の曇りにする */
+  --veil: radial-gradient(circle at 50% 56%, rgba(104, 128, 166, 0.6), rgba(78, 100, 140, 0.54) 62%, rgba(66, 86, 124, 0.5));
+}
+/* ライドフォトと棚: 夜明けの金 */
+.ui :is([data-room='photo'], [data-room='shelf']) {
+  --tint: 255, 205, 130;
+  --veil: linear-gradient(180deg, rgba(18, 22, 50, 0.62) 0%, rgba(64, 44, 72, 0.4) 55%, rgba(110, 66, 60, 0.42) 100%);
+}
+
+/* ── 待ち列 ───────────────────────────────────────────────────── */
+.ui .screen-queue {
+  justify-content: flex-end;
+}
+.ui .corridor {
+  --vy: 46%;
+  position: absolute;
+  inset: 0;
+}
+.ui .corridor-floor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--vy);
+  bottom: 0;
+  clip-path: polygon(44% 0, 56% 0, 100% 100%, 0 100%);
+  background: radial-gradient(ellipse 70% 90% at 50% 0%, rgba(var(--tint), 0.34), transparent 75%), linear-gradient(180deg, rgba(150, 180, 230, 0.16), rgba(10, 16, 34, 0) 90%);
+}
+/* 突き当たりのガラス扉。灯りが増えるほど光があふれる */
+.ui .corridor-door {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--vy) - 11vh);
+  width: max(3.2rem, 8vw);
+  height: 20vh;
+  min-height: 5rem;
+  translate: -50% 0;
+  border-radius: 999px 999px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-bottom: 0;
+  /* 光があふれる扉。下へ向かって床の光にとけていく */
+  background: linear-gradient(180deg, rgba(255, 240, 210, calc(0.1 + var(--load) * 0.6)), rgba(255, 220, 160, calc(0.06 + var(--load) * 0.3)) 65%, rgba(255, 210, 150, 0));
+  box-shadow: 0 0 calc(var(--load) * 4.5rem) rgba(255, 224, 170, calc(var(--load) * 0.5)), inset 0 0 1.4rem rgba(255, 255, 255, calc(var(--load) * 0.3));
+  transition: background 0.8s ease-out, box-shadow 0.8s ease-out;
+}
+.ui .lamp {
+  --k: calc(1 / (1 + var(--i) * 0.55));
+  --size: calc(var(--k) * 4rem);
+  position: absolute;
+  left: calc(50% + var(--side) * var(--k) * 39vw);
+  top: calc(var(--vy) - var(--k) * 24vh);
+  width: var(--size);
+  height: var(--size);
+  translate: -50% -50%;
+}
+/* 灯りを支える細い柱と、床への映り込み */
+.ui .lamp::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: max(1px, calc(var(--k) * 0.22rem));
+  height: calc(var(--k) * 34vh);
+  translate: -50% 0;
+  background: linear-gradient(180deg, rgba(220, 230, 250, 0.5), rgba(220, 230, 250, 0.04));
+}
+.ui .lamp::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: calc(100% + var(--k) * 30vh);
+  width: calc(var(--size) * 1.8);
+  height: calc(var(--size) * 0.5);
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 214, 150, 0.7), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.9s ease-out;
+}
+.ui .lamp.lit::after {
+  opacity: 0.55;
+}
+.ui .lamp-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.4), rgba(160, 185, 230, 0.12) 55%, rgba(120, 150, 210, 0.05));
+  box-shadow: inset 0 0 calc(var(--size) * 0.2) rgba(255, 255, 255, 0.12);
+  transition: background 0.7s ease-out, box-shadow 0.7s ease-out, border-color 0.7s ease-out;
+}
+.ui .lamp.lit .lamp-core {
+  border-color: rgba(255, 245, 220, 0.9);
+  background: radial-gradient(circle at 36% 30%, #fff 0, #fff8e8 14%, rgba(255, 230, 175, 0.96) 40%, rgba(255, 190, 120, 0.7) 78%);
+  box-shadow: 0 0 calc(var(--size) * 0.7) rgba(255, 214, 150, 0.8), 0 0 calc(var(--size) * 2) rgba(255, 190, 120, 0.4), inset 0 0 calc(var(--size) * 0.25) rgba(255, 255, 255, 0.6);
+}
+.ui .queue-foot {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  min-height: 7rem;
+  margin-bottom: max(1.2rem, 6vh);
+}
+.ui .queue-caption {
+  align-self: end;
+  color: var(--ink-soft);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  animation: pulse 3s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ── 入口 ─────────────────────────────────────────────────────── */
+.ui .screen-home {
+  gap: clamp(0.8rem, 2.4vh, 1.6rem);
+}
+.ui .home-hero {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  width: 100%;
+}
+.ui .arch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(86vw, max(25rem, 56vmin));
+  height: clamp(13rem, 50vh, max(26rem, 62vmin));
+  border-radius: 999px 999px 0.6rem 0.6rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.02));
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.ui .arch-light {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(ellipse 70% 60% at 50% 100%, rgba(var(--tint), 0.5), transparent 70%), radial-gradient(ellipse 50% 40% at 50% 30%, rgba(255, 255, 255, 0.16), transparent 70%);
+  animation: breathe 7s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    opacity: 0.7;
+  }
+}
+.ui .arch-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  filter: drop-shadow(0 0 0.8rem rgba(var(--tint), 0.85));
+}
+.ui .arch-rim::before {
+  padding: 2px;
+  background: var(--film-ring);
+  opacity: 0.95;
+  animation: rim 28s linear infinite;
+}
+@keyframes rim {
+  to {
+    --rim-angle: 360deg;
+  }
+}
+.ui .arch-text {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.7rem;
+  margin-top: -1.5rem;
+  padding: 0 1rem;
+  text-align: center;
+}
+.ui .title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: min(max(3.9rem, 7.2vmin), 13vw);
+  line-height: 1.2;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: #f6f9ff;
+  text-shadow: 0 0 0.5rem rgba(var(--tint), 1), 0 0 1.6rem rgba(var(--tint), 0.85), 0 0 3.4rem rgba(var(--tint), 0.6);
+}
+.ui .subtitle {
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--ink-soft);
+}
+.ui .ticket {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(88vw, max(24rem, 52vmin));
+  margin-top: -2.4rem;
+  padding: 1rem 1.5rem 1rem 1.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.07)), rgba(var(--tint), 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 18px 44px rgba(2, 6, 18, 0.4), 0 0 44px rgba(var(--tint), 0.3);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  transform: rotate(-2deg);
+  animation: ticket-float 6.5s ease-in-out infinite;
+}
+@keyframes ticket-float {
+  50% {
+    transform: rotate(-1.2deg) translateY(-0.45rem);
+  }
+}
+.ui .ticket-body {
+  display: grid;
+  gap: 0.05rem;
+}
+.ui .ticket-label {
+  color: var(--ink-soft);
+  letter-spacing: 0.3em;
+}
+.ui .ticket-number {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 2.1rem;
+  line-height: 1.3;
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 1rem rgba(var(--tint), 0.8);
+}
+.ui .ticket-route {
+  color: var(--ink-soft);
+}
+/* 改札の穴。乗るとここに光が開く */
+.ui .ticket-hole {
+  flex: none;
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.5);
+  background: radial-gradient(circle, rgba(2, 6, 18, 0.4), rgba(2, 6, 18, 0.06) 72%);
+  box-shadow: inset 0 2px 6px rgba(2, 6, 18, 0.5);
+}
+.ui .is-leaving .ticket-hole {
+  animation: punch 1s ease-in forwards;
+}
+@keyframes punch {
+  to {
+    transform: scale(9);
+    border-color: transparent;
+    background: radial-gradient(circle, #fff 0%, rgba(var(--tint), 0.7) 50%, transparent 70%);
+  }
+}
+.ui .home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.9rem 1.2rem;
+  margin-top: 0.4rem;
+}
+.ui .home-menu {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem 0.8rem;
+  max-width: min(56rem, 100%);
+}
+.ui .screen-home.enter .arch {
+  animation: arch-in 1.4s var(--ease-glass) var(--delay, 0s) both;
+}
+.ui .screen-home.enter .ticket {
+  animation: ticket-in 1.3s calc(0.5s + var(--delay, 0s)) var(--ease-glass) both, ticket-float 6.5s calc(1.8s + var(--delay, 0s)) ease-in-out infinite;
+}
+.ui .screen-home.enter :is(.home-actions, .home-menu) {
+  animation: rise-in 1s calc(0.9s + var(--delay, 0s)) var(--ease-glass) both;
+}
+@keyframes arch-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+@keyframes ticket-in {
+  from {
+    opacity: 0;
+    translate: 0 2rem;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    translate: 0 1rem;
+  }
+}
+
+/* ── 乗車前の案内 ─────────────────────────────────────────────── */
+.ui .screen-guide {
+  gap: 1.6rem;
+  cursor: pointer;
+}
+.ui .board-wrap {
+  display: grid;
+  justify-items: center;
+}
+.ui .board {
+  width: min(34rem, 90vw);
+  padding: 2.4rem 2rem;
+  overflow: hidden;
+  border-radius: 1.4rem;
+  text-align: center;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.08)), rgba(var(--tint), 0.1);
+}
+.ui .board-lines {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1.3rem;
+}
+.ui .guide-line {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(1.15rem, 4vw, 1.85rem);
+  line-height: 1.5;
+  text-wrap: balance;
+  word-break: auto-phrase;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 0.5em rgba(255, 255, 255, 0.5), 0 1px 10px rgba(14, 22, 44, 0.5);
+}
+.ui .board-post {
+  width: 0.7rem;
+  height: 3.6rem;
+  border-radius: 0 0 0.7rem 0.7rem;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1));
+  box-shadow: 0 0 1rem rgba(var(--tint), 0.4);
+}
+.ui .guide-foot {
+  display: grid;
+  justify-items: center;
+  gap: 0.9rem;
+  cursor: default;
+}
+.ui .guide-timer {
+  position: relative;
+  display: block;
+  width: 12rem;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.ui .guide-timer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--film-flat);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.ui .guide-timer.run::after {
+  animation: timer var(--sec, 6s) linear forwards;
+}
+@keyframes timer {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* ── 乗車中: 何も出さない ─────────────────────────────────────── */
+.ui .screen-riding {
+  display: block;
+  padding: 0;
+  overflow: visible;
+  /* 画面には何もない。下の 3D の操作（見回す・触れる）を邪魔しない */
+  pointer-events: none;
+  opacity: 1;
+  transition: none;
+}
+.ui .screen-riding::before {
+  display: none;
+}
+/* マウスを動かしたときだけ、隅に浮かぶ雫（ポーズ） */
+.ui .drop {
+  position: absolute;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  width: 3rem;
+  height: 3.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(-0.7rem) scale(0.8);
+  transition: opacity 0.3s var(--ease-glass), transform 0.3s var(--ease-glass);
+  filter: drop-shadow(0 0 0.6rem rgba(170, 205, 255, 0.7));
+}
+.ui .drop.is-on {
+  opacity: 1;
+  transform: none;
+}
+.ui .drop.is-on:hover {
+  transform: scale(1.14);
+  transition-duration: var(--quick);
+}
+.ui .drop.is-on:active {
+  transform: scale(0.92);
+  transition-duration: 40ms;
+}
+.ui .drop svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.ui .drop-body {
+  fill: rgba(214, 232, 255, 0.26);
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 1.1;
+}
+.ui .drop-shine {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+/* 0:20 の案内。泡の内側の曇りに書かれて消える */
+.ui .ride-hint {
+  position: absolute;
+  left: 50%;
+  bottom: max(9vh, 3rem);
+  width: min(32rem, 92vw);
+  translate: -50% 0;
+  pointer-events: none;
+  animation: hint-in 0.9s var(--ease-glass) both;
+}
+.ui .hint-fog {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 7rem;
+  padding: 2.6rem 3rem;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(98, 124, 168, 0.58) 0%, rgba(98, 124, 168, 0.4) 50%, rgba(98, 124, 168, 0) 76%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 40%, transparent 72%);
+  mask-image: radial-gradient(ellipse at 50% 50%, #000 40%, transparent 72%);
+}
+.ui .hint-text {
+  position: relative;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(1.3rem, 4.4vw, 1.8rem);
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  text-align: center;
+  color: #fff;
+  text-shadow: 0 0 0.5em rgba(255, 255, 255, 0.5), 0 1px 3px rgba(8, 16, 40, 0.5), 0 0 16px rgba(8, 16, 40, 0.5);
+}
+.ui .ride-hint.is-dissolving {
+  animation: dissolve 1.2s ease-in forwards;
+}
+@keyframes hint-in {
+  from {
+    opacity: 0;
+    scale: 0.9;
+  }
+}
+@keyframes dissolve {
+  to {
+    opacity: 0;
+    filter: blur(6px);
+    scale: 1.04;
+  }
+}
+
+/* ── ポーズ ───────────────────────────────────────────────────── */
+.ui .screen-pause::before {
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+  backdrop-filter: blur(16px) saturate(1.1);
+}
+/* 息を吹きかけたように、中心から曇りが広がる */
+.ui .screen-pause.is-in::before {
+  animation: breath var(--in, 0.4s) var(--ease-glass) both;
+}
+@keyframes breath {
+  from {
+    clip-path: circle(0% at 50% 56%);
+  }
+  to {
+    clip-path: circle(150% at 50% 56%);
+  }
+}
+.ui .pause-panel {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+.ui .pause-title {
+  margin-bottom: 0.8rem;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 1.1rem;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: var(--ink-soft);
+}
+.ui .pause-menu {
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+}
+.ui .pause-row {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+/* 項目の名前は中央に置き、今の状態はその右に添える */
+.ui .pause-state {
+  position: absolute;
+  left: calc(100% + 0.4rem);
+  top: 50%;
+  translate: 0 -50%;
+  white-space: nowrap;
+  padding: 0.05rem 0.9rem;
+  border-radius: 999px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.ui .write-item {
+  min-height: 3rem;
+  margin: 0;
+  padding: 0.4rem 1.6rem;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(1.5rem, 5vw, 2.1rem);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: #fff;
+  text-shadow: 0 0 0.5em rgba(255, 255, 255, 0.5), 0 1px 3px rgba(20, 34, 60, 0.45), 0 0 18px rgba(20, 34, 60, 0.4);
+  transition: transform var(--quick) ease-out, text-shadow var(--quick) ease-out;
+}
+.ui .write-item:hover {
+  transform: scale(1.07);
+  text-shadow: 0 0 0.8em rgba(255, 255, 255, 0.95), 0 0 2em rgba(var(--tint), 0.9);
+}
+.ui .write-item:active {
+  transform: scale(0.96);
+  transition-duration: 40ms;
+}
+.ui .write-item[aria-pressed='true'] {
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.5);
+  text-underline-offset: 0.35em;
+}
+.ui .pause-volume {
+  width: min(22rem, 84vw);
+  margin: 0.3rem auto 0;
+  padding: 0.2rem 1.2rem;
+  border-radius: 1.2rem;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  animation: rise-in 0.4s var(--ease-glass) both;
+}
+.ui .pause-volume .row {
+  padding: 0.4rem 0;
+  border: 0;
+}
+
+/* ── ライドフォトと乗車の記録 ─────────────────────────────────── */
+.ui .screen-photo {
+  gap: 0.9rem;
+}
+.ui .photo-thanks {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(1.15rem, 3.4vw, 1.5rem);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-align: center;
+  color: #fff0d6;
+  text-shadow: 0 0 1rem rgba(255, 200, 120, 0.7);
+}
+.ui .photo-pane {
+  --photo-h: clamp(10rem, 33vh, 23rem);
+  display: grid;
+  justify-items: center;
+  gap: 0.9rem;
+  width: 100%;
+}
+.ui .photo-stage {
+  position: relative;
+  padding: 6px;
+  border-radius: 2.1rem;
+  animation: sway 11s ease-in-out infinite;
+}
+/* ゆっくり回る（左右に少し向きを変える） */
+@keyframes sway {
+  0%,
+  100% {
+    transform: perspective(1400px) rotateY(-3.5deg) rotateX(1deg);
+  }
+  50% {
+    transform: perspective(1400px) rotateY(3.5deg) rotateX(-1deg);
+  }
+}
+.ui .photo-glass {
+  position: relative;
+  width: min(88vw, calc(var(--photo-h) * 1.7778));
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 1.6rem;
+  background: radial-gradient(circle at 50% 100%, rgba(var(--tint), 0.28), rgba(var(--tint), 0.06));
+  box-shadow: inset 0 0 36px rgba(255, 255, 255, 0.16), 0 22px 60px rgba(2, 6, 18, 0.45), 0 0 70px rgba(var(--tint), 0.3);
+  transition: width 0.55s var(--ease-glass), aspect-ratio 0.55s var(--ease-glass);
+}
+.ui .photo-pane[data-format='square'] .photo-glass {
+  width: min(88vw, var(--photo-h));
+  aspect-ratio: 1;
+}
+.ui .photo-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: photo-in 1.3s var(--ease-glass) both;
+}
+@keyframes photo-in {
+  from {
+    opacity: 0;
+    scale: 1.08;
+    filter: blur(8px);
+  }
+}
+.ui .photo-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 80% 55% at 18% 0%, rgba(255, 255, 255, 0.34), transparent 60%), linear-gradient(115deg, transparent 32%, rgba(255, 255, 255, 0.22) 46%, transparent 60%);
+  background-size: 100% 100%, 260% 100%;
+  background-position: 0 0, 0% 0;
+  mix-blend-mode: screen;
+  animation: sheen 10s ease-in-out infinite;
+}
+@keyframes sheen {
+  50% {
+    background-position: 0 0, 100% 0;
+  }
+}
+.ui .photo-developing {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  letter-spacing: 0.2em;
+  color: rgba(255, 240, 215, 0.92);
+  animation: pulse 2.6s ease-in-out infinite;
+}
+/* 額縁: 隠れた泡の数で変わる（0〜1 通常、2〜3 銀、4 金、5 虹色） */
+.ui .photo-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.ui .photo-rim::before {
+  padding: var(--rim-w, 1.5px);
+  background: var(--rim-bg, var(--film-flat));
+  opacity: var(--rim-op, 0.65);
+}
+.ui .photo-pane[data-tier='silver'] .photo-rim {
+  --rim-w: 4px;
+  --rim-bg: linear-gradient(135deg, #f6f8fc, #9ba5b6 28%, #eef1f6 52%, #7f8a9c 78%, #f2f5fa);
+  --rim-op: 1;
+}
+.ui .photo-pane[data-tier='gold'] .photo-rim {
+  --rim-w: 5px;
+  --rim-bg: linear-gradient(135deg, #fff3c6, #e2b24a 28%, #fff0b0 52%, #b5832a 78%, #ffe9a0);
+  --rim-op: 1;
+}
+.ui .photo-pane[data-tier='rainbow'] .photo-rim {
+  --rim-w: 5px;
+  --rim-bg: var(--film-ring);
+  --rim-op: 1;
+  filter: drop-shadow(0 0 0.7rem rgba(255, 255, 255, 0.6));
+}
+.ui .photo-pane[data-tier='rainbow'] .photo-rim::before {
+  animation: rim 14s linear infinite;
+}
+.ui .shot-choices {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+.ui .pane-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem 1.4rem;
+}
+.ui .pane-format {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.ui .pane-format .row-label {
+  flex: none;
+  color: var(--ink-soft);
+}
+.ui .pane-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+}
+/* 乗車の記録: 写真の下の曇りガラスの小さな札 */
+.ui .plaque {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  justify-content: center;
+  gap: 0.5rem 2.4rem;
+  padding: 0.9rem 2rem;
+  border-radius: 1.3rem;
+  text-align: center;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+}
+.ui .cell {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 0.1rem;
+}
+.ui .cell-label {
+  color: var(--ink-soft);
+}
+.ui .cell-value {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 1.5rem;
+  line-height: 1.4;
+  color: #fff4dc;
+}
+.ui .cell-door,
+.ui .cell-bubbles {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.ui .cell-bubbles {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.ui .door-swatch {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+}
+.ui .door-swatch[data-door='amber'] {
+  background: radial-gradient(circle at 35% 30%, #fff1c2, #ffb347 55%, #c97a12);
+  box-shadow: 0 0 0.7rem #ffb347;
+}
+.ui .door-swatch[data-door='lapis'] {
+  background: radial-gradient(circle at 35% 30%, #d6ecff, #4a78e0 55%, #1b3a9a);
+  box-shadow: 0 0 0.7rem #5b8cff;
+}
+.ui .mini-bubbles {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+.ui .mini-bubble {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.4s ease-out, box-shadow 0.4s ease-out;
+}
+.ui .mini-bubble.lit {
+  border-color: rgba(255, 255, 255, 0.9);
+  background: var(--film-flat);
+  box-shadow: 0 0 0.6rem rgba(255, 255, 255, 0.7);
+}
+.ui .photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.8rem 1.2rem;
+}
+/* 降車: 泡が開いたあと、写真が空から降りてくる */
+.ui .screen-photo.enter .photo-pane .photo-glass {
+  animation: descend 2.2s var(--ease-glass) var(--delay, 0s) both;
+}
+.ui .screen-photo.enter :is(.plaque, .photo-actions, .photo-thanks, .shot-choices, .pane-controls) {
+  animation: rise-in 1.1s calc(1.1s + var(--delay, 0s)) var(--ease-glass) both;
+}
+@keyframes descend {
+  from {
+    opacity: 0;
+    translate: 0 -28vh;
+    scale: 0.35;
+  }
+}
+
+/* ── 入口や写真から開く画面（棚・設定・乗り方・クレジット） ────────── */
+.ui :is(.screen-shelf, .screen-settings, .screen-howto, .screen-credits) {
+  justify-content: flex-start;
+  justify-content: safe flex-start;
+  gap: 1rem;
+}
+.ui .sub-header {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  width: min(46rem, 100%);
+  padding-top: 0.3rem;
+}
+.ui .back::after {
+  content: '‹';
+  content: '‹' / '';
+  order: -1;
+  font-size: 1.4em;
+  line-height: 1;
+  margin-right: 0.1em;
+}
+.ui .sub-title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(1.3rem, 3.6vw, 1.8rem);
+  letter-spacing: 0.3em;
+}
+.ui .settings-panel,
+.ui .howto-panel,
+.ui .credits-panel {
+  width: min(46rem, 100%);
+  padding: 1.1rem 1.7rem 1.5rem;
+}
+
+/* 設定のタブ */
+.ui .tabs {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+  padding: 0.2rem 0 0.5rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ui .tabs::-webkit-scrollbar {
+  display: none;
+}
+.ui .tab {
+  position: relative;
+  overflow: hidden;
+  flex: none;
+  min-height: 2.75rem;
+  padding: 0.3rem 1.25rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  transition: transform var(--quick) ease-out, background var(--quick) ease-out, color var(--quick) ease-out, box-shadow var(--quick) ease-out;
+}
+.ui .tab::before {
+  opacity: 0;
+}
+.ui .tab:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+.ui .tab:active {
+  transform: scale(0.95);
+  transition-duration: 40ms;
+}
+.ui .tab[aria-selected='true'] {
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.08)), rgba(var(--tint), 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0 16px rgba(var(--tint), 0.4);
+}
+.ui .tab[aria-selected='true']::before {
+  opacity: 0.8;
+}
+.ui .tab-panel {
+  animation: rise-in 0.4s var(--ease-glass) both;
+}
+
+/* 乗り方 */
+.ui .howto-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem 2.4rem;
+}
+.ui .howto-head {
+  margin-bottom: 0.5rem;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 1.15rem;
+  letter-spacing: 0.25em;
+}
+.ui .howto-list {
+  display: grid;
+  gap: 0.15rem;
+}
+.ui .howto-op {
+  margin-top: 0.7rem;
+  color: var(--ink-soft);
+}
+.ui .howto-text {
+  margin: 0;
+  color: var(--ink);
+}
+.ui .howto-gaze {
+  margin-top: 1.1rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+.ui .howto-note {
+  margin-top: 1rem;
+}
+.ui .howto-note-soft {
+  color: var(--ink-soft);
+}
+
+/* クレジット */
+.ui .credits-panel {
+  display: grid;
+  gap: 0.6rem;
+  text-align: center;
+}
+.ui .credits-name {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(2rem, 7vw, 2.8rem);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-shadow: 0 0 1.4rem rgba(var(--tint), 0.8);
+}
+.ui .credits-sub {
+  margin-bottom: 0.8rem;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink-soft);
+}
+.ui .credits-line {
+  color: var(--ink);
+}
+
+/* 写真の棚 */
+.ui .shelf-body {
+  display: grid;
+  justify-items: center;
+  gap: 1.1rem;
+  width: min(46rem, 100%);
+}
+.ui .shelf-view {
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+.ui .shelf-view .photo-pane {
+  --photo-h: clamp(9rem, 32vh, 20rem);
+}
+.ui .shelf-caption {
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  color: var(--ink-soft);
+}
+.ui .shelf-board {
+  width: 100%;
+  padding: 0.9rem 1.2rem 1.1rem;
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.14));
+  border-bottom: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 14px 30px -12px rgba(255, 190, 110, 0.35);
+}
+.ui .shelf-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.9rem;
+}
+.ui .shelf-strip .orb {
+  width: 3.4rem;
+  height: 3.4rem;
+}
+.ui .shelf-empty {
+  max-width: 30rem;
+  text-wrap: balance;
+  margin-top: 8vh;
+  text-align: center;
+  color: var(--ink-soft);
+  line-height: 1.9;
+}
+.ui .shelf-keep {
+  color: var(--ink-faint);
+}
+
+/* 大きな画面（1080p 以上の横長）では、写真を大きく見せる */
+@media (min-width: 900px) and (min-height: 900px) {
+  .ui .photo-pane {
+    --photo-h: clamp(10rem, calc(100vh - 27.5rem), 36rem);
+  }
+}
+
+/* ── スマートフォン（縦） ─────────────────────────────────────── */
+@media (max-width: 640px) {
+  .ui .arch {
+    height: clamp(12rem, 40vh, 22rem);
+  }
+  .ui .plaque {
+    grid-template-columns: repeat(2, auto);
+    gap: 0.7rem 2rem;
+    padding: 0.9rem 1.4rem;
+  }
+  .ui .howto-cols {
+    grid-template-columns: 1fr;
+  }
+  .ui .tab {
+    padding-inline: 0.8rem;
+  }
+  .ui .settings-panel,
+  .ui .howto-panel,
+  .ui .credits-panel {
+    padding: 0.8rem 1.1rem 1.2rem;
+  }
+  .ui .btn-primary {
+    padding-inline: 2.6rem;
+  }
+  .ui .row-control {
+    max-width: none;
+  }
+}
+/* 背の低い画面（横向きのスマートフォン）では上下の余白を詰める */
+@media (max-height: 520px) {
+  .ui .arch {
+    height: 9.5rem;
+  }
+  .ui .photo-pane {
+    --photo-h: 9rem;
+  }
+}
