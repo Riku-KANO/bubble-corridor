@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>画面効果の確認（fx）</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0e13; color: #e8eef8; font: 13px/1.5 system-ui, sans-serif; overflow: hidden; }
+      #stage { position: fixed; inset: 0; }
+      #stage canvas { display: block; width: 100%; height: 100%; }
+      #panel { position: fixed; top: 8px; left: 8px; width: 300px; padding: 10px 12px; background: rgb(11 14 19 / 0.78); border: 1px solid rgb(255 255 255 / 0.18); border-radius: 8px; backdrop-filter: blur(6px); }
+      #panel h1 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+      #panel .row { display: grid; grid-template-columns: 132px 1fr 40px; align-items: center; gap: 6px; }
+      #panel .row output { text-align: right; font-variant-numeric: tabular-nums; opacity: 0.8; }
+      #panel input[type='range'] { width: 100%; }
+      #panel button { margin-top: 8px; width: 100%; padding: 6px; font: inherit; color: inherit; background: rgb(255 255 255 / 0.12); border: 1px solid rgb(255 255 255 / 0.3); border-radius: 6px; cursor: pointer; }
+      #panel label.check { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+      #panel .info { margin-top: 6px; opacity: 0.7; font-size: 12px; }
+      #panel.hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="panel"></div>
+    <script type="module" src="/src/dev/fx/main.ts"></script>
+  </body>
+</html>

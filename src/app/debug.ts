@@ -20,9 +20,16 @@ export function createDebugOverlay(root: HTMLElement, backend: string) {
   let frames = 0;
   let fps = 0;
   // e2e と snap が読むための値（window.__utakata）
-  const shared = { fps: 0, calls: 0, triangles: 0, t: 0, section: '', screen: '', backend };
+  const shared: Record<string, unknown> = { fps: 0, calls: 0, triangles: 0, t: 0, section: '', screen: '', backend };
   (globalThis as unknown as { __utakata?: typeof shared }).__utakata = shared;
   return {
+    /** 操作の口と、読むたびに計算する値（関数はそのまま、getter にして出す） */
+    expose(entries: Record<string, unknown>) {
+      for (const [k, v] of Object.entries(entries)) {
+        if (typeof v === 'function' && k !== 'commands') Object.defineProperty(shared, k, { get: v as () => unknown, enumerable: true });
+        else shared[k] = v;
+      }
+    },
     update(s: DebugSample) {
       acc += s.frameMs;
       frames++;

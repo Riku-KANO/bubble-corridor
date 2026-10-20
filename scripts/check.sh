@@ -10,6 +10,7 @@ run "core boundary" node --import ./scripts/ts-resolve.mjs scripts/check-core.ts
 run "spine"         node --import ./scripts/ts-resolve.mjs scripts/spine.ts validate
 run "typecheck"     pnpm -s typecheck
 run "lint"          pnpm -s lint
+if [ $quick -eq 1 ]; then export SKIP_BLENDER=1; fi  # Blender を起動するテストは遅いので速い検査では省く
 run "unit"          pnpm -s exec vitest run --reporter=dot
 if [ $quick -eq 0 ]; then
   run "build"   pnpm -s build
