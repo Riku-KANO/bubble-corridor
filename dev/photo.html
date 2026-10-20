@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>ライドフォト 確認ページ</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #eef3f8;
+        --dim: #8c9bb0;
+        --line: #26324a;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #0b0e13;
+        color: var(--ink);
+        font: 14px/1.6 system-ui, sans-serif;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      p.note {
+        margin: 0 0 12px;
+        color: var(--dim);
+      }
+      .live {
+        position: relative;
+        width: min(100%, 880px);
+        aspect-ratio: 16 / 9;
+        border: 1px solid var(--line);
+      }
+      .live canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin: 12px 0;
+      }
+      button,
+      select {
+        font: inherit;
+        color: var(--ink);
+        background: #17213a;
+        border: 1px solid #3a4a70;
+        border-radius: 6px;
+        padding: 6px 14px;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      pre#status {
+        margin: 0 0 16px;
+        padding: 8px 12px;
+        background: #11172a;
+        border: 1px solid var(--line);
+        white-space: pre-wrap;
+        color: #b9c6dc;
+      }
+      #results {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+        gap: 16px;
+        align-items: start;
+      }
+      figure {
+        margin: 0;
+      }
+      figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        background: #222;
+        cursor: pointer;
+      }
+      figcaption {
+        color: var(--dim);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ライドフォト 確認ページ</h1>
+    <p class="note">
+      「撮る」で別の解像度に描き出し、額縁 4 種 × 横長・正方形に合成して並べます。画像をクリックで保存。
+      <code>?webgl</code> で WebGL2 の経路、<code>?door=amber</code>、<code>?lang=en</code>、<code>?freeze</code>（場面を止める）。
+    </p>
+    <div class="live" id="live"></div>
+    <div class="bar">
+      <button id="shoot" type="button" disabled>撮る</button>
+      <label>撮影の大きさ
+        <select id="size">
+          <option value="desktop">PC 2560×1440</option>
+          <option value="mobile">スマートフォン 1920×1080</option>
+        </select>
+      </label>
+      <label>扉
+        <select id="door">
+          <option value="lapis">瑠璃</option>
+          <option value="amber">琥珀</option>
+        </select>
+      </label>
+      <label>言語
+        <select id="lang">
+          <option value="ja">日本語</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+    </div>
+    <pre id="status">準備中…</pre>
+    <div id="results"></div>
+    <script type="module" src="/src/dev/photo/main.ts"></script>
+  </body>
+</html>
