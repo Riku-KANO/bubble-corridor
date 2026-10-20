@@ -35,8 +35,8 @@ slices:
   depends_on: [S-00]
   paths: [src/ride/**, scripts/build-ride-data.ts, scripts/comfort.ts, public/assets/rail.json, public/assets/cues.json, dev/ride.html, src/dev/ride/**]
   tests: [src/ride/ride.test.ts, src/ride/cues.test.ts, src/ride/comfort.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト49件（ride 22、cues 14、comfort 13）を作成。赤の証跡: vitest run src/ride → 23 failed（STUB: 直線のレール、空のキューシート、analyzeComfort が空、先読みが今の部屋だけ）。実装 消費 1/3（委任前に記録）'
+  status: green
+  notes: '2026-10-20 親がテスト49件（ride 22、cues 14、comfort 13）を作成。赤の証跡: vitest run src/ride → 23 failed（STUB: 直線のレール、空のキューシート、analyzeComfort が空、先読みが今の部屋だけ）。実装 消費 1/3（委任前に記録） 2026-10-20 実装 1/3 で緑（ride 49件、全体72件、check.sh --quick ALL OK、comfort 違反0、テスト無変更）。レール 850m の輪（終点=始点）、普段の速さ 1.06〜1.71 m/s、加速度最大 0.20、上下 0.24 m/s、回転 3.4°/s。レビュー 消費 1/2'
 - id: S-11
   title: 音楽と音（構成データ、演奏、触れた音、立体音響と残響、ガラスの音源の合成）
   wave: 1
