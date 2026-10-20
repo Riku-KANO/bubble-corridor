@@ -14,10 +14,14 @@ export interface RideData {
   readonly rail: { readonly spacing: number; readonly points: readonly Vec3Tuple[] };
   /**
    * 時刻 → レール上の距離（m）の対応表。t は単調増加、s は単調非減少。
-   * 間は線形に補う。gentle は穏やかモード用（同じ長さ・同じ時刻で、上下と回転だけ半分）
+   * s は3Dの弧長（点は3Dで spacing の等間隔に並べ、s = 点の番号 × spacing）。
+   * 点の間は createRide が単調な3次エルミートで補う（速度が階段にならない。ADR-0008）。
    */
   readonly timeline: readonly { readonly t: number; readonly s: number }[];
-  /** 穏やかモードで使う高さの点列（rail.points と同じ数）。なければ standard と同じ */
+  /**
+   * 穏やかモードで使う高さの点列（rail.points と同じ数）。なければ standard と同じ。
+   * いまは持たない（レールは1本。標準の動きを穏やかの上限以内に設計する。ADR-0008）
+   */
   readonly gentleY?: readonly number[];
   /** 区間ごとのレール上の範囲（m） */
   readonly sections: readonly { readonly id: SectionId; readonly s0: number; readonly s1: number }[];
