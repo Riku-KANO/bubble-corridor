@@ -116,3 +116,38 @@ describe('REN-2 動的な解像度', () => {
     expect(d.scale).toBe(preset.renderScale);
   });
 });
+
+describe('REN-2 動的な解像度: 重い状態が続いても行ったり来たりしない（レビュー2巡目の症状をテストにしたもの）', () => {
+  /** 倍率 s のときのフレーム時間（画素数に比例する GPU の重さ、垂直同期 60Hz の下限つき） */
+  const frameMs = (s: number, heavyAt1: number) => Math.max(1000 / 60, heavyAt1 * s * s);
+
+  function run(d: DynamicResolution, seconds: number, heavyAt1: number) {
+    let t = 0;
+    let changes = 0;
+    let last = d.scale;
+    const changeTimes: number[] = [];
+    while (t < seconds * 1000) {
+      const ms = frameMs(d.scale, heavyAt1);
+      t += ms;
+      const s = d.sample(ms);
+      if (s !== last) {
+        changes++;
+        changeTimes.push(t / 1000);
+        last = s;
+      }
+    }
+    return { changes, changeTimes };
+  }
+
+  it('倍率 1.0 で 24ms の重さが150秒続くと、落ち着いた後（20秒以降）の変化は3回以下', () => {
+    const d = new DynamicResolution(presetFor('high', desktop()));
+    const { changeTimes } = run(d, 150, 24);
+    expect(changeTimes.filter((x) => x > 20).length).toBeLessThanOrEqual(3);
+  });
+
+  it('スマートフォン（目標 30fps）でも同じ', () => {
+    const d = new DynamicResolution(presetFor('low', { isMobile: true, isXR: false }));
+    const { changeTimes } = run(d, 150, 48);
+    expect(changeTimes.filter((x) => x > 20).length).toBeLessThanOrEqual(3);
+  });
+});
