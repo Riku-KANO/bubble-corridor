@@ -63,6 +63,12 @@ describe('UI-1 画面の流れ', () => {
     }
   });
 
+  it('VR のセッションが乗車前の案内の途中で終わったら、入口へ戻る', () => {
+    const guide = run([{ type: 'loaded' }, { type: 'enterHome' }, { type: 'ride', mode: 'vr' }], first);
+    expect(guide.screen).toBe('guide');
+    expect(reduceFlow(guide, { type: 'xrEnded' }, first)).toMatchObject({ screen: 'home', viewMode: 'screen' });
+  });
+
   it('VR のセッションが終わったら、乗車中ならポーズにして画面で続けられるようにする', () => {
     const riding = run([{ type: 'loaded' }, { type: 'enterHome' }, { type: 'ride', mode: 'vr' }], again);
     expect(reduceFlow(riding, { type: 'xrEnded' }, again)).toMatchObject({ screen: 'pause', viewMode: 'screen' });
