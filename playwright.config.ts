@@ -15,7 +15,8 @@ export default defineConfig({
     headless: true,
     viewport: { width: 1280, height: 720 },
     locale: 'ja-JP',
-    launchOptions: { args: ['--use-angle=metal', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] },
+    // WebXR を切るのは、本物の Chrome が localhost で navigator.xr を持ち、IWER（e2e/xr.spec.ts）が入らないため
+    launchOptions: { args: ['--use-angle=metal', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required', '--disable-features=WebXR'] },
   },
   webServer: {
     // 毎回ビルドしてから配信する（古いビルドでテストしない）。既存サーバーは再利用しない

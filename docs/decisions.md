@@ -8,12 +8,15 @@
 - three r186 の WebGPURenderer は `XRManager` と `RenderPipeline` を持つ。材質と画面効果は TSL で書き、WebGPU・WebGL2（`forceWebGL`）・VR で同じ部品を使う。
 - **M0 の関門1で確定する**。使えなければ VR 版だけ WebGLRenderer にし、共通部品のシェーダを2系統で持つ（設計書のリスク表）。
 
-## ADR-0002 Blender の代わりにコードでプレビズを作る（2026-10-21）
+## ADR-0002 Blender のパイプラインを設計書どおりに使う（2026-10-21、改訂）
 
-- この開発環境に Blender がない。設計書の流れ（絵コンテ → Blender のプレビズ → 本番の造形 → 焼き込み → 書き出し）のうち、
-  レール・時刻表・キューシートは同じ形の JSON をコード（`scripts/build-ride-data.ts`、`buildCueSheet`）で作り、部屋の形もコードで作る。
-- `rail.json` と `cues.json` の形は Blender の書き出しと同じにする（`src/contracts/ride.ts`）。Blender が使えるようになったら書き出しに差し替える。
-- 部屋の形はレールの点（`ride.pointAt`）を基準に置く。レールが変わっても部屋が追従する。
+- 当初「Blender がない」としてコードのプレビズで代える判断をしたが、確認の誤りだった（PATH だけを見ていた）。Blender 5.2.2 LTS が `/Applications/Blender.app` にあり、ヘッドレス（`-b --factory-startup -P`）で glTF の書き出し、Cycles の焼き込み（Metal GPU）、Eevee の描画ができることを確かめた。
+- 設計書「Blenderパイプライン」の流れに従う: レールと部屋の仮の形・カメラ・タイムラインマーカー・仮の楽曲でプレビズ（`blender/scenes/previz.blend`）を組み、通しの動画を Eevee で書き出す → 酔いの確認 → 部屋の本番の造形 → 見えない面の削除 → 焼き込み → 部屋ごとの glb とライトマップ、rail.json、cues.json を書き出す。
+- 呼び出しは `scripts/blender.ts`（`BLENDER` の環境変数 → `/Applications/Blender.app/...` → PATH の順に探す）。造形はスクリプト（bpy）で作り、再現できるようにする。人が .blend を開いて直したら、書き出しのスクリプトで JSON と glb を作り直す。
+- レールの最初の種は `generateRideData()`（TS）。プレビズに取り込んだ後は Blender が正で、書き出した `public/assets/rail.json` を実行時もテスト（`src/rooms/testing.ts`）も使う。
+- 部屋の glb には画像を埋め込まない（ライトマップは別の画像。node のテストでも glb を読める）。部屋の担当は glb の形と焼き込みの上に、触れられる物・動き・ガラスの材質を TS で重ねる。
+- 座標: rail.json と glb は three.js の向き（Y が上）。Blender（Z が上）との変換は書き出しと取り込みのスクリプトが受け持つ。
+- `blender/scripts/common/` は案1と共有する（`src/core` と同じくコピーで揃える。ADR-0005）。
 
 ## ADR-0003 ガラスの音は合成で作る（2026-10-21）
 
