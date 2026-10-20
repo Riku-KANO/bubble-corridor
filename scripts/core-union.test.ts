@@ -123,6 +123,14 @@ describe('CORE-5 名前のぶつかりと曲線', () => {
   });
 });
 
+describe('CORE-5 案1が受け取っても案1の検査が通る', () => {
+  // 案1の vitest は jsdom を持たない（node で走る）。案1の tsconfig の noUncheckedIndexedAccess は tsconfig.core.json で確かめる
+  it('core のテストは jsdom などの環境の指定を使わない', () => {
+    const tests = walk(CORE).filter((f) => f.endsWith('.test.ts'));
+    expect(tests.filter((f) => /@vitest-environment\s+(?!node\b)/.test(readFileSync(f, 'utf8')))).toEqual([]);
+  });
+});
+
 describe('CORE-1 和集合でも core の外を import しない', () => {
   it('違反なし', () => {
     const files = walk(CORE).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));

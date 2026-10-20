@@ -46,8 +46,8 @@ describe('REN-2 プリセット', () => {
   it('品質が上がるほど粒子・環境画像が増え、倍率は範囲内', () => {
     const p = tiers.map((t) => presetFor(t, desktop()));
     for (let i = 1; i < p.length; i++) {
-      expect(p[i].particleScale).toBeGreaterThanOrEqual(p[i - 1].particleScale);
-      expect(p[i].envMapSize).toBeGreaterThanOrEqual(p[i - 1].envMapSize);
+      expect(p[i]!.particleScale).toBeGreaterThanOrEqual(p[i - 1]!.particleScale);
+      expect(p[i]!.envMapSize).toBeGreaterThanOrEqual(p[i - 1]!.envMapSize);
     }
     for (const x of p) {
       expect(x.particleScale).toBeGreaterThan(0);

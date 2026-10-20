@@ -87,7 +87,7 @@ describe('AUD-6 空間ごとの残響', () => {
   }
   const energy = (a: Float32Array, from: number, to: number) => {
     let e = 0;
-    for (let i = from; i < to; i++) e += a[i] * a[i];
+    for (let i = from; i < to; i++) e += a[i]! * a[i]!;
     return e;
   };
 
@@ -109,7 +109,7 @@ describe('AUD-6 空間ごとの残響', () => {
     const n = l.length;
     expect(energy(l, 0, n / 4)).toBeGreaterThan(energy(l, (3 * n) / 4, n) * 20);
     let diff = 0;
-    for (let i = 0; i < n; i++) diff += Math.abs(l[i] - r[i]);
+    for (let i = 0; i < n; i++) diff += Math.abs(l[i]! - r[i]!);
     expect(diff).toBeGreaterThan(0);
   });
 
