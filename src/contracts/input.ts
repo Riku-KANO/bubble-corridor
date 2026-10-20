@@ -12,6 +12,8 @@ export interface LookState {
 export interface LookOptions {
   readonly mode: 'drag' | 'follow';
   readonly gyro: boolean;
+  /** 設定の視野角（度）。ドラッグの感度を景色に合わせるのに使う。省略時は CAMERA.fovDeg */
+  readonly fovDeg?: number;
 }
 
 /** 見回しの入力。カメラはゴンドラの座席に固定し、向きだけを変える */

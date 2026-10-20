@@ -94,6 +94,8 @@ export const CAMERA = {
   recenterThresholdDeg: 45,
   /** 正面へ戻す動きの長さ（秒） */
   recenterSec: 1.2,
+  /** 正面へ戻すときの最大の角速度（度/秒）。大きく外れているときは長さを延ばす（酔わせない）。仮 */
+  recenterMaxDegPerSec: 60,
   /** 座席の目の高さ（ゴンドラの中心からの高さ、m） */
   seatEyeHeight: 0.15,
 } as const;
@@ -116,6 +118,8 @@ export const INTERACTION = {
   highlightDistance: 6,
   /** 触れられないままの物が自分で小さく鳴る距離（m）。仮 */
   idleChimeDistance: 4,
+  /** 見つめて触れる物までの最大の距離（物の表面まで、m）。手を使わない人も遠くの扉や星に届くように、縁が光る距離より遠くまで。仮 */
+  gazeMaxDistance: 25,
   /** VR で指先と物の距離がこれ以下なら触れたとみなす（m）。仮 */
   xrTouchDistance: 0.06,
 } as const;
