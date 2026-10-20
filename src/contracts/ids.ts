@@ -36,6 +36,7 @@ export const DEFAULT_DOOR: DoorChoice = 'lapis';
 
 /** 自動撮影の3か所 */
 export type ShotId = 'bloom' | 'freeze' | 'constellation';
+export const SHOT_IDS: readonly ShotId[] = ['bloom', 'freeze', 'constellation'];
 
 /** 快適モード。穏やかでは上下の動きと向きの回転を半分にし、万華鏡の模様の回転を止める */
 export type ComfortMode = 'standard' | 'gentle';
