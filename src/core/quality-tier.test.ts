@@ -1,6 +1,7 @@
 // S-12 REN-2 品質プリセットと自動判定、動的な解像度（親が作成。実装担当は変更しない）
+// S-18 で quality.ts から quality-tier.ts へ移した（quality.ts は案1の QUALITY_PRESETS。CORE-5）
 import { describe, expect, it } from 'vitest';
-import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityTier } from './quality';
+import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityTier } from './quality-tier';
 
 const desktop = (extra: Partial<DeviceHints> = {}): DeviceHints => ({ isMobile: false, isXR: false, hardwareConcurrency: 8, deviceMemoryGB: 8, ...extra });
 
