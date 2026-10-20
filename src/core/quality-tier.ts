@@ -1,7 +1,7 @@
 // 端末の自動判定と動的な解像度（案2「泡沫回廊」の部品）。品質の段 low/medium/high を端末の手がかりから決め、
 // その段の描画設定（TierPreset）を返す。プリセットの表そのもの（案1の QUALITY_PRESETS）は ./quality.ts にある。
 // ここの TierPreset は、案1の quality.ts の QualityPreset（renderScale・transmissionScale・dispersion など）とは別の型。
-// 名前がぶつからないように 0.4.0 で QualityPreset から TierPreset に改めた。
+// 名前がぶつからないように 0.5.0 で QualityPreset から TierPreset に改めた。
 // 判断の順序: 端末の種類（スマートフォン・VR）→ 明らかに遅い手がかり（ソフトウェア描画・少ないコア・少ないメモリ）→ GPU の種類。
 // 動的な解像度調整は、重ければすぐ下げ、軽くなっても慌てて戻さない（ちらつかせない）。
 // 案1の perf/dynamic-resolution（GPU 時間で動かす）・perf/governor とは別物で、こちらは requestAnimationFrame の間隔で動く（README 参照）。

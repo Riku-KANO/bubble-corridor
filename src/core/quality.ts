@@ -7,7 +7,11 @@ export type QualityLevel = 'low' | 'mid' | 'high';
 export interface QualityPreset {
   /** Render resolution scale relative to the canvas size × devicePixelRatio. */
   renderScale: number;
-  /** Resolution of the transmission background buffer relative to the render size. */
+  /**
+   * Resolution of the transmission background buffer relative to the render size (design value).
+   * Has no effect on three r186 (S-10): the backdrop is always copied at the size of the render target, so only
+   * renderScale and dynamic resolution change it. Kept for the design table and a future three option.
+   */
   transmissionScale: number;
   /** Resolution of the back-layer target while peeking. */
   peekScale: number;

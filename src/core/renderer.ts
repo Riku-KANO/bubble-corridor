@@ -1,10 +1,13 @@
 import * as THREE from 'three/webgpu';
+import { chooseGpuTimeSource, GpuSpanTimer, type GpuTimeSource } from './perf/gpu-span';
 
 export type Backend = 'webgpu' | 'webgl2';
 
 export interface RendererOptions {
   forceWebGL: boolean;
   renderScale: number;
+  /** Time the GPU frame span where possible (default true; false for A/B measurements, ?gpuSpan=0). */
+  frameSpan?: boolean;
 }
 
 export interface RendererHandle {
@@ -14,20 +17,27 @@ export interface RendererHandle {
   baseDpr: number;
   /** Adapter / renderer string, for logs and the probe. */
   gpuName: string;
-  /** True when the backend can read GPU timestamps at all. */
+  /** True when the backend can read three's per-pass GPU timestamps (shown in the overlay and bench). */
   gpuTiming: boolean;
   /**
-   * True when those timestamps may drive decisions. Apple/Metal sums overlapping per-pass times (~10× too high in
-   * S-05), so there they are shown but not used until calibrated on the recommended hardware (S-07).
+   * Which GPU time drives decisions: the frame span (WebGPU, our own timestamps, S-08) or three's per-pass sum.
+   * See perf/gpu-span.ts.
+   */
+  gpuSource: GpuTimeSource;
+  /**
+   * True when GPU time may drive decisions. The frame span is trusted everywhere; the per-pass sum is not on
+   * Apple/Metal, where overlapping passes read ~10× too high (S-05).
    */
   gpuTimingTrusted: boolean;
+  /** The WebGPU device when the frame span can be timed on it (for GpuSpanTimer), otherwise null. */
+  spanDevice: GPUDevice | null;
 }
 
 interface BackendInternals {
   isWebGPUBackend?: boolean;
   hasTimestamp?: boolean;
   trackTimestamp?: boolean;
-  device?: { adapterInfo?: { vendor?: string; architecture?: string; description?: string } };
+  device?: GPUDevice;
   gl?: WebGL2RenderingContext | null;
 }
 
@@ -45,7 +55,8 @@ function describeGpu(b: BackendInternals): string {
 /**
  * Creates the single WebGPURenderer for the app (falls back to WebGL2 automatically).
  * Color pipeline follows アートディレクション > 画面の仕上げ: AgX tone mapping, sRGB output.
- * Timestamp queries are requested so quality selection and dynamic resolution can see GPU cost.
+ * Timestamp queries are requested so quality selection and dynamic resolution can see GPU cost
+ * (three's per-pass sum for reference, the frame span from perf/gpu-span.ts for decisions).
  */
 export async function createRenderer(container: HTMLElement, opts: RendererOptions): Promise<RendererHandle> {
   const renderer = new THREE.WebGPURenderer({
@@ -66,12 +77,21 @@ export async function createRenderer(container: HTMLElement, opts: RendererOptio
   // Public getter (WebGPU: always; WebGL2: EXT_disjoint_timer_query_webgl2) + the option we passed.
   const gpuTiming = b.hasTimestamp === true && b.trackTimestamp === true;
   const gpuName = describeGpu(b);
+  const spanDevice =
+    opts.frameSpan !== false && backend === 'webgpu' && GpuSpanTimer.supported(b.device) ? b.device : null;
+  const { source, trusted } = chooseGpuTimeSource({
+    span: spanDevice !== null,
+    passes: gpuTiming,
+    apple: /apple|metal/i.test(gpuName),
+  });
   return {
     renderer,
     backend,
     baseDpr,
     gpuName,
     gpuTiming,
-    gpuTimingTrusted: gpuTiming && !/apple|metal/i.test(gpuName),
+    gpuSource: source,
+    gpuTimingTrusted: trusted,
+    spanDevice,
   };
 }

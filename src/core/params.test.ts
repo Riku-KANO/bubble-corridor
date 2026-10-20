@@ -63,3 +63,23 @@ describe('parseParams (S-05 perf switches)', () => {
     expect(parseParams('').gpuTrust).toBe(false);
   });
 });
+
+describe('parseParams (S-08 GPU timing switches)', () => {
+  it('times the frame span and allows three per-pass timestamps by default; 0 turns each off', () => {
+    const d = parseParams('?scene=a');
+    expect(d.gpuSpan).toBe(true);
+    expect(d.gpuPasses).toBe(true);
+    const off = parseParams('?scene=a&gpuSpan=0&gpuPasses=0');
+    expect(off.gpuSpan).toBe(false);
+    expect(off.gpuPasses).toBe(false);
+    expect(parseParams('?scene=a&gpuSpan=1&gpuPasses=1')).toMatchObject({ gpuSpan: true, gpuPasses: true });
+  });
+
+  it('checks that lowering the resolution lowers the GPU time unless ?dynresResponse=0, also with dynresTarget', () => {
+    expect(parseParams('?scene=a').dynresResponse).toBe(true);
+    expect(parseParams('?scene=a&dynresResponse=0').dynresResponse).toBe(false);
+    expect(parseParams('?scene=a&dynresResponse=1').dynresResponse).toBe(true);
+    expect(parseParams('?scene=a&dynresTarget=0.1').dynresResponse).toBe(true);
+    expect(parseParams('?scene=a&dynresTarget=0.1&dynresResponse=0').dynresResponse).toBe(false);
+  });
+});

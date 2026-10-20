@@ -1,9 +1,9 @@
-# src/core — 案1と案2で共有する部品（和集合 0.4.0）
+# src/core — 案1と案2で共有する部品（和集合 0.5.0）
 
 案1「ビードロの向こう」と案2「泡沫回廊」が、それぞれのリポジトリに同じ中身で置く共通部品。
 設計書「案1との共有、判断記録と未決事項 › 共通の部品」の表に対応する。変更の歴史は [CHANGELOG.md](CHANGELOG.md)。
 
-0.4.0 で、別々に育った案1（0.3.0）と案2を1つの和集合にした。役目が重なるところは**どちらも残し**、下の「使い分け」で選ぶ。
+0.5.0 で、別々に育った案1（0.4.0、コミット b88d317）と案2を1つの和集合にした。役目が重なるところは**どちらも残し**、下の「使い分け」で選ぶ。
 
 ## 部品の一覧
 
@@ -16,11 +16,12 @@
 | 遷移の進行（逆再生・待ち・Esc） | transition/ | 案1 | 実装済み |
 | 品質プリセットの表（low / mid / high） | quality.ts | 案1 | 実装済み |
 | 端末の自動判定と、描画の間隔で動く動的な解像度 | quality-tier.ts | 案2 | 実装済み（S-12） |
-| 品質の自動選択・GPU 時間の動的解像度・governor | perf/ | 案1 | 実装済み |
+| 品質の自動選択・GPU 時間の動的解像度・governor、GPU のフレーム時間（`GpuSpanTimer`） | perf/ | 案1 | 実装済み |
 | レンダラの生成、フレーム時間の統計、URL スイッチ、検証用シーンの契約 | renderer.ts, bench.ts, params.ts, scene.ts | 案1 | 実装済み |
-| 音の仕組み（音階・拍・立体音響・残響） | sound/scale.ts, sound/grid.ts, sound/space.ts | 案2 | 実装済み（S-11） |
+| 音の仕組み（調・和音・拍の格子・立体音響・残響） | sound/scale.ts, sound/grid.ts, sound/space.ts | 案2 | 実装済み（S-11） |
 | ガラスの音源（実録音の代わりに合成。ADR-0003） | sound/voices.ts | 案2 | 実装済み（S-11） |
 | 音量の系統（全体・音楽・効果音・環境音） | sound/mixer.ts | 案2 | 実装済み |
+| 音のエンジン・発音の管理・合成の残響・ガラスと膜の音・音階・書き出しと解析（値は呼び出し側が渡す） | audio/ | 案1 | 実装済み（S-09） |
 | 型つきイベント、保存 | events.ts, storage.ts | 案2 | 実装済み |
 
 ## 使い分け
@@ -42,16 +43,36 @@
 - `quality.ts`: プリセットの**表**（`QUALITY_PRESETS`）。段は `low` / `mid` / `high`（`QualityLevel`）。`QualityPreset` は renderScale・transmissionScale・dispersion・影・アンチエイリアスの方式を持つ。`glass/` と `perf/` がこれを使う。
 - `quality-tier.ts`: 端末の手がかりから**段を決める**（`detectTier`。段は `low` / `medium` / `high` で、`QualityTier`）と、その段の描画設定を返す（`presetFor` → **`TierPreset`**。画素比・倍率・fps の目標・後処理・粒子と環境画像の量）、
   描画の間隔で動く `DynamicResolution`。
-- 型の名前が似ているので注意: 案1の `QualityPreset`（`quality.ts`）と案2の `TierPreset`（`quality-tier.ts`）は**別の型**（0.4.0 で案2の側を `QualityPreset` から改めた）。段の名前も `mid` と `medium` で違う。変換はしない。
+- 型の名前が似ているので注意: 案1の `QualityPreset`（`quality.ts`）と案2の `TierPreset`（`quality-tier.ts`）は**別の型**（0.5.0 で案2の側を `QualityPreset` から改めた）。段の名前も `mid` と `medium` で違う。変換はしない。
 
 ### 動的な解像度: `perf/dynamic-resolution.ts`（案1）と `quality-tier.ts` の `DynamicResolution`（案2）
 
 どちらも同じ名前のクラスだが別物。
 
-- 案1 `perf/dynamic-resolution.ts`: **GPU 時間**（タイムスタンプ）で動かす。5個の中央値と EMA、ヒステリシス。`perf/governor.ts`（品質の自動選択 → 切り替え → 測り直し → 動的解像度）に組み込まれて使う。
-  GPU のタイムスタンプを信用できないとき（Apple/Metal）は止まる。
+- 案1 `perf/dynamic-resolution.ts`: **GPU 時間**で動かす。5個の中央値と EMA、ヒステリシス、段を下げても GPU 時間が下がらなければ止まる `requireResponse`。
+  `perf/governor.ts`（品質の自動選択 → 切り替え → 測り直し → 動的解像度）に組み込んで使う。GPU 時間は `perf/gpu-span.ts` の `GpuSpanTimer`（描画の前後に `begin()` / `end()`）か
+  three のパスの合計から得る（`chooseGpuTimeSource`）。GPU 時間が信用できないときは止まる。
 - 案2 `quality-tier.ts` の `DynamicResolution`: **`requestAnimationFrame` の間隔**（ms）をそのまま `sample()` に渡す。約0.5秒の窓の中央値で判断し、重ければすぐ下げ、軽くなっても待ってから試しに戻す。
   GPU のタイムスタンプに頼らないので、VR や垂直同期で固定された画面でも動く。
+- どちらを使うかはアプリが決める。2つを同時に同じ描画倍率へかけない。
+
+### 音: `audio/`（案1）と `sound/`（案2）
+
+役目が重なるが、ディレクトリが違うので並べて置いてある（整理は後）。`midiToHz`・`noiseBuffer`・`playGlass` のような名前が両方にあるが、別のモジュールなので import の元で選ぶ。
+
+| | `audio/`（案1） | `sound/`（案2） |
+|---|---|---|
+| 考え方 | **仕組みと型だけ**。音階・大きさ→音程の規則・部屋・ガラスの鳴り方・ぽぺんの音型・音量の初期値は、呼び出し側が引数で渡す | 楽曲の**調・和音・拍の格子**に揃えて演奏する部品。値（音色の数、残響の長さ）を持つ |
+| 音階 | `makeScale`（平均律 A4=440Hz）、`snapToScale`、`pitchForSize`（大きさから音程） | `Key`・`Chord`、`pentatonic`、`touchCandidates`（触れた音の候補）、`nearestPitch` |
+| 発音の管理 | `AudioEngine`（バス → 全体 → リミッター、HRTF の `Emitter`、同時発音の上限と横取り、最初の操作での開始と再開）、`VoiceAllocator` | `Voice.liveSources`（同時発音の数え方）。管理は使う側（`src/audio`） |
+| 残響 | `RoomReverb`（部屋ごとの合成インパルス応答、クロスフェードで切り替え） | `createReverb` / `createReverbImpulse`（`ReverbSize` の5段） |
+| 立体音響 | `Emitter`（PannerNode）、聞き手の姿勢 | `createSpatialPanner`、`setListenerPose` |
+| 音源 | `designGlassVoice`（薄い殻のモード合成）、`designPops`（ぽ・ぺん）、`playGlass` / `playPops` | `playGlass`（harp・bell・chime・bottle・drop・bowl・tap）、`playPad`（strings・choir・warm・air） |
+| 拍 | なし | `nextGridTime`、`barToSec`、`secToBar` |
+| 音量の系統 | `mix.ts`（`music` / `sfx` / `ambience` と `volumeToGain`） | `mixer.ts`（`master` / `music` / `sfx` / `ambient` と `sliderToGain`） |
+| 書き出し・解析 | `renderOffline`、`rms`・`estimatePitch`・`decayT60` など | なし |
+
+案2のアプリは `sound/` を使う（楽曲の時刻から演奏するため）。案1の `audio/` は、値を自分で渡してエンジンごと使いたいときの土台。
 
 ### 動きの曲線
 
@@ -63,7 +84,7 @@
 - **core の外を import しない**（`three` などの外部パッケージは可）。`scripts/check-core.ts` が検査する。
 - 案1と案2それぞれの固有の名前（案2の区間・部屋・キュー、案1の場面など）を持ち込まない。必要なら引数で受け取る。
 - 変更したら VERSION と CHANGELOG.md を更新する。相手のリポジトリへは `pnpm core:sync` でコピーする（相手の版の方が新しいときは止まる。先に相手から取り込む）。
-- 案1から取り込んだファイル（glass/、perf/、transition/、renderer.ts、bench.ts、params.ts、scene.ts、quality.ts）は、こちらで書き換えない。直したいときは案1で直して取り込む。
+- 案1から取り込んだファイル（audio/、glass/、perf/、transition/、renderer.ts、bench.ts、params.ts、scene.ts、quality.ts）は、こちらで書き換えない。直したいときは案1で直して取り込む。
 
 ## ガラスの使い方: `materials/glass.ts`（案2）（飾りは共有し、前の部屋で先にコンパイルする）
 

@@ -13,7 +13,11 @@ import { isQualityLevel, type QualityLevel } from './quality';
  *   ?autoForce=low|mid|high test hook: replace the recommendation (the switch and verification still run)
  *   ?dynres=0|1         dynamic resolution (default on, off while benchmarking a fixed preset)
  *   ?dynresTarget=<ms>  override the frame-cost target (test hook)
+ *   ?dynresResponse=0   do not stop dynamic resolution when lowering the resolution does not lower the GPU time
+ *                       (default: stop, S-08). For tests that check the wiring and drive the controller to its floor
  *   ?gpuTrust=1         let GPU timestamps drive decisions even where they are not trusted (tests, calibration)
+ *   ?gpuSpan=0          do not time the GPU frame span (A/B of its cost; GPU time falls back to three's per-pass sum)
+ *   ?gpuPasses=0        never enable three's per-pass timestamps (A/B of their cost; the bench then has no pass sum)
  *   ?webgl=1            force the WebGL2 backend (to test the fallback path)
  *   ?stats=1            show the perf overlay
  */
@@ -28,7 +32,13 @@ export interface AppParams {
   autoForce: QualityLevel | null;
   dynres: boolean;
   dynresTargetMs: number | null;
+  /** Stop dynamic resolution when steps down do not lower the GPU time. */
+  dynresResponse: boolean;
   gpuTrust: boolean;
+  /** Time the GPU frame span where WebGPU can (default true). */
+  gpuSpan: boolean;
+  /** Allow three's per-pass timestamps (default true; they run only where something reads them). */
+  gpuPasses: boolean;
   forceWebGL: boolean;
   stats: boolean;
   raw: URLSearchParams;
@@ -65,7 +75,10 @@ export function parseParams(search: string): AppParams {
     autoForce: isQualityLevel(autoForce) ? autoForce : null,
     dynres: dynresFlag === null ? benchSeconds === null : dynresFlag === '1',
     dynresTargetMs: positive(raw, 'dynresTarget', 100),
+    dynresResponse: raw.get('dynresResponse') !== '0',
     gpuTrust: raw.get('gpuTrust') === '1',
+    gpuSpan: raw.get('gpuSpan') !== '0',
+    gpuPasses: raw.get('gpuPasses') !== '0',
     forceWebGL: raw.get('webgl') === '1',
     stats: raw.get('stats') === '1',
     raw,

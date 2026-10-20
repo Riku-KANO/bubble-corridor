@@ -21,10 +21,14 @@ export interface SceneContext {
 export interface SandboxScene {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
-  /** Called once per frame before render. dt and t are in seconds. */
+  /**
+   * Called once per frame before render. dt and t are in seconds.
+   * CPU work only: do not submit GPU work here (renderer.compute(), render passes). The app times the GPU frame
+   * around render() (perf/gpu-span.ts, S-08), so GPU work submitted in update() would escape the measurement.
+   */
   update(dt: number, t: number): void;
   /**
-   * Optional custom render (multi-pass, post-processing).
+   * Optional custom render (multi-pass, post-processing). Every GPU submit of the frame happens in here.
    * Default: renderer.render(scene, camera).
    */
   render?(): void;
