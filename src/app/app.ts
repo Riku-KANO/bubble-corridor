@@ -217,7 +217,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
   const ui = mountUi(root, commands);
   // e2e と snap が操作するための口（?debug のときだけ）
-  debug?.expose({ commands, xr: () => xr.active, xrFrames: () => xrFrames, xrSupported: () => xrSupported });
+  debug?.expose({ commands, xr: () => xr.active, xrFrames: () => xrFrames, xrSupported: () => xrSupported, xrExit: () => () => xr.exit() });
   const uiState = (): UiState => ({
     screen: flow.screen,
     loadProgress,
