@@ -18,8 +18,8 @@ export interface MenuPanel {
   /** 選んだ項目を一瞬強く光らせる */
   flash(index: number): void;
   /**
-   * 見つめた進み具合（0〜1）を、その項目の上に塗りで見せる（-1 か 0 で消す）。
-   * 板は描き直さず、項目に重ねた細長い板の長さだけを変える（毎フレーム呼んでよい）。
+   * 見つめた進み具合（0〜1）を、その項目の下の縁に沿った線で見せる（-1 か 0 で消す）。
+   * 板は描き直さず、細長い板の長さだけを変える（毎フレーム呼んでよい）。
    */
   setProgress(index: number, progress: number): void;
   /** 不透明度 0 のまま見えるようにする（開始前の compileAsync 用）。false で元に戻す */
@@ -32,13 +32,7 @@ export interface MenuPanel {
 }
 
 const CANVAS_W = 1024;
-/**
- * canvas の大きさは最初から最後まで固定にする（項目の数で変えない）。
- * 一度 GPU に上げたテクスチャの大きさは変えられず、canvas を大きくすると
- * 「Offset overflows texture dimensions」の警告が出て描けないため。板は上の一部を使い、UV で切り出す。
- */
-const CANVAS_H = 1280;
-/** 板に出せる項目の最大（canvas の高さに収まる数）。超えた分は出さない */
+/** 板に出せる項目の最大（canvas の高さが 2048 画素に収まる数）。超えた分は出さない */
 const MAX_ITEMS = 8;
 const FONT = '"Noto Sans JP", "Zen Old Mincho", "Hiragino Sans", sans-serif';
 
@@ -49,12 +43,19 @@ export function createMenu(): MenuPanel {
   const gap = font * 0.5;
   const pad = font * 1.0;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = CANVAS_W;
-  canvas.height = CANVAS_H;
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
+  // canvas とテクスチャは、項目の数（＝板の高さ）が変わるときだけ作り直す。
+  // 一度 GPU に上げたテクスチャの大きさは変えられず、同じテクスチャの canvas を大きくすると
+  // 「Offset overflows texture dimensions」の警告が出て描けないため（同じ数の描き直しは同じ canvas に描く）
+  function makeTexture(heightPx: number) {
+    const c = document.createElement('canvas');
+    c.width = CANVAS_W;
+    c.height = heightPx;
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return { c, t };
+  }
+  let { c: canvas, t: texture } = makeTexture(64);
   const material = new THREE.MeshBasicNodeMaterial({
     map: texture,
     transparent: true,
@@ -67,11 +68,12 @@ export function createMenu(): MenuPanel {
   mesh.renderOrder = 9_000;
   mesh.visible = false;
 
-  // 見つめた進み具合の塗り。項目の左端から伸びる細長い板（板の子なので、板と一緒に動く）
+  // 見つめた進み具合の線。項目の下の縁に沿って左端から伸びる細い板（板の子なので、板と一緒に動く）。
+  // 文字の上には重ねない（文字と背景の対比を下げない）
   const fillMaterial = new THREE.MeshBasicNodeMaterial({
-    color: 0xf2cf94,
+    color: 0xf5d9a6,
     transparent: true,
-    opacity: 0.42,
+    opacity: 0.95,
     depthWrite: false,
     fog: false,
     toneMapped: false,
@@ -108,9 +110,9 @@ export function createMenu(): MenuPanel {
     if (!ctx) return;
     const noise = createNoise();
     const ppm = CANVAS_W / W; // 1m あたりの画素
-    const w = CANVAS_W;
-    const h = Math.min(CANVAS_H, Math.ceil(height * ppm)); // 板が使う上の部分
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
 
     // 板: 青灰の曇りガラス。上の左から光が差す
     const r = font * 0.9 * ppm;
@@ -175,17 +177,21 @@ export function createMenu(): MenuPanel {
   return {
     mesh,
     setItems(next) {
+      if (next.length > MAX_ITEMS) console.warn(`[xr] メニューの項目が多すぎます（最大 ${MAX_ITEMS}）。超えた分は出しません`);
       items = next.slice(0, MAX_ITEMS);
       hover = -1;
       flashIndex = -1;
       height = pad * 2 + items.length * rowH + Math.max(0, items.length - 1) * gap;
+      const heightPx = Math.max(64, Math.ceil(height * (CANVAS_W / W)));
+      if (heightPx !== canvas.height) {
+        // 項目の数が変わった: 大きさの合うテクスチャに作り直す（古いものは捨てる）
+        texture.dispose();
+        ({ c: canvas, t: texture } = makeTexture(heightPx));
+        material.map = texture;
+        material.needsUpdate = true;
+      }
       mesh.geometry.dispose();
-      const geometry = new THREE.PlaneGeometry(W, height);
-      // 板は canvas の上の部分だけを使うので、UV の縦をその範囲に縮める（画像の上端が v=1）
-      const used = Math.min(1, Math.ceil(height * (CANVAS_W / W)) / CANVAS_H);
-      const uv = geometry.attributes.uv;
-      for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - (1 - uv.getY(i)) * used);
-      mesh.geometry = geometry;
+      mesh.geometry = new THREE.PlaneGeometry(W, height);
       draw();
     },
     setHover(index) {
@@ -212,12 +218,14 @@ export function createMenu(): MenuPanel {
       const rw = W - 2 * pad;
       const p = progress >= 1 ? 1 : progress;
       fill.visible = true;
-      fill.scale.set(Math.max(rw * p, 1e-4), rowH * 0.94, 1);
-      fill.position.set(-rw / 2 + (rw * p) / 2, rowTop(index) - rowH / 2, 0.003);
+      // 項目の下の縁の少し内側に、太さ rowH の 7% の線
+      const thick = rowH * 0.07;
+      fill.scale.set(Math.max(rw * p, 1e-4), thick, 1);
+      fill.position.set(-rw / 2 + (rw * p) / 2, rowTop(index) - rowH + rowH * 0.12, 0.003);
     },
     prewarm(on) {
       material.opacity = on ? 0 : 1;
-      fillMaterial.opacity = on ? 0 : 0.42;
+      fillMaterial.opacity = on ? 0 : 0.95;
       mesh.visible = on;
       fill.visible = on;
     },

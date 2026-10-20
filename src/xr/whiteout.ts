@@ -8,14 +8,13 @@ export interface Whiteout {
   readonly mesh: THREE.Mesh;
   /** 不透明度（0〜1）。0 なら描かない */
   set(opacity: number): void;
-  /** 不透明度 0 のまま見えるようにする（開始前の compileAsync 用。set(0) で隠れる） */
-  prewarm(): void;
   dispose(): void;
 }
 
 export function createWhiteout(): Whiteout {
   const material = new THREE.MeshBasicNodeMaterial({
-    color: 0xffffff,
+    // まぶしくない、やわらかい白
+    color: 0xeef2f5,
     transparent: true,
     opacity: 0,
     depthTest: false,
@@ -42,10 +41,6 @@ export function createWhiteout(): Whiteout {
       }
       mesh.visible = true;
       material.opacity = o;
-    },
-    prewarm() {
-      material.opacity = 0;
-      mesh.visible = true;
     },
     dispose() {
       geometry.dispose();

@@ -187,9 +187,9 @@ export interface MenuPose {
 }
 
 /**
- * 曇りガラスのメニューの置き場所（板の上端の中央）。頭の前方 XR.menuDistance、目より少し下、頭の方を向く。
- * 板はここから下へ伸びる。目の高さには板の上の余白が来るので、開いた直後に前を見ていても項目に当たらない。
+ * 曇りガラスのメニューの置き場所（板の中心）。頭の前方 XR.menuDistance、目より少し下、頭の方を向く。
  * 向き（yaw）は three.js の rotation.y。板の表（+Z）が頭を向くよう、頭の向きと同じ yaw にする。
+ * 背の高い板で下端が下がりすぎる分の調整は、板の大きさを知っている呼び出し側が行う。
  */
 export function menuPose(head: MenuPose): MenuPose {
   return {
@@ -212,8 +212,9 @@ export function menuTextHeight(): number {
 // ── 画面 → VR の白い霧 ─────────────────────────────────────────
 
 /**
- * 白い霧の不透明度。セッションが始まったとき 1 で、TRANSITION_SEC.screenToVR（1.0秒）かけて晴れる。
- * 霧は「セッション開始からの時刻」で決める（フレームの積み上げで状態を作らない）。
+ * 白い霧の不透明度。セッションが始まり、頭の高さと正面を合わせ終えたときを 0 秒として、1 で始まり
+ * TRANSITION_SEC.screenToVR（1.0秒）かけて晴れる（合わせ終えるまでは晴らさない）。
+ * 霧は経過時間で決める（フレームの積み上げで状態を作らない）。
  */
 export function whiteoutOpacity(sinceStartSec: number): number {
   return 1 - smoothstep(0, TRANSITION_SEC.screenToVR, sinceStartSec);

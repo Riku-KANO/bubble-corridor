@@ -7,7 +7,7 @@ export interface Vignette {
   readonly mesh: THREE.Mesh;
   /** 強さ（0〜1）。0 なら描かない */
   set(strength: number): void;
-  /** 不透明度 0 のまま見えるようにする。開始前に compileAsync でシェーダを作るため（set(0) で隠れる） */
+  /** 不透明度 0 のまま見えるようにする。白い霧のあいだに一度描いて XR 用のシェーダを作るため（次の set(0) で隠れる） */
   prewarm(): void;
   dispose(): void;
 }

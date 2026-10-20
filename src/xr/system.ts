@@ -138,6 +138,8 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
 
   // ── セッションと台 ──
   let session: XRSession | null = null;
+  /** カメラを台へ移し、台をシーンに置いた状態か。detach を二重に走らせない（二度目はカメラの親を失う） */
+  let attached = false;
   /** setSession が終わり、次のフレームから XR で描ける。それまでは active にしない（enter の完了と同時に true になる） */
   let ready = false;
   /** enter の最中の Promise。続けて呼ばれても requestSession を二重にしない */
@@ -173,7 +175,8 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
 
   // ── 画面 → VR の白い霧（セッション開始からの時刻で決める） ──
   let whiteout: Whiteout | null = null;
-  let readyMs = 0;
+  /** 頭の高さと正面を合わせ終えた時刻（ms）。それまでは霧を晴らさない（-1: まだ） */
+  let fogStartMs = -1;
   let whiteoutNow = 1;
 
   // ── 触れる ──
@@ -190,7 +193,7 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
   const raycaster = new THREE.Raycaster();
   raycaster.camera = deps.camera;
   const rayScratch: THREE.Intersection[] = [];
-  const pick = { index: -1, along: 0, x: 0, y: 0, z: 0, exact: false };
+  const pick = { index: -1, along: 0, x: 0, y: 0, z: 0 };
 
   // ── コントローラーと手 ──
   const slots: Slot[] = [];
@@ -262,6 +265,7 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
 
   function attach(s: XRSession) {
     session = s;
+    attached = true;
     ready = false;
     const cam = deps.camera;
     camParent = cam.parent;
@@ -283,6 +287,7 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
     cam.add(whiteout.mesh);
     whiteout.set(1);
     whiteoutNow = 1;
+    fogStartMs = -1;
     ensureMenu();
     needsCalibrate = true;
     calibrated = false;
@@ -295,6 +300,9 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
   }
 
   function detach() {
+    // 二度目はカメラの親（camParent）がもう無いので、カメラを台から外したまま戻せなくなる。一度だけ行う
+    if (!attached) return;
+    attached = false;
     const cam = deps.camera;
     cam.removeFromParent();
     if (camParent) camParent.add(cam);
@@ -368,6 +376,8 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
     recenterOffset = recenterYaw(headYaw);
     calibrated = true;
     needsCalibrate = false;
+    // 白い霧は、最初に合わせ終えた時点から晴らし始める
+    if (fogStartMs < 0) fogStartMs = performance.now();
     // ヘッドセットの「中心を合わせ直す」操作でも、ゴンドラの正面を保つ
     if (space !== watchedSpace) {
       watchedSpace = space;
@@ -445,6 +455,7 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
       }
       if (!local) continue;
       slot.tip.position.copy(local);
+      slot.tip.scale.setScalar(1);
       slot.tip.visible = true;
       _v.copy(local).applyMatrix4(rig.matrixWorld);
       slot.x = _v.x;
@@ -489,45 +500,47 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
   }
 
   /**
-   * 光線（_o, _d）が当たる触れられる物を探して pick に書く。
-   * 前段: 物の原点中心の球（半径 + 距離に比例する余裕）で、見つめる距離の上限内の候補を手前から数個に絞る。
-   * 後段: 候補の表面を Raycaster で確かめ、最初に当たった物とその表面の点を採る。
-   * prefer（いま見つめている物）だけは、表面を外れても球に入っていれば保つ（頭の揺れで数え直しにならない）。その点は光線の最接近点。
+   * 光線（_o, _d）の候補を集めて候補の数を返す（前段）。物の原点中心の球（半径 + 距離に比例する余裕）で、
+   * 見つめる距離の上限（INTERACTION.gazeMaxDistance、表面まで）内のものを手前から数個に絞る。
    */
-  function pickByRay(prefer: number): boolean {
-    const n = rayCandidates(_o.x, _o.y, _o.z, _d.x, _d.y, _d.z, touchables, XR_TUNING.gazeSlackDeg, INTERACTION.gazeMaxDistance, candidates);
-    if (n === 0) return false;
+  function gatherCandidates(): number {
+    return rayCandidates(_o.x, _o.y, _o.z, _d.x, _d.y, _d.z, touchables, XR_TUNING.gazeSlackDeg, INTERACTION.gazeMaxDistance, candidates);
+  }
+
+  /** 物 t の表面に光線（_o, _d）が当たる点を、当たるなら hit に写して true を返す */
+  function surfaceHit(t: Touchable, along: number): THREE.Intersection | null {
     raycaster.ray.origin.copy(_o);
     raycaster.ray.direction.copy(_d);
     raycaster.near = 0;
+    raycaster.far = along + t.radius + 1;
+    rayScratch.length = 0;
+    raycaster.intersectObject(t.object, true, rayScratch);
+    return rayScratch.length > 0 ? rayScratch[0] : null;
+  }
+
+  /** 後段: 候補のうち、表面を Raycaster で確かめて最初に当たる物と、その表面の点を pick に書く */
+  function pickSurface(n: number): boolean {
     for (let k = 0; k < n; k++) {
       const i = candidates.index[k];
-      const t = touchables[i];
-      raycaster.far = candidates.along[k] + t.radius + 1;
-      rayScratch.length = 0;
-      raycaster.intersectObject(t.object, true, rayScratch);
-      if (rayScratch.length > 0) {
-        const h = rayScratch[0];
+      const h = surfaceHit(touchables[i], candidates.along[k]);
+      if (h) {
         pick.index = i;
-        pick.along = h.distance;
+        pick.along = candidates.along[k];
         pick.x = h.point.x;
         pick.y = h.point.y;
         pick.z = h.point.z;
-        pick.exact = true;
-        return true;
-      }
-      if (i === prefer) {
-        const along = candidates.along[k];
-        pick.index = i;
-        pick.along = along;
-        pick.x = _o.x + _d.x * along;
-        pick.y = _o.y + _d.y * along;
-        pick.z = _o.z + _d.z * along;
-        pick.exact = false;
         return true;
       }
     }
     return false;
+  }
+
+  /** 物 i に触れる点を決めて触れる。表面に当たればその点、外れていれば（見つめの揺れ）光線の最接近点 */
+  function fireOnSurface(i: number, along: number, source: TouchSource) {
+    const t = touchables[i];
+    const h = surfaceHit(t, along);
+    if (h) fire(t, h.point.x, h.point.y, h.point.z, source);
+    else fire(t, _o.x + _d.x * along, _o.y + _d.y * along, _o.z + _d.z * along, source);
   }
 
   function onSelectStart(slot: Slot) {
@@ -540,7 +553,8 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
       if (item >= 0) selectMenu(item, slot);
       return;
     }
-    if (pickByRay(-1)) {
+    // 指す: 前段の候補のうち、表面に当たる最初の物（表面の点で触れる）
+    if (pickSurface(gatherCandidates())) {
       fire(touchables[pick.index], pick.x, pick.y, pick.z, 'xr');
       buzz(slot);
     }
@@ -569,12 +583,30 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
     }
 
     // 2. 見つめて触れる（INT-2）。頭の正面の光線が同じ物に設定の秒数あたり続けば触れる。外れたら数え直す。
-    //    見つめる距離には上限がある（INTERACTION.gazeMaxDistance、物の表面まで）
+    //    見つめる距離には上限がある（INTERACTION.gazeMaxDistance、物の表面まで）。
+    //    見つめている物は球の判定だけで保つ（毎フレームの Raycaster をやめ、頭の揺れでも数え直しにならない）。
+    //    表面を確かめるのは、新しい物に移るときと、触れる点を決めるときだけ
     _o.set(_head.x, _head.y, _head.z);
     _d.set(_head.dx, _head.dy, _head.dz);
-    if (pickByRay(gazeIndex)) {
-      if (pick.index !== gazeIndex) {
-        gazeIndex = pick.index;
+    const n = gatherCandidates();
+    let target = -1;
+    let targetAlong = 0;
+    if (gazeIndex >= 0) {
+      for (let k = 0; k < n; k++) {
+        if (candidates.index[k] === gazeIndex) {
+          target = gazeIndex;
+          targetAlong = candidates.along[k];
+          break;
+        }
+      }
+    }
+    if (target < 0 && n > 0 && pickSurface(n)) {
+      target = pick.index;
+      targetAlong = pick.along;
+    }
+    if (target >= 0) {
+      if (target !== gazeIndex) {
+        gazeIndex = target;
         gazeTime = 0;
         gazeFired = false;
       } else {
@@ -582,7 +614,7 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
         if (!gazeFired && gazeTime >= gazeDwell) {
           gazeFired = true;
           // 触れた点は、見つめ終わりの表面の点
-          fire(list[gazeIndex], pick.x, pick.y, pick.z, 'gaze');
+          fireOnSurface(gazeIndex, targetAlong, 'gaze');
         }
       }
     } else {
@@ -645,8 +677,9 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
     const panel = menu;
     if (!panel) return;
     panel.setItems(menuItems);
-    // 頭の前方 XR.menuDistance、板の上端は目より少し下（目の高さには板の上の余白が来る）。
-    // 台の局所座標で置くので、ゴンドラが動いてもついていく
+    panel.prewarm(false); // 白い霧のあいだの先描画（不透明度 0）が残っていても、ここで元に戻す
+    // 頭の前方 XR.menuDistance、板の中心は目の約 0.12m 下。背の高い板は、下端が視野の下 menuMaxDownDeg に収まるよう
+    // 中心を上げる（ゴンドラの手すり、目の約 0.5m 下に隠れない）。台の局所座標で置くので、ゴンドラが動いてもついていく
     let hx = headX;
     let hy = headY;
     let hz = headZ;
@@ -659,7 +692,8 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
       hyaw = yawFromQuaternion(cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w);
     }
     const p = menuPose({ x: hx, y: hy, z: hz, yaw: hyaw });
-    panel.mesh.position.set(p.x, p.y - panel.height / 2, p.z);
+    const lowest = hy - XR.menuDistance * Math.tan((XR_TUNING.menuMaxDownDeg * Math.PI) / 180);
+    panel.mesh.position.set(p.x, Math.max(p.y, lowest + panel.height / 2), p.z);
     panel.mesh.rotation.set(0, p.yaw, 0);
     panel.mesh.visible = true;
     panel.mesh.updateMatrixWorld(true);
@@ -788,24 +822,33 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
   // ───────────────────────────── 開始 ─────────────────────────────
 
   /**
-   * 外周の暗さ・白い霧・メニュー・指先を、不透明度 0 のまま compileAsync してシェーダを作っておく。
-   * 乗車の最初のフレームでの引っかかり（シェーダ生成）を避ける。失敗しても乗車は続けられる。
+   * 白い霧のあいだ（最初の約 1 秒）に、外周の暗さ・メニュー・指先を不透明度 0（指先は極小）で一度描く。
+   * XR の描画ではカメラが ArrayCamera になり、通常のカメラとは別のシェーダが要る。それを開始前に compileAsync しても
+   * 作れず、WebGL バックエンドの完了待ちが window の rAF に頼るため、没入中に rAF が止まる端末では開始が止まる。
+   * だから開始前には何もせず、最初のフレームの描画で作る（同期で作られ、引っかかりは霧に隠れる）。
    */
-  async function prewarm() {
-    if (typeof renderer.compileAsync !== 'function') return;
+  function warmUp() {
     vignette?.prewarm();
-    whiteout?.prewarm();
-    menu?.prewarm(true);
-    for (const slot of slots) slot.tip.visible = true;
+    if (!menuOpen) menu?.prewarm(true);
+    for (const slot of slots) {
+      if (slot.valid) continue;
+      slot.tip.scale.setScalar(0.001);
+      slot.tip.visible = true;
+    }
+  }
+
+  /** 開始の途中で終わった・失敗したときの後片付け。すでに片付いていれば（sessionend が先に走った）何もしない */
+  async function abandon(s: XRSession) {
+    if (session !== s) return;
+    renderer.xr.removeEventListener('sessionend', onSessionEnd);
+    detach();
+    renderer.xr.enabled = false;
+    session = null;
+    ready = false;
     try {
-      await renderer.compileAsync(rig, deps.camera, deps.scene);
-    } catch (err) {
-      console.warn('[xr] 開始前のシェーダ生成に失敗（描画は続けられます）', err);
-    } finally {
-      vignette?.set(0);
-      whiteout?.set(1);
-      menu?.prewarm(false);
-      for (const slot of slots) slot.tip.visible = false;
+      await s.end();
+    } catch {
+      // すでに終わっている
     }
   }
 
@@ -818,6 +861,9 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
     }
     posture = requested;
     const s = await nav.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking'] });
+    // 開始の途中で終わったことを記録する（ヘッドセットが外された、など）
+    let ended = false;
+    s.addEventListener('end', () => (ended = true), { once: true });
     // local-floor が許されなかった端末では、立って乗る場合も local で測る（高さは頭から測るので困らない）
     const granted = (s as unknown as { enabledFeatures?: readonly string[] }).enabledFeatures;
     refSpace = referenceSpaceFor(posture);
@@ -825,27 +871,26 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType(refSpace);
     attach(s);
+    // すでに終わっていたら、setSession を呼ばずに片付けて抜ける
+    if (ended) {
+      await abandon(s);
+      throw new Error('VR のセッションが始まる前に終わりました');
+    }
     try {
-      await prewarm();
       await renderer.xr.setSession(s);
       // ここから最初の XR フレームまで、他の処理は挟まらない（続きのマイクロタスクは次のフレームより先に走る）
       tolerateNullFramebuffer(renderer);
       // three r186 の setSession は、投影レイヤーを作る前に foveation を当てるので、層に効かない。作った後に当て直す
       renderer.xr.setFoveation(XR_TUNING.foveation);
     } catch (err) {
-      renderer.xr.removeEventListener('sessionend', onSessionEnd);
-      detach();
-      renderer.xr.enabled = false;
-      try {
-        await s.end();
-      } catch {
-        // すでに終わっている
-      }
+      // 途中で終わっていたら、sessionend から finish → detach がすでに走っている（abandon は何もしない）
+      await abandon(s);
       throw err;
     }
-    // 開始の途中でヘッドセットが外されるなどして、すでに終わっていた
-    if (session !== s) throw new Error('VR のセッションが始まる前に終わりました');
-    readyMs = performance.now();
+    if (session !== s || ended) {
+      await abandon(s);
+      throw new Error('VR のセッションが始まる前に終わりました');
+    }
     whiteoutNow = 1;
     whiteout?.set(1);
     ready = true;
@@ -910,14 +955,17 @@ export function createXRSystem(renderer: THREE.WebGPURenderer, deps: XRDeps): XR
       frames++;
       if (needsCalibrate) calibrate();
       placeRig(pose);
-      // 白い霧: セッション開始からの時刻で決める（始まりで視界を覆い、1 秒で晴れる）
-      const fog = whiteoutOpacity((nowMs - readyMs) / 1000);
+      // 白い霧: 頭の高さと正面を合わせ終えた時刻から数える（それまでは視界を覆ったまま、合わせ終えて 1 秒で晴れる）
+      const fog = fogStartMs < 0 ? 1 : whiteoutOpacity((nowMs - fogStartMs) / 1000);
       if (fog !== whiteoutNow) {
         whiteoutNow = fog;
         whiteout?.set(fog);
       }
       updateVignette(dt, real, pose);
       collectTips();
+      // 最初のフレームの描画で、外周の暗さ・メニュー・指先の XR 用シェーダを（霧に隠れて）作る
+      if (frames === 1) warmUp();
+      else if (frames === 2 && !menuOpen) menu?.prewarm(false);
       if (menuPending && calibrated) openMenu();
       if (menuOpen) updateMenu(real);
       else updateTouchables(real);
