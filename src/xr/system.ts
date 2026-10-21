@@ -34,9 +34,7 @@ import { createWhiteout, type Whiteout } from './whiteout';
 
 /** 契約（XRSystem）に足す、統合担当向けの口 */
 export interface XRSystemExtras {
-  /** 見つめて触れるまでの秒（設定の 0.8 / 1.2 / 2.0）。既定は INTERACTION.gazeDwellSec */
-  setGazeDwell(sec: number): void;
-  /** 確認ページと e2e が読む内部の状態 */
+  /** 確認ページと e2e が読む内部の状態（見つめる時間の setGazeDwell は契約 XRSystem に上がった） */
   debugInfo(): XRDebugInfo;
 }
 
