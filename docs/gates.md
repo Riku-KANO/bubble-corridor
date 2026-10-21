@@ -49,3 +49,11 @@
 | 温室で誰も酔わない | 人が VR で乗る。温室（S-20）が入ってから | 未 |
 
 関門1 の残り: PC 60fps（天球の見どころ）は天球の部屋（S-22）の統合後に測る。Quest 3 の 72fps とガラスの見た目は人が確かめる（ADR-0010 の実機の確認項目）。
+
+### 2026-10-21 関門1（PC 60fps）— main 956ee67（天球 S-22 を統合した時点）
+
+| 条件 | 結果 | 合否 |
+|---|---|---|
+| PC 60fps（天球の見どころ） | `pnpm snap ride --only stars,celestial,constellation`（1280×720、ヘッドレスの Chrome、Apple M5 Pro）: WebGPU 60.0 / 60.0 / 60.0 fps（calls 42〜47、三角形 219k〜287k）、WebGL2 60.0 / 59.9 / 60.0 fps、low の 9:51 は 59.9 fps（calls 30、157k）。コンソールエラー 0 | 合格（この機械で。設計書の「近年の内蔵 GPU で 1080p・中品質」はまだ測っていない） |
+| 3つの描画経路 | `pnpm e2e`（render-paths・xr）: WebGPU・WebGL2・IWER の immersive-vr でエラー 0（本物の天球で） | 合格 |
+| Quest 3 72fps、ガラスの見た目 | 人が確かめる（ADR-0010 の実機の確認項目） | 未 |
