@@ -12,6 +12,7 @@ import {
   expectRoomContract,
   loadRoom,
   sectionTimes,
+  shapeClearanceViolations,
 } from '../testing';
 import { createRainRoom } from './index';
 
@@ -25,6 +26,12 @@ describe('第2室 雨の回廊', () => {
 
   it('BLD-4〜7 Blender で造形して焼いた glb とライトマップを読む（blender/scripts/rooms/rain.py）', async () => {
     await expectBlenderRoom(createRainRoom, 'rain');
+  });
+
+  it('RIDE-8 clearanceExempt の物（壁・穹窿・鏡の板など）も本当の形で 0.5m 以上（区間の前後 3m まで。ADR-0013）', async () => {
+    const h = await loadRoom(createRainRoom);
+    h.play(sectionTimes('rain').t0, sectionTimes('rain').t1, 1);
+    expect(shapeClearanceViolations(h.room, ['rain'])).toEqual([]);
   });
 
   it('RIDE-8 ゴンドラの表面から物まで 0.5m 以上（止まった雨粒も）', async () => {

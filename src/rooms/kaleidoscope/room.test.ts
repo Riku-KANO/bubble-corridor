@@ -1,4 +1,5 @@
 // S-21 第3室「万華鏡の間」（金と青）（親が作成。実装担当は変更しない）
+import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 import { MOMENT_BARS, SEC_PER_BAR } from '../../config';
 import {
@@ -12,6 +13,8 @@ import {
   expectRoomContract,
   findByRole,
   loadRoom,
+  sectionTimes,
+  shapeClearanceViolations,
 } from '../testing';
 import { createKaleidoscopeRoom } from './index';
 
@@ -24,6 +27,12 @@ describe('第3室 万華鏡の間', () => {
 
   it('BLD-4〜7 Blender で造形して焼いた glb とライトマップを読む（blender/scripts/rooms/kaleidoscope.py）', async () => {
     await expectBlenderRoom(createKaleidoscopeRoom, 'kaleidoscope');
+  });
+
+  it('RIDE-8 clearanceExempt の物（壁・穹窿・鏡の板など）も本当の形で 0.5m 以上（区間の前後 3m まで。ADR-0013）', async () => {
+    const h = await loadRoom(createKaleidoscopeRoom);
+    h.play(sectionTimes('kaleidoscope').t0, sectionTimes('kaleidoscope').t1, 1);
+    expect(shapeClearanceViolations(h.room, ['kaleidoscope'])).toEqual([]);
   });
 
   it('RIDE-8 ゴンドラの表面から物まで 0.5m 以上', async () => {
@@ -52,6 +61,23 @@ describe('第3室 万華鏡の間', () => {
   it('INT-1 ガラス片（12以上）に触れられる', async () => {
     const { room } = await loadRoom(createKaleidoscopeRoom);
     expect(room.touchables.filter((t) => t.kind === 'shard').length).toBeGreaterThanOrEqual(12);
+  });
+
+  it('触れたガラス片の動きは時刻から決まる（フレームの刻み方に依らず、同じ時刻なら同じ向き。レビュー1巡目 P1-1）', async () => {
+    const run = async (dt: number) => {
+      const h = await loadRoom(createKaleidoscopeRoom);
+      const shard = h.room.touchables.filter((t) => t.kind === 'shard')[0]!;
+      h.frame(380, 1 / 60);
+      shard.onTouch({ t: 380, source: 'pointer', point: [0, 0, 0] });
+      // 回っている途中（触れて 0.4 秒後）の向きを、刻み方を変えて比べる
+      const steps = Math.round(0.4 / dt);
+      for (let i = 1; i <= steps; i++) h.frame(380 + i * dt, dt);
+      shard.object.updateMatrixWorld(true);
+      return shard.object.getWorldQuaternion(new THREE.Quaternion());
+    };
+    const fine = await run(0.4 / 48);
+    const coarse = await run(0.1);
+    expect(fine.angleTo(coarse)).toBeLessThan(1e-3);
   });
 
   it('RIDE-4 穏やかモードでは模様の回転を止める（標準では回る）', async () => {
