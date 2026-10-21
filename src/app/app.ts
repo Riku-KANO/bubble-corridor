@@ -12,15 +12,15 @@ import type { PhotoRecord } from '../contracts/photo';
 import type { Progress, QualitySetting, Settings, UiCommands, UiState } from '../contracts/ui';
 import { CAMERA, HIDDEN_BUBBLE_SECTIONS, PHOTO, RIDE_DURATION, TRANSITION_SEC, UI } from '../config';
 import { createBus } from '../core/events';
-import { lerp, smoothstep } from '../core/easing';
-import { setDefaultGlassTier, setGlassFlashScale } from '../core/materials/glass';
+import { easeGlass, lerp } from '../core/easing';
+import { setDefaultGlassTier, setGlassFlashScale, setGlassLighting } from '../core/materials/glass';
 import { DynamicResolution, detectTier, presetFor, type TierPreset } from '../core/quality-tier';
 import { createAudioEngine } from '../audio';
 import { createScreenFx, REDUCED_FLASH_SCALE } from '../fx';
 import { createGondola } from '../gondola';
 import { createLookControl, createTouchInput } from '../input';
 import { capturePhoto, createPhotoStore, composePhoto, downloadPhoto, photoFileName, sharePhoto, stampText, warmUpCapture } from '../photo';
-import { buildCueSheet, createCueDispatcher, createRide, createWallClock, generateRideData, streamingPlan } from '../ride';
+import { buildCueSheet, createCueDispatcher, createRide, createWallClock, generateRideData } from '../ride';
 import { ROOM_FACTORIES } from '../rooms';
 import { loadProgress as readProgress, loadSettings, mountUi, saveProgress, saveSettings } from '../ui';
 import { createXRSystem } from '../xr';
@@ -28,8 +28,11 @@ import { createAssetLoader } from './assets';
 import { createDebugOverlay, type DebugSample } from './debug';
 import { deviceHints } from './device';
 import { INITIAL_FLOW, reduceFlow, type FlowAction, type FlowState } from './flow';
+import { glassLightingFor } from './glass-lighting';
 import { createIdleChimer } from './idle-chime';
 import { parseParams } from './params';
+import { createRiseSounder } from './rise-sound';
+import { HOME_PLAN, homePlanFor, planFor, type RoomPlan } from './room-plan';
 import { RoomManager } from './rooms';
 import { loadRideData } from './ride-data';
 import { BOARD_START_SEC, fxAt, type FxTimeline, type FxTimelineOptions } from './timeline';
@@ -116,6 +119,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   let hintShown = false;
   /** 殻が閉じる音を鳴らしたか。時刻（BOARD_START_SEC）を越えたときに一度だけ。?t で越えた後から始めたら鳴らさない */
   let shellCloseSounded = true;
+  /** 水面からゴンドラが浮かぶ音。乗るたびに一度、案内の頭か乗車の頭（いつ鳴らすかは rise-sound.ts） */
+  const riseSound = createRiseSounder(() => audio.sfx('gondola.rise'));
   /** 前のフレームの乗車の秒（dt を出す）。新しい乗車の最初のフレームで、?t の位置まで飛んだ長さを dt にしないよう beginRide で合わせる */
   let lastT = 0;
   const photoStore = createPhotoStore();
@@ -155,7 +160,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   camera.add(darkness.object);
   // 画面 → VR の白い霧。乗車の時計の外の遷移なので壁時計で進める（満ちるのは TRANSITION_SEC.screenToVR）
   const fog = { from: 0, to: 0, startMs: 0 };
-  const fogAt = (nowMs: number): number => lerp(fog.from, fog.to, smoothstep(0, TRANSITION_SEC.screenToVR * 1000, nowMs - fog.startMs));
+  // 満ちる曲線もガラスの曲線（動きの曲線は作品で1つ。ADR-0011）
+  const fogAt = (nowMs: number): number => lerp(fog.from, fog.to, easeGlass((nowMs - fog.startMs) / (TRANSITION_SEC.screenToVR * 1000)));
   const fogTo = (to: number, instant = false) => {
     const nowMs = performance.now();
     fog.from = instant ? to : fogAt(nowMs);
@@ -326,6 +332,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     // 案内を出ている間だけ自動進行の見張りを持つ（飛ばしたら止める）
     if (prev.screen === 'guide' && next.screen !== 'guide') window.clearTimeout(guideTimer);
     if (next.screen === 'guide') {
+      riseSound.guideStarted(next.viewMode);
       // 案内は UI.preRideGuideSec 秒で自動的に進む。クリックで飛ばせる。2回目以降は出さない
       progress = { ...progress, seenGuide: true };
       saveProgress(progress);
@@ -364,6 +371,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     audio.stopLobby();
     audio.setDoor(door ?? DEFAULT_DOOR);
     const t0 = params.t ?? 0;
+    riseSound.rideStarted(t0);
     // 殻が閉じる音は時刻から一度だけ。?t で閉じ始めの後から始めたときに、過ぎた分を鳴らさない
     shellCloseSounded = t0 > BOARD_START_SEC;
     lastT = t0;
@@ -482,7 +490,15 @@ export async function startApp(root: HTMLElement): Promise<void> {
   }
 
   // ── 読み込み（待ち列の灯り） ──
-  const initialRooms = ['lobby', 'platform', 'greenhouse'] as const;
+  // 乗車の外の部屋の計画（画面ごと。乗車の中は時刻から）。?screen=home&t= で入口に止まる確認用は、乗る時刻の部屋も持っておく
+  const stopAtHome = params.screen === 'home' && params.t !== null;
+  const homePlan = homePlanFor(stopAtHome ? params.t : null, ride);
+  const planOf = (screen: FlowState['screen'], t: number): RoomPlan => {
+    const plan = planFor(screen, t, ride);
+    return plan === HOME_PLAN ? homePlan : plan;
+  };
+  // 起動時に読み込む部屋 = 入口の計画の部屋
+  const initialRooms = HOME_PLAN.keep;
   let readyCount = 0;
   let captureWarmed = false;
   for (const id of initialRooms) {
@@ -500,15 +516,13 @@ export async function startApp(root: HTMLElement): Promise<void> {
       refreshUi();
     });
   }
-  rooms.sync({ visible: ['lobby', 'platform'], keep: [...initialRooms] });
+  rooms.sync(homePlan);
 
   // 確認用: ?t や ?screen で途中から始める。?screen=home と ?t が両方あれば入口で止まり、
   // 「乗る」「VRで乗る」で ?t の時刻から乗る（Quest 3 で天球から VR を確かめるため）
   if (params.t !== null || params.screen) {
-    const stopAtHome = params.screen === 'home' && params.t !== null;
-    // 入口で止まる間に、乗る時刻の部屋も読み込んでおく（乗った直後に空の景色を見せない）
-    const ahead = stopAtHome && params.t !== null ? streamingPlan(params.t, ride).keep : [];
-    await Promise.all([...initialRooms, ...ahead].map((id) => rooms.ensure(id)));
+    // 入口で止まる間に、乗る時刻の部屋も読み込んでおく（乗った直後に空の景色を見せない。homePlan がその部屋も持つ）
+    await Promise.all(homePlan.keep.map((id) => rooms.ensure(id)));
     dispatch({ type: 'loaded' });
     dispatch({ type: 'enterHome' });
     if (params.t !== null) {
@@ -588,8 +602,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
       if (t >= RIDE_DURATION && flow.screen === 'riding' && !hasRideEndCue) void endRide();
     }
 
-    // 部屋の先読みと表示
-    if (riding) rooms.sync(streamingPlan(t, ride));
+    // 部屋の先読みと表示（乗車の外でも画面に応じて渡す。同じ計画は参照で見分けて何もしない）
+    rooms.sync(planOf(flow.screen, t));
     if (rooms.consumeTouchChange()) {
       touch.setTouchables(rooms.touchables());
       xr.setTouchables(rooms.touchables());
@@ -601,18 +615,17 @@ export async function startApp(root: HTMLElement): Promise<void> {
     rooms.update(roomFrame);
     if (riding && !xr.active) touch.update(t, dt, camera, gondolaPos);
 
-    // 部屋の空気（膜を通る瞬間に切り替える。部屋が時刻で差し替えたときも反映する）
-    const roomId = riding ? ROOM_OF_SECTION[pose.section] : 'lobby';
+    // 部屋の空気（膜を通る瞬間に切り替える。部屋が時刻で差し替えたときも反映する）。ゴンドラのいる部屋の空気 = 今の区間の部屋。
+    // 乗車の外は入口の部屋、ライドフォトは降車の乗り場。ガラスの擬似照明（縁の反射の色・ハイライト）も、空気が変わったときだけ部屋に合わせる
+    const roomId = riding ? ROOM_OF_SECTION[pose.section] : flow.screen === 'photo' ? 'platform' : 'lobby';
     const atmosphere = rooms.get(roomId)?.atmosphere ?? null;
     if (atmosphere && atmosphere !== currentAtmosphere) {
-      {
-        currentAtmosphere = atmosphere;
-        const a = atmosphere;
-        scene.background = new THREE.Color(a.background);
-        scene.fog = a.fog ? new THREE.Fog(a.fog.color, a.fog.near, a.fog.far) : null;
-        renderer.toneMappingExposure = a.exposure;
-        scene.environment = a.environment ?? null;
-      }
+      currentAtmosphere = atmosphere;
+      scene.background = new THREE.Color(atmosphere.background);
+      scene.fog = atmosphere.fog ? new THREE.Fog(atmosphere.fog.color, atmosphere.fog.near, atmosphere.fog.far) : null;
+      renderer.toneMappingExposure = atmosphere.exposure;
+      scene.environment = atmosphere.environment ?? null;
+      setGlassLighting(glassLightingFor(atmosphere));
     }
 
     // 画面効果（乗車の時刻から決めた値をそのまま渡す。白い霧だけは乗車の外の遷移なので壁時計）
