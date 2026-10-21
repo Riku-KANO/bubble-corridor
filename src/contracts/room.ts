@@ -1,5 +1,6 @@
 // 部屋（セット）の契約。各部屋の担当は src/rooms/<部屋>/ で RoomModule を実装する。
 import type { AnimationClip, Camera, ColorRepresentation, Group, Object3D, Texture } from 'three';
+import type { GlassLighting } from '../core/materials/glass';
 import type { TierPreset } from '../core/quality-tier';
 import type { Cue, EventBus, Vec3Tuple } from './events';
 import type { ComfortMode, DoorChoice, RoomId, SectionId, TouchKind, TouchSource } from './ids';
@@ -43,6 +44,11 @@ export interface Atmosphere {
   /** トーンマッピングの露出 */
   readonly exposure: number;
   readonly environment?: Texture | null;
+  /**
+   * この部屋のガラスの擬似照明（src/core/materials/glass.ts の setGlassLighting）。省いた項目は、統合担当が空気から作る
+   * （src/app/glass-lighting.ts）。光の来る向き（朝日・水平線の光）など、部屋が知っていることを書く。
+   */
+  readonly glassLighting?: Partial<GlassLighting>;
 }
 
 /**
