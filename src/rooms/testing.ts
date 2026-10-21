@@ -400,3 +400,113 @@ export async function expectBlenderRoom(factory: RoomFactory, name: string): Pro
   }
   room.dispose();
 }
+
+const PASS_THROUGH_ROLES = new Set(['membrane', 'shell', 'water']);
+
+/** 通り抜ける物（膜・殻・水面、または userData.passThrough）か。自分か親のどれかがそうなら真 */
+function passesThrough(o: THREE.Object3D): boolean {
+  for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+    if (p.userData.passThrough || PASS_THROUGH_ROLES.has(p.userData.role as string)) return true;
+  }
+  return false;
+}
+
+/** clearanceExempt が自分か親のどれかに付いているか */
+function exempted(o: THREE.Object3D): boolean {
+  for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p.userData.clearanceExempt) return true;
+  return false;
+}
+
+/**
+ * RIDE-8 の本当の形での確かめ。clearanceExempt を付けた物（レールを囲む連続した壁・穹窿・鏡の板など、軸に沿った箱では
+ * レールを含んでしまう物）も、三角形との最短距離でゴンドラの表面から 0.5m 以上離れていること。
+ * 通り抜ける物（role が membrane・shell・water、または userData.passThrough）だけは除く。
+ * exempt を付けるだけで RIDE-8 を外れる抜け道を塞ぐ（S-21 レビュー1巡目 P2-1）。レールは区間の前後 margin m まで測る
+ * （隣の区間から見える所、部屋の境目の物も）。レールは1本なので標準と穏やかで同じ（ADR-0008）。
+ * 違反した [s, 距離, 物の名前] を、物ごとに最も近いものだけ返す。
+ */
+export function shapeClearanceViolations(
+  room: RoomModule,
+  sections: readonly SectionId[],
+  opts: { margin?: number; step?: number } = {},
+): [number, number, string][] {
+  const margin = opts.margin ?? 3;
+  const step = opts.step ?? 0.25;
+  const need = GONDOLA_DIAMETER / 2 + MOTION.clearanceMin;
+  room.root.updateMatrixWorld(true);
+  // 三角形を世界座標で集める（物ごと）
+  const objs: { name: string; tri: Float32Array; centers: Float32Array; radii: Float32Array }[] = [];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const m = new THREE.Matrix4();
+  room.root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || !exempted(o) || passesThrough(o)) return;
+    const g = mesh.geometry as THREE.BufferGeometry;
+    const pos = g.attributes.position;
+    if (!pos) return;
+    const idx = g.index;
+    const triCount = idx ? idx.count / 3 : pos.count / 3;
+    const inst = (o as THREE.InstancedMesh).isInstancedMesh ? (o as THREE.InstancedMesh).count : 1;
+    const tri = new Float32Array(triCount * inst * 9);
+    const centers = new Float32Array(triCount * inst * 3);
+    const radii = new Float32Array(triCount * inst);
+    let k = 0;
+    for (let i = 0; i < inst; i++) {
+      if (inst > 1 || (o as THREE.InstancedMesh).isInstancedMesh) {
+        (o as THREE.InstancedMesh).getMatrixAt(i, m);
+        m.premultiply(mesh.matrixWorld);
+      } else m.copy(mesh.matrixWorld);
+      for (let t = 0; t < triCount; t++) {
+        const ia = idx ? idx.getX(t * 3) : t * 3;
+        const ib = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
+        const ic = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+        a.fromBufferAttribute(pos, ia).applyMatrix4(m);
+        b.fromBufferAttribute(pos, ib).applyMatrix4(m);
+        c.fromBufferAttribute(pos, ic).applyMatrix4(m);
+        tri.set([a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z], k * 9);
+        const cx = (a.x + b.x + c.x) / 3;
+        const cy = (a.y + b.y + c.y) / 3;
+        const cz = (a.z + b.z + c.z) / 3;
+        centers.set([cx, cy, cz], k * 3);
+        radii[k] = Math.sqrt(
+          Math.max((a.x - cx) ** 2 + (a.y - cy) ** 2 + (a.z - cz) ** 2, (b.x - cx) ** 2 + (b.y - cy) ** 2 + (b.z - cz) ** 2, (c.x - cx) ** 2 + (c.y - cy) ** 2 + (c.z - cz) ** 2),
+        );
+        k++;
+      }
+    }
+    objs.push({ name: (o.userData.name as string) ?? o.name, tri, centers, radii });
+  });
+  const worst = new Map<string, [number, number, string]>();
+  const triangle = new THREE.Triangle();
+  const closest = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  for (const id of sections) {
+    const { s0, s1 } = ride.sectionSpan(id);
+    for (let s = Math.max(0, s0 - margin); s <= s1 + margin; s += step) {
+      const q = ride.pointAt(s);
+      p.set(q.x, q.y, q.z);
+      for (const ob of objs) {
+        const n = ob.radii.length;
+        for (let t = 0; t < n; t++) {
+          const dx = ob.centers[t * 3]! - p.x;
+          const dy = ob.centers[t * 3 + 1]! - p.y;
+          const dz = ob.centers[t * 3 + 2]! - p.z;
+          if (Math.sqrt(dx * dx + dy * dy + dz * dz) - ob.radii[t]! >= need) continue;
+          const o9 = t * 9;
+          a.set(ob.tri[o9]!, ob.tri[o9 + 1]!, ob.tri[o9 + 2]!);
+          b.set(ob.tri[o9 + 3]!, ob.tri[o9 + 4]!, ob.tri[o9 + 5]!);
+          c.set(ob.tri[o9 + 6]!, ob.tri[o9 + 7]!, ob.tri[o9 + 8]!);
+          triangle.set(a, b, c).closestPointToPoint(p, closest);
+          const d = closest.distanceTo(p);
+          if (d < need) {
+            const w = worst.get(ob.name);
+            if (!w || d < w[1]) worst.set(ob.name, [Math.round(s * 100) / 100, Math.round(d * 1000) / 1000, ob.name]);
+          }
+        }
+      }
+    }
+  }
+  return [...worst.values()];
+}
