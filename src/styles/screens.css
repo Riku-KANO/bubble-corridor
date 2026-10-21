@@ -52,7 +52,8 @@
    かけるのは「ガラスを含まない一番上の要素」だけ（画面の直下か、ガラスを含む入れ物の直下）。
    その子孫にもかけると、入れ物の深さだけ opacity が掛け算になり（深い文字ほど遅れて急に現れる）、
    動いている間は合成のレイヤーも要素の数だけ増える。
-   現れる動きの opacity は transition だけで行い、入ってくる動き（animation）では translate と scale だけを動かす。 */
+   現れる動きの opacity は transition だけで行い、入ってくる動き（animation）では translate と scale だけを動かす。
+   一番上になる要素が自分の transition を持つときは、必ず opacity の transition も足す（足さないと、その要素だけ急に現れ・消える）。 */
 :where(.ui .screen:not(.screen-riding), .ui .screen:not(.screen-riding) :has(.btn, .chip, .glass-panel, .board, .plaque, .arch, .ticket)) > :where(:not(:has(.btn, .chip, .glass-panel, .board, .plaque, .arch, .ticket))) {
   opacity: 0;
   transition: opacity var(--fade-d, 0s) var(--ease-glass) calc(var(--fade-w, 0s) + var(--stagger, 0s) * var(--fade-on, 0));
@@ -644,7 +645,8 @@
   }
 }
 /* 狭い幅: 名前を中央のまま、札を下へ（札の幅が名前の両脇に収まらない）。しきい値は rem なので文字の大きさに追従する。
-   札のいちばん広い状態（日本語は「穏やか」、英語は「Standard」）が、名前の両脇に収まる幅を目安にする */
+   札のいちばん広い状態（日本語は「穏やか」、英語は「Standard」）が、名前の両脇に収まる幅を目安にする。
+   文言（項目の名前・札）を変えたら、このしきい値を見直す（長くなると3列のまま左の列が縮み、名前が中央からずれる） */
 @container pause (max-width: 21.5rem) {
   .ui:lang(ja) .pause-row {
     grid-template-columns: 1fr;
@@ -715,6 +717,10 @@
 /* ── ライドフォトと乗車の記録 ─────────────────────────────────── */
 .ui .screen-photo {
   gap: 0.9rem;
+}
+/* 読み上げのためにフォーカスを移す見出し（tabindex=-1）。押せる物ではないので、フォーカスの枠は出さない */
+.ui .photo-thanks:focus {
+  outline: none;
 }
 .ui .photo-thanks {
   font-family: var(--font-serif);
@@ -1198,7 +1204,7 @@
   text-indent: 0.06em;
 }
 /* 日本語: 語の途中で折り返さない（対応するブラウザで） */
-.ui:lang(ja) :is(.howto-text, .howto-note, .credits-line, .row-desc, .row-note, .guide-note, .shelf-empty, .pane-status, .row-label) {
+.ui:lang(ja) :is(.howto-text, .howto-note, .credits-line, .row-desc, .row-note, .guide-note, .shelf-empty, .pane-status, .row-label, .photo-thanks, .cell-label, .ticket-route) {
   word-break: auto-phrase;
   text-wrap: pretty;
 }
