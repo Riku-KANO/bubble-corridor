@@ -677,21 +677,53 @@ export function sharedGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
   };
 }
 
+// ── 真鍮の縁の明るさ（createBrass と brassGlow が同じ定数・同じ式を使う。変えるときは両方の式を揃える） ──
+
+/** 真鍮の既定の色（createBrass の color を省いたとき）。暖かい金（r > g > b） */
+const BRASS_COLOR = 0xb08d57;
+/** 反射する色（空・地面の混ぜ合わせ）に掛けて発光にする倍率。環境画像がない場面で真っ黒にならない程度のごく薄い光 */
+const BRASS_GAIN = 0.14;
+/**
+ * 反射する色の下限（線形の灰色。真鍮の色にそのまま掛かるので、下限のときも真鍮の暖かい色になる）。
+ * 縁は「視界の下側に常に見える動かない基準」（設計書 147 行、ADR-0012: VR の暗転でも縁を残す）なので、
+ * 暗い部屋（空の輝度が既定の 2〜3 割）でも消さない。既定（夜明け）の空を映した縁の輝度の約 0.76 倍。
+ * 一律に足さず「下限」にするのは、明るい部屋では照明を映して明るくなる変化と、既定の見え方を変えないため
+ */
+const BRASS_FLOOR = 0.5;
+/** 反射する色（空と地面の混ぜ合わせ）に下限を掛ける。シェーダの式 max(混ぜ合わせ × fakeScale, BRASS_FLOOR) と同じ */
+function brassReflected(lit: THREE.Color): THREE.Color {
+  return new THREE.Color().setRGB(Math.max(lit.r, BRASS_FLOOR), Math.max(lit.g, BRASS_FLOOR), Math.max(lit.b, BRASS_FLOOR), THREE.LinearSRGBColorSpace);
+}
+
 /**
  * 真鍮の細い枠（ゴンドラ、温室の鉄骨の飾り、街灯）。
  * 環境画像がない場面でも真っ黒にならないよう、反射方向の空と地面の色をごく薄く足す（環境画像があれば弱める）。
+ * 反射する色には下限があり、暗い部屋でも縁が消えない（BRASS_FLOOR。値は brassGlow で確かめられる）。
  */
 export function createBrass(
   params: { readonly color?: THREE.ColorRepresentation; readonly roughness?: number } = {},
 ): THREE.Material {
   const material = new THREE.MeshStandardNodeMaterial({
-    color: params.color ?? 0xb08d57,
+    color: params.color ?? BRASS_COLOR,
     roughness: params.roughness ?? 0.35,
     metalness: 1,
   });
-  material.emissiveNode = materialColor.rgb
-    .mul(mix(uGround, uSky, smoothstep(-0.4, 0.5, reflectVector.y)))
-    .mul(0.14)
-    .mul(fakeScale);
+  const up = smoothstep(-0.4, 0.5, reflectVector.y);
+  const lit = mix(uGround, uSky, up).mul(fakeScale);
+  // 下限にも反射の向きで弱い勾配をつける（暗い部屋で縁が1色の平板にならず、管の陰影が残る）。上の面（up = 1）は下限のまま
+  material.emissiveNode = materialColor.rgb.mul(max(lit, vec3(BRASS_FLOOR).mul(mix(0.8, 1, up)))).mul(BRASS_GAIN);
   return material;
+}
+
+/**
+ * 座席から見下ろす縁の上の面（反射の向きが真上に近く reflect.y ≥ 0.5 で、空の色だけを映す）の、真鍮の発光の色（線形）。
+ * createBrass のシェーダと同じ式（真鍮の色 × max(空, 下限) × 倍率）で CPU で求める。確認と調整のため。
+ * 引数の照明は、指定した項目だけを共有の値の代わりに使う（共有の値は変えない）。環境画像がある場面での弱め（envReflection）は見ない。
+ */
+export function brassGlow(
+  lighting: Partial<GlassLighting> = {},
+  color: THREE.ColorRepresentation = BRASS_COLOR,
+): THREE.Color {
+  const sky = lighting.sky !== undefined ? new THREE.Color().set(lighting.sky) : (uSky.value as THREE.Color);
+  return brassReflected(sky).multiply(new THREE.Color().set(color)).multiplyScalar(BRASS_GAIN);
 }

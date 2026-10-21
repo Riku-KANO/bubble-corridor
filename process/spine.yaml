@@ -134,8 +134,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**, blender/scripts/rooms/lobby.py, blender/scenes/lobby.blend, public/assets/rooms/lobby*, blender/scripts/rooms/platform.py, blender/scenes/platform.blend, public/assets/rooms/platform*, blender/scripts/rooms/greenhouse.py, blender/scenes/greenhouse.blend, public/assets/rooms/greenhouse*, blender/scripts/rooms/gondola.py, blender/scenes/gondola.blend, public/assets/rooms/gondola*]
   tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts, src/gondola/gondola.test.ts]
-  status: red
-  notes: '2026-10-20 2026-10-21 親がテストを作成（lobby・platform・greenhouse・gondola。BLD-4〜7 は expectBlenderRoom で glb とライトマップの付け方まで確かめる）。赤の証跡: 4 files 20 failed / 8 passed。ゴンドラはコードで作ってよい（同期の createGondola のため。glb は任意）。実装 消費 0/3'
+  status: green
+  notes: '2026-10-20 2026-10-21 親がテストを作成（lobby・platform・greenhouse・gondola。BLD-4〜7 は expectBlenderRoom で glb とライトマップの付け方まで確かめる）。赤の証跡: 4 files 20 failed / 8 passed。ゴンドラはコードで作ってよい（同期の createGondola のため。glb は任意）。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（部屋A 28件、親の本当の形の距離・rules も緑、check --quick ALL OK）。読み込み lobby 1.19MB・platform 4.84MB・greenhouse 5.00MB、初回 約6.0MB。温室 high 1.02M 三角形、乗り場の描く物 80（上限ちょうど）。親が最新の main を取り込んだ。レビュー1巡目へ'
 - id: S-21
   title: 部屋B（雨の回廊と扉の分岐、万華鏡の間の金と青）を Blender で造形・焼き込み
   wave: 2
@@ -145,8 +145,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**, blender/scripts/rooms/rain.py, blender/scenes/rain.blend, public/assets/rooms/rain*, blender/scripts/rooms/kaleidoscope.py, blender/scenes/kaleidoscope.blend, public/assets/rooms/kaleidoscope*]
   tests: [src/rooms/rain/room.test.ts, src/rooms/kaleidoscope/room.test.ts]
-  status: green
-  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（rain 10・kaleidoscope 10・担当のテスト10、check --quick ALL OK）。雨 3.2MB・万華鏡 4.6MB、60fps（WebGPU・WebGL2）。連続した壁と鏡の板は clearance_exempt にして、本当の三角形で 1.7m 以上を Blender と TS で確かめる、という判断をレビューで厳しく見る。親が最新の main を取り込み（30件緑）。レビュー1巡目へ'
+  status: red
+  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（rain 10・kaleidoscope 10・担当のテスト10、check --quick ALL OK）。雨 3.2MB・万華鏡 4.6MB、60fps（WebGPU・WebGL2）。連続した壁と鏡の板は clearance_exempt にして、本当の三角形で 1.7m 以上を Blender と TS で確かめる、という判断をレビューで厳しく見る。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 触れたガラス片の回転を毎フレーム積み上げる（時刻から決まらない）、色のこだまが 3.3Hz で光る（明滅の上限を超える）。P2 exempt の距離の検査が自分の区間だけ（実測 1.838m で足りている）、黒い街と床の映り込み、隠した物のシェーダの組み立て、部屋から setGlassLighting、扉の解釈（ADR-0013 で仮、発案者に確認中）。exempt の判断は実測で RIDE-8 を弱めていない。親が testing.ts に shapeClearanceViolations と rules.test を足し（main）、P1-1 と本当の形の距離をテストにした（赤 2件）。実装 消費 2/3'
 - id: S-22
   title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）を Blender で造形・焼き込み
   wave: 2
@@ -156,8 +156,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/celestial/**, src/rooms/dawn/**, dev/rooms-c.html, src/dev/rooms-c/**, blender/scripts/rooms/celestial.py, blender/scenes/celestial.blend, public/assets/rooms/celestial*, blender/scripts/rooms/dawn.py, blender/scenes/dawn.blend, public/assets/rooms/dawn*]
   tests: [src/rooms/celestial/room.test.ts, src/rooms/dawn/room.test.ts]
-  status: red
-  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒 2026-10-20 2026-10-21 親がテストを作成（celestial・dawn、expectBlenderRoom 込み。ADR-0009: 外殻 62m 以内、暗転が明けたとき殻の外で、球の縁が正面から 30° 以内）。赤の証跡: 2 files 16 failed / 5 passed。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3（Opus）で緑（celestial 12・dawn 9・担当のテスト9、check --quick ALL OK、render-paths 2/2）。天球 2.79MB・岸 2.15MB、60fps（WebGPU・WebGL2）、mobile low 58〜60fps。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 部屋が setGlassLighting を直接呼ぶ（S-25 と重なると岸で照明が 4Hz で明滅、単独でも区間を出た後に照明が残る）→ Atmosphere.glassLighting に寄せる（S-25 の統合の後に main を取り込んで直す）。P2 殻に擬似光源の白いにじみ（keyIntensity 0〜0.05）、振り返ると 11:10 に天球が消える（岸に安い代役）、殻を抜ける光の輪が目の位置から始まる（数 m 先から）、low の殻が両面で重い（片面）、膜のフレームで材質約50の組み立て（触れる星を sharedGlass、app で compileAsync）。実装 消費 1/3 2026-10-21 親が最新の main（S-25）を取り込み、指摘をテストにした（rules.test: 部屋は setGlassLighting を呼ばない、天球の glassLighting の keyIntensity ≤ 0.05、low の殻は片面、材質 ≤ 20、岸の朝日の glassLighting。赤 5件）。app の compileAsync は S-29。実装 消費 2/3'
+  status: integrated
+  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒 2026-10-20 2026-10-21 親がテストを作成（celestial・dawn、expectBlenderRoom 込み。ADR-0009: 外殻 62m 以内、暗転が明けたとき殻の外で、球の縁が正面から 30° 以内）。赤の証跡: 2 files 16 failed / 5 passed。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3（Opus）で緑（celestial 12・dawn 9・担当のテスト9、check --quick ALL OK、render-paths 2/2）。天球 2.79MB・岸 2.15MB、60fps（WebGPU・WebGL2）、mobile low 58〜60fps。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 部屋が setGlassLighting を直接呼ぶ（S-25 と重なると岸で照明が 4Hz で明滅、単独でも区間を出た後に照明が残る）→ Atmosphere.glassLighting に寄せる（S-25 の統合の後に main を取り込んで直す）。P2 殻に擬似光源の白いにじみ（keyIntensity 0〜0.05）、振り返ると 11:10 に天球が消える（岸に安い代役）、殻を抜ける光の輪が目の位置から始まる（数 m 先から）、low の殻が両面で重い（片面）、膜のフレームで材質約50の組み立て（触れる星を sharedGlass、app で compileAsync）。実装 消費 1/3 2026-10-21 親が最新の main（S-25）を取り込み、指摘をテストにした（rules.test: 部屋は setGlassLighting を呼ばない、天球の glassLighting の keyIntensity ≤ 0.05、low の殻は片面、材質 ≤ 20、岸の朝日の glassLighting。赤 5件）。app の compileAsync は S-29。実装 消費 2/3 2026-10-21 レビュー2巡目 request_changes（統合を止めるのは1点）: 親の shapeClearanceViolations で岸の水に触れる見えない板と天球の代役が赤（本当の衝突ではない）→ 親が passThrough を付けて直した（37件緑）。P1・P2 はすべて解消（にじみ、11:10 の代役、光の輪、low の片面、材質 51→18）。残し（P3）: 代役の球の朝日のハイライトの塊、日の出の前後の keyIntensity の 0.25 秒の段、11:00.3 の切り替えが VR では見える（0.5〜1 秒のフェード）、数値の写し、GPU の焼き込みの揺れ（再現が要れば CPU）。main の check（ビルド・e2e 10件）ALL OK、関門1の PC 60fps を記録。統合'
 - id: S-23
   title: VR（immersive-vr、座る/立つ、指先とコントローラーで触れる、外周の暗さ、曇りガラスのメニュー）と描画経路の検証
   wave: 1
@@ -200,8 +200,8 @@ slices:
   depends_on: [S-18, S-25]
   paths: [src/core/materials/**, src/core/README.md, src/core/CHANGELOG.md, src/core/VERSION, dev/core.html, src/dev/core/**]
   tests: [src/core/materials/brass.test.ts]
-  status: red
-  notes: 'S-25 レビュー1巡目 P2-3 から: 暗い部屋（入口・乗り場・万華鏡・天球）では擬似照明の空の輝度が 0.18〜0.33 に下がり、createBrass の発光（空と地面を映す）が弱まって、座席から見下ろす縁がほぼ消える。設計書「視界の下側には常に縁」と ADR-0012（VR の暗転でも縁を残す）の基準が弱まる。真鍮に部屋の照明とは別の発光の下限を持たせる。core を変えるので版を上げる（0.5.1）。M1 の VR の確認より前に 2026-10-21 S-25 レビュー2巡目: 地面を空の 0.6 倍にして天球の真鍮の発光は既定の約21%（ride/04-stars で縁がほぼ見えない）。M1 の VR の確認より前に必須 2026-10-21 親がテストを作成（brass.test: brassGlow がシェーダと同じ式の CPU の写し。暗い部屋でも既定の6割以上、明るい部屋で 1.6 倍まで、暖かい色）。赤の証跡: brassGlow がない（4 failed）。実装 消費 0/3'
+  status: integrated
+  notes: 'S-25 レビュー1巡目 P2-3 から: 暗い部屋（入口・乗り場・万華鏡・天球）では擬似照明の空の輝度が 0.18〜0.33 に下がり、createBrass の発光（空と地面を映す）が弱まって、座席から見下ろす縁がほぼ消える。設計書「視界の下側には常に縁」と ADR-0012（VR の暗転でも縁を残す）の基準が弱まる。真鍮に部屋の照明とは別の発光の下限を持たせる。core を変えるので版を上げる（0.5.1）。M1 の VR の確認より前に 2026-10-21 S-25 レビュー2巡目: 地面を空の 0.6 倍にして天球の真鍮の発光は既定の約21%（ride/04-stars で縁がほぼ見えない）。M1 の VR の確認より前に必須 2026-10-21 親がテストを作成（brass.test: brassGlow がシェーダと同じ式の CPU の写し。暗い部屋でも既定の6割以上、明るい部屋で 1.6 倍まで、暖かい色）。赤の証跡: brassGlow がない（4 failed）。実装 消費 0/3 2026-10-21 実装 1/3 で緑（core 251件、check --quick ALL OK、版 0.5.1）。下限 BRASS_FLOOR=0.5（灰）を max で、縁の明るさは暗い部屋で既定の 0.76 倍（天球 0.23→0.77）、白い空で 1.52。レビュー1巡目へ 2026-10-21 レビュー1巡目 approve（P3 のみ）。親が統合時に: 下限に反射の向きで 0.8〜1 の勾配（暗い部屋で管の陰影を残す。brassGlow とテストは変わらない）、CHANGELOG の訂正、app/glass-lighting.ts のコメント。縁の明るさは暗い部屋で既定の 0.76 倍、--nofx（VR と同じく後処理なし）でも同じ画素。VR の実機で見えにくければ BRASS_FLOOR を上げる。残し: 真鍮が金色に見えない（ハイライトなし。磨きの別スライス）。統合'
 - id: S-27
   title: 磨き・画面（入れ子の opacity、快適モードの札、VR の初回の案内、viewMode の使い道）
   wave: 3

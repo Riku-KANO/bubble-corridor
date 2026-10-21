@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#070b22" />
+    <link rel="icon" href="data:," />
+    <title>rooms-c 確認ページ — 星の天球と夜明けの岸</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      canvas.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      .hud { position: fixed; left: 10px; top: 8px; font: 12px/1.4 ui-monospace, monospace; color: #e8eeff; text-shadow: 0 0 3px #000; white-space: pre; z-index: 2; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <!-- 部屋C（星の天球・夜明けの岸）だけを、レールの上のゴンドラの目から描く確認ページ。本番のビルドには含まれない。
+         ?room=celestial|dawn|both（both は先読みの計画で2つを出し入れし、空気と擬似照明もアプリと同じに当てる）、?t=591（乗車の秒）、?rate=1（時計の速さ。0 で止める）、?webgl、?tier=low|medium|high、
+         ?yaw=30&pitch=10（正面からの見回し、度）、?fov=75、?hide=shell,stars（role か名前で隠す）、?flash（光の点滅を抑える）、?gentle（穏やかモード）、
+         ?touch=8（読み込み後に触れられる物を 8 つ触れる）、?hud=0 -->
+    <div class="hud" id="hud"></div>
+    <script type="module" src="/src/dev/rooms-c/main.ts"></script>
+  </body>
+</html>
