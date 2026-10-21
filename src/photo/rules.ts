@@ -57,3 +57,37 @@ export function cropFor(format: PhotoFormat, srcW: number, srcH: number): PhotoC
 export function photoFileName(meta: Pick<PhotoMeta, 'rideNo' | 'date'>, shot: ShotId, format: PhotoFormat): string {
   return `utakata-${meta.date}-ride${meta.rideNo}-${shot}-${format}.png`;
 }
+
+/**
+ * 撮影の下ごしらえを始める、撮影のキューの何秒前から。部屋が見えていて、シェーダーを物ごとに少しずつ作る時間
+ * （雨の部屋で約 1 秒、遅い端末で数倍）を取れる長さ。部屋は撮影の 100 秒以上前から見えているので、この間は同じ部屋。
+ * 設計書に値がない（仮）。
+ */
+export const CAPTURE_PREPARE_LEAD_SEC = PHOTO.prepareLeadSec;
+
+/** 撮影のキューの最小の形（Cue の一部） */
+export interface ShotCue {
+  readonly id: string;
+  readonly name: string;
+  readonly t: number;
+}
+
+/**
+ * 時刻 t に下ごしらえを始めるべき撮影のキュー。撮影の LEAD 秒前から撮影の時刻までの間で、
+ * まだ済んでいなくて、撮影の部屋が見えているもの（なければ null）。
+ * 途中から乗って、撮影の時刻を過ぎている撮影は下ごしらえしない（撮影のキューも配信されない）。
+ * roomReady は、そのキューの部屋が読み込まれて見えているか。見えていない間に始めると、物が何もない場面で下ごしらえが終わってしまう
+ * （?t= で撮影の直前から乗ると、部屋はそのあと読み込まれる）。
+ */
+export function captureToPrepare<C extends ShotCue>(
+  cues: readonly C[],
+  t: number,
+  done: ReadonlySet<string>,
+  roomReady: (cue: C) => boolean,
+): C | null {
+  for (const cue of cues) {
+    if (cue.name !== 'photo.capture' || done.has(cue.id)) continue;
+    if (t >= cue.t - CAPTURE_PREPARE_LEAD_SEC && t < cue.t && roomReady(cue)) return cue;
+  }
+  return null;
+}

@@ -25,9 +25,19 @@ export function createDebugOverlay(root: HTMLElement, backend: string) {
   const TEXT_INTERVAL_MS = 250;
   let textAcc = TEXT_INTERVAL_MS;
   // e2e と snap が読むための値（window.__utakata）
-  const shared: Record<string, unknown> = { fps: 0, calls: 0, triangles: 0, t: 0, frameAt: 0, section: '', screen: '', backend };
+  /** 撮影で描いた場面の乗車の時刻（撮るたびに足す。乗り直したら空に）。撮影がキューの時刻どおりかを e2e が見る */
+  const captures: number[] = [];
+  const shared: Record<string, unknown> = { fps: 0, calls: 0, triangles: 0, t: 0, frameAt: 0, section: '', screen: '', backend, captures };
   (globalThis as unknown as { __utakata?: typeof shared }).__utakata = shared;
   return {
+    /** 撮影で描いた場面の時刻を足す（撮影のときだけ呼ぶ） */
+    recordCapture(t: number) {
+      captures.push(t);
+    },
+    /** 乗り直し: 撮影の時刻の記録を空にする */
+    clearCaptures() {
+      captures.length = 0;
+    },
     /** 操作の口と、読むたびに計算する値（関数はそのまま、getter にして出す） */
     expose(entries: Record<string, unknown>) {
       for (const [k, v] of Object.entries(entries)) {
