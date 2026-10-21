@@ -14,9 +14,10 @@ import type { Cue, Vec3Tuple } from '../../contracts/events';
 import { DEFAULT_DOOR, type ComfortMode, type DoorChoice } from '../../contracts/ids';
 import type { Atmosphere, RoomContext, RoomFrame, RoomModule, Touchable } from '../../contracts/room';
 import type { RidePose } from '../../contracts/ride';
-import { createBrass, createGlass, setGlassLighting, type GlassHandle, type GlassLighting } from '../../core/materials/glass';
+import { createBrass, createGlass, type GlassHandle } from '../../core/materials/glass';
 import { disposeTree, findAll, instancesFrom, loadBlenderRoom } from '../rain/blender-room';
 import { decorateMetal, decorateMirror, floatUniform, glowMaterial } from '../rain/look';
+import { echoAt, echoFlash, echoGrid, type Echo, type EchoState } from './echo';
 import { FLOWER_R0, flowerSlot, gatherAt, lerpCyl, type Cyl, type FlowerTiming } from './flower';
 
 const FLOWER_T = MOMENT_BARS.kaleidoscopeFlower * SEC_PER_BAR;
@@ -27,10 +28,17 @@ const TIMING: FlowerTiming = { flowerT: FLOWER_T, gatherSec: 8, releaseT: FLOWER
 const ROSETTE_SPEED = [0.16, -0.12, 0.2, -0.15, 0.13, -0.18, 0.14];
 /** 隠れた小さな泡: 筒の中ほどの左下の角の近く（前を見ていると気づかない） */
 const HIDDEN = { ds: 52, angDeg: 214, rad: 3.6, r: 0.07 };
+/**
+ * 色ガラス（ロゼット・散らばるガラス片・触れられるガラス片・プリズム）の共通の引数。縁の強さ・虹色の強さ・粗さは
+ * シェーダの式に埋め込まれるので、そろえると 1 つのシェーダで済む（初めて見えたときの組み立てが短い）。色・発光・不透明度は材質ごと
+ */
+const COLOR_GLASS = { rim: 0.85, iridescence: 0.3 } as const;
+/** 触れたガラス片がくるりと一回転する秒 */
+const SPIN_SEC = 0.8;
 
 interface Palette {
+  /** 部屋の空気。ガラスの擬似照明（glassLighting）もここに書く（アプリが空気の変わり目に当てる。部屋は共有の値に触れない） */
   readonly atmosphere: Atmosphere;
-  readonly lighting: Partial<GlassLighting>;
   /** プリズムの光の色 */
   readonly light: number;
   /** 鏡の板の拡散の色（焼いた光に掛ける）と、映り込みの色 */
@@ -43,16 +51,25 @@ interface Palette {
 /** 金の万華鏡（琥珀と金の暖かい光）と青の万華鏡（瑠璃と水色の冷たい光）。空気の色相: 金 20〜60°、青 190〜250° */
 const PALETTES: Record<DoorChoice, Palette> = {
   amber: {
-    atmosphere: { background: 0x2c1c0d, fog: { color: 0x2c1c0d, near: 14, far: 90 }, exposure: 1.0 },
-    lighting: { sky: 0xffd9a0, ground: 0x5a3415, keyColor: 0xfff0d0, keyIntensity: 0.7, keyDir: { x: 0.3, y: 1, z: 0.2 }, envReflection: 0.4 },
-    light: 0xffa030,
-    panel: 0x6e4210,
-    tint: new THREE.Color(1.15, 0.66, 0.2),
+    atmosphere: {
+      background: 0x2c1c0d,
+      fog: { color: 0x2c1c0d, near: 14, far: 90 },
+      exposure: 1.05,
+      glassLighting: { sky: 0xffd9a0, ground: 0x5a3415, keyColor: 0xfff0d0, keyIntensity: 0.7, keyDir: { x: 0.3, y: 1, z: 0.2 } },
+    },
+    light: 0xffb43c,
+    // 金の鏡: 映り込みを明るい金に寄せる（暗い茶に沈ませない）
+    panel: 0x9a6a1c,
+    tint: new THREE.Color(1.45, 1.02, 0.42),
     glass: [0xff8c1a, 0xffc12e, 0xff5a1a, 0xe8952a, 0xd04a24, 0xffb020],
   },
   lapis: {
-    atmosphere: { background: 0x0b1a36, fog: { color: 0x0b1a36, near: 14, far: 90 }, exposure: 1.0 },
-    lighting: { sky: 0xa8d8ff, ground: 0x10204a, keyColor: 0xe0f4ff, keyIntensity: 0.7, keyDir: { x: 0.3, y: 1, z: 0.2 }, envReflection: 0.4 },
+    atmosphere: {
+      background: 0x0b1a36,
+      fog: { color: 0x0b1a36, near: 14, far: 90 },
+      exposure: 1.0,
+      glassLighting: { sky: 0xa8d8ff, ground: 0x10204a, keyColor: 0xe0f4ff, keyIntensity: 0.7, keyDir: { x: 0.3, y: 1, z: 0.2 } },
+    },
     light: 0x46c8ff,
     panel: 0x1a2f5e,
     tint: new THREE.Color(0.3, 0.58, 1.0),
@@ -80,12 +97,10 @@ interface Shard {
   /** 花の面からの前後のずれ */
   readonly ds: number;
   readonly seed: number;
-}
-
-interface Echo {
-  readonly t: number;
-  readonly s: number;
-  readonly color: number;
+  /** 花の中の大きさの増し分（散らばるガラス片は花びらの面を埋めるよう大きく、触れられる物は控えめ） */
+  readonly grow: number;
+  /** 触れた時刻（くるりと回る。時刻から作り直す。触れていなければ -Infinity） */
+  touchAt: number;
 }
 
 export function createKaleidoscopeRoom(): RoomModule {
@@ -96,7 +111,10 @@ export function createKaleidoscopeRoom(): RoomModule {
   const owned: { dispose(): void }[] = [];
   const rosettes: Rosette[] = [];
   const shards: Shard[] = [];
-  const touchShards: { shard: Shard; glass: GlassHandle; colorIdx: number; touchAt: number; touchable: Touchable }[] = [];
+  const touchShards: { shard: Shard; glass: GlassHandle; colorIdx: number; touchable: Touchable }[] = [];
+  /** 位置を毎フレーム書く InstancedMesh（散らばるガラス片） */
+  const shardMeshes: THREE.InstancedMesh[] = [];
+  const echoState: EchoState = { arrival: -Infinity, color: -1 };
   const echoes: Echo[] = [];
   const uTint = uniform(new THREE.Color(PALETTES.lapis.tint));
   const uLight = uniform(new THREE.Color(PALETTES.lapis.light));
@@ -110,7 +128,6 @@ export function createKaleidoscopeRoom(): RoomModule {
   let flowerS = 0;
   let sectionT0 = 0;
   let lastT = -Infinity;
-  let lightingApplied: DoorChoice | null = null;
   let hidden: { mesh: THREE.Mesh; glass: GlassHandle; base: THREE.Vector3; foundAt: number; touchAt: number } | null = null;
   // 軸の向き（筒はまっすぐ）
   const axisF = new THREE.Vector3();
@@ -179,7 +196,6 @@ export function createKaleidoscopeRoom(): RoomModule {
     }
     for (let j = 0; j < shardColorHandles.length; j++) setShardColor(shardColorHandles[j], p.glass[(j * 2) % p.glass.length]);
     for (const ts of touchShards) setShardColor(ts.glass, p.glass[ts.colorIdx % p.glass.length]);
-    lightingApplied = null;
   }
 
   function setShardColor(g: GlassHandle, color: number) {
@@ -191,8 +207,6 @@ export function createKaleidoscopeRoom(): RoomModule {
   async function load(ctx: RoomContext) {
     ctxRef = ctx;
     door = DEFAULT_DOOR;
-    // 扉はアプリの setDoor で来るが、読み込みより前に乗車が始まっていると届かないので、選ばれた出来事も自分で聞く
-    offDoor = ctx.events.on('doorChosen', (e) => setDoorChoice(e.door));
     const span = ctx.ride.sectionSpan('kaleidoscope');
     sectionT0 = ctx.ride.sectionTime('kaleidoscope').t0;
     const p0 = ctx.ride.pointAt(span.s0);
@@ -234,7 +248,7 @@ export function createKaleidoscopeRoom(): RoomModule {
       (o as THREE.Mesh).material = m;
     }
     // 角のプリズムの棒（内側から光るガラス）
-    prismGlass = createGlass('tinted', { color: PALETTES.lapis.light, opacity: 0.6, rim: 0.7, iridescence: 0.3, emissive: PALETTES.lapis.light, emissiveIntensity: 1.3 });
+    prismGlass = createGlass('tinted', { ...COLOR_GLASS, color: PALETTES.lapis.light, opacity: 0.6, emissive: PALETTES.lapis.light, emissiveIntensity: 1.3 });
     handles.push(prismGlass);
     const prisms = instancesFrom(scene, 'prism', prismGlass.material);
     if (prisms) {
@@ -247,6 +261,8 @@ export function createKaleidoscopeRoom(): RoomModule {
     for (const o of findAll(scene, (ud) => typeof ud.rosette === 'number')) rosetteIds.add(o.userData.rosette as number);
     for (const k of [...rosetteIds].sort((a, b) => a - b)) {
       const s = Number(findAll(scene, (ud) => ud.rosette === k)[0].userData.rosette_s);
+      // glb の extras は外のデータ。数でなければその輪は作らない（インスタンスにまとめず、元の物のまま残る）
+      if (!Number.isFinite(s)) continue;
       const group = new THREE.Group();
       group.name = `kaleidoscope.rosette-${k}`;
       cylToWorld({ s, ang: 0, rad: 0 }, group.position);
@@ -256,8 +272,8 @@ export function createKaleidoscopeRoom(): RoomModule {
       group.updateMatrixWorld(true);
       const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
       const pal = PALETTES.lapis.glass;
-      const petals = createGlass('tinted', { color: pal[k % pal.length], opacity: 0.55, rim: 0.85, iridescence: 0.3, emissive: pal[k % pal.length], emissiveIntensity: 0.55 });
-      const jewels = createGlass('tinted', { color: pal[(k + 3) % pal.length], opacity: 0.6, rim: 0.9, iridescence: 0.45, emissive: pal[(k + 3) % pal.length], emissiveIntensity: 0.8 });
+      const petals = createGlass('tinted', { ...COLOR_GLASS, color: pal[k % pal.length], opacity: 0.55, emissive: pal[k % pal.length], emissiveIntensity: 0.55 });
+      const jewels = createGlass('tinted', { ...COLOR_GLASS, color: pal[(k + 3) % pal.length], opacity: 0.6, emissive: pal[(k + 3) % pal.length], emissiveIntensity: 0.8 });
       handles.push(petals, jewels);
       for (const [key, h] of [
         [`rosette_${k}_petal`, petals],
@@ -292,7 +308,7 @@ export function createKaleidoscopeRoom(): RoomModule {
     const all: { im: THREE.InstancedMesh; i: number }[] = [];
     keys.forEach((key, j) => {
       const pal = PALETTES.lapis.glass;
-      const h = createGlass('tinted', { color: pal[(j * 2) % pal.length], opacity: 0.55, rim: 0.85, iridescence: 0.3, emissive: pal[(j * 2) % pal.length], emissiveIntensity: 0.6 });
+      const h = createGlass('tinted', { ...COLOR_GLASS, color: pal[(j * 2) % pal.length], opacity: 0.55, emissive: pal[(j * 2) % pal.length], emissiveIntensity: 0.6 });
       handles.push(h);
       shardHandles.push(h);
       const im = instancesFrom(scene, key, h.material);
@@ -301,6 +317,7 @@ export function createKaleidoscopeRoom(): RoomModule {
       im.renderOrder = 3;
       im.userData.shardColor = j;
       scene.add(im);
+      shardMeshes.push(im);
       const keep = Math.max(1, Math.round(im.count * ctx.quality.particleScale));
       for (let i = 0; i < im.count; i++) all.push({ im, i });
       im.count = keep;
@@ -310,7 +327,7 @@ export function createKaleidoscopeRoom(): RoomModule {
       const pos = new THREE.Vector3();
       const q = new THREE.Quaternion();
       tmpM.decompose(pos, q, tmpP);
-      shards.push({ mesh: im, instance: i, home: worldToCyl(pos, { s: 0, ang: 0, rad: 0 }), homeQ: q, slot: flowerSlot(n, all.length), ds: ((n * 0.7548) % 1) * 0.5 - 0.25, seed: (n * 0.618034) % 1 });
+      shards.push({ mesh: im, instance: i, home: worldToCyl(pos, { s: 0, ang: 0, rad: 0 }), homeQ: q, slot: flowerSlot(n, all.length), ds: ((n * 0.7548) % 1) * 0.5 - 0.25, seed: (n * 0.618034) % 1, grow: 1.1, touchAt: -Infinity });
       n++;
     }
     shardColorHandles = shardHandles;
@@ -320,16 +337,27 @@ export function createKaleidoscopeRoom(): RoomModule {
     touchObjs.forEach((o, i) => {
       const pal = PALETTES.lapis.glass;
       const colorIdx = i % pal.length;
-      const glass = createGlass('tinted', { color: pal[colorIdx], opacity: 0.5, rim: 0.95, iridescence: 0.35, emissive: pal[colorIdx], emissiveIntensity: 0.75 });
+      const glass = createGlass('tinted', { ...COLOR_GLASS, color: pal[colorIdx], opacity: 0.5, emissive: pal[colorIdx], emissiveIntensity: 0.75 });
       handles.push(glass);
       o.material = glass.material;
       o.renderOrder = 4;
       o.updateMatrixWorld(true);
       const pos = o.getWorldPosition(new THREE.Vector3());
       const q = o.getWorldQuaternion(new THREE.Quaternion());
-      // 花の中では、いちばん内側の輪に並ぶ
-      const shard: Shard = { mesh: o, instance: -1, home: worldToCyl(pos, { s: 0, ang: 0, rad: 0 }), homeQ: q, slot: { ang: (2 * Math.PI * i) / touchObjs.length, rad: FLOWER_R0 + 0.05, tilt: 0 }, ds: -0.35, seed: (i * 0.618034) % 1 };
-      const entry = { shard, glass, colorIdx, touchAt: -Infinity, touchable: null as unknown as Touchable };
+      // 触れられるガラス片も花に集まり、いちばん内側の輪に並ぶ（花の面の少し手前）
+      const shard: Shard = {
+        mesh: o,
+        instance: -1,
+        home: worldToCyl(pos, { s: 0, ang: 0, rad: 0 }),
+        homeQ: q,
+        slot: { ang: (2 * Math.PI * i) / touchObjs.length, rad: FLOWER_R0 + 0.05, tilt: 0 },
+        ds: -0.35,
+        seed: (i * 0.618034) % 1,
+        grow: 0.6,
+        touchAt: -Infinity,
+      };
+      shards.push(shard);
+      const entry = { shard, glass, colorIdx, touchable: null as unknown as Touchable };
       entry.touchable = {
         id: `kaleidoscope/${String(o.userData.touch_id ?? `shard-${i}`)}`,
         kind: 'shard',
@@ -342,7 +370,7 @@ export function createKaleidoscopeRoom(): RoomModule {
         onTouch: (e) => {
           // 0.1 秒以内に光と動き: 波紋、色が次の色へ、くるりと回る。色は拍に合わせて模様へ広がる
           glass.pulse(e.t, new THREE.Vector3(...e.point));
-          entry.touchAt = e.t;
+          shard.touchAt = e.t;
           entry.colorIdx++;
           const color = PALETTES[door].glass[entry.colorIdx % PALETTES[door].glass.length];
           setShardColor(glass, color);
@@ -398,7 +426,6 @@ export function createKaleidoscopeRoom(): RoomModule {
   }
 
   let shardColorHandles: GlassHandle[] = [];
-  let offDoor: (() => void) | null = null;
 
   function setDoorChoice(d: DoorChoice) {
     if (d === door) return;
@@ -410,7 +437,6 @@ export function createKaleidoscopeRoom(): RoomModule {
     const spin = comfort === 'standard' ? (t - FLOWER_T) * 0.06 : 0;
     // ゴンドラが近づくと花が開く（内側の半径が広がる）
     const open = 1 + 0.16 * smooth(FLOWER_T + 8, FLOWER_T + 18, t);
-    const touched = new Set<THREE.InstancedMesh>();
     for (const sh of shards) {
       const g = gatherAt(t, TIMING, Math.round(sh.seed * 997));
       // 家: 壁ぎわをゆっくり漂い、自分の軸のまわりにゆっくり回る
@@ -427,26 +453,28 @@ export function createKaleidoscopeRoom(): RoomModule {
       // glb の形は Y 上に直してあるので、ガラス片の厚み（Blender の z）は局所の y。花の面に寝かせるには y を軸へ向ける
       const fq = axisRotation(flowerCyl.ang, flowerQ).multiply(tmpQ2.setFromAxisAngle(zAxis, sh.slot.tilt)).multiply(LAY_FLAT);
       tmpQ.slerp(fq, g);
+      // 触れたガラス片は、くるりと一回転する（触れた時刻からの経過で毎フレーム作り直す。積み上げない）
+      const sk = (t - sh.touchAt) / SPIN_SEC;
+      if (sk >= 0 && sk < 1) tmpQ.multiply(tmpQ2.setFromAxisAngle(zAxis, Math.PI * 2 * smooth(0, 1, sk)));
       // 花の中では大きく（花びらの面を埋める）
-      const k = 1 + 1.1 * g;
+      const k = 1 + sh.grow * g;
       if (sh.instance >= 0) {
         const im = sh.mesh as THREE.InstancedMesh;
         if (sh.instance >= im.count) continue;
         tmpM.compose(tmpP, tmpQ, tmpS.set(k, k, k));
         im.setMatrixAt(sh.instance, tmpM);
-        touched.add(im);
       } else {
         sh.mesh.position.copy(tmpP);
         sh.mesh.quaternion.copy(tmpQ);
-        sh.mesh.scale.setScalar(1 + 0.6 * g);
+        sh.mesh.scale.setScalar(k);
       }
     }
-    for (const im of touched) im.instanceMatrix.needsUpdate = true;
+    for (const im of shardMeshes) im.instanceMatrix.needsUpdate = true;
   }
 
   function rewind(t: number) {
     while (echoes.length > 0 && echoes[echoes.length - 1].t > t + 0.25) echoes.pop();
-    for (const ts of touchShards) if (t < ts.touchAt - 0.25) ts.touchAt = -Infinity;
+    for (const sh of shards) if (t < sh.touchAt - 0.25) sh.touchAt = -Infinity;
     if (hidden && t < hidden.foundAt - 0.25) hidden.foundAt = Infinity;
   }
 
@@ -454,12 +482,6 @@ export function createKaleidoscopeRoom(): RoomModule {
     const t = frame.t;
     if (t < lastT - 0.5) rewind(t);
     lastT = t;
-    if (frame.pose.section === 'kaleidoscope') {
-      if (lightingApplied !== door) {
-        setGlassLighting(PALETTES[door].lighting);
-        lightingApplied = door;
-      }
-    } else lightingApplied = null;
     for (const h of handles) h.setTime(t);
     // プリズムはごくゆっくり息をする（明滅ではない）
     uGlow.value = 2.2 * (1 + 0.04 * Math.sin(t * 0.5));
@@ -470,33 +492,21 @@ export function createKaleidoscopeRoom(): RoomModule {
     for (const r of rosettes) {
       const ang = frame.comfort === 'standard' ? (t - sectionT0) * r.speed : 0;
       r.group.quaternion.copy(r.base).multiply(tmpQ.setFromAxisAngle(zAxis, ang));
-      // 触れた色のこだま: 拍ごとに近い輪から順に届き、届いた色は残る
-      let arrival = -Infinity;
-      let color = -1;
-      for (const e of echoes) {
-        const at = e.t + SEC_PER_BEAT * (1 + Math.floor(Math.abs(r.s - e.s) / 12));
-        if (at <= t && at >= arrival) {
-          arrival = at;
-          color = e.color;
-        }
-      }
+      // 触れた色のこだま: 拍の頭に、近い輪から順に届き、届いた色は残る。光は 1 拍に 1 回まで
+      // （光の点滅を抑えるモードでは 2 拍に 1 回まで、弱く。折り返しで画面中に広がるため）
+      echoAt(echoes, r.s, t, echoGrid(SEC_PER_BEAT, frame.reducedFlash), echoState);
       const base = pal[r.index % pal.length];
       const pm = r.petals.material as THREE.MeshStandardMaterial;
       pm.emissive.set(base);
-      if (color >= 0) pm.emissive.lerp(tmpColor.set(color), 0.65);
+      if (echoState.color >= 0) pm.emissive.lerp(tmpColor.set(echoState.color), 0.65);
       pm.color.copy(pm.emissive);
-      const flash = arrival > -Infinity ? Math.exp(-(t - arrival) / 0.45) * (frame.reducedFlash ? 0.35 : 1) : 0;
-      pm.emissiveIntensity = 0.55 + 1.1 * flash;
-      (r.jewels.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.8 + 0.8 * flash;
+      const flash = echoFlash(t, echoState.arrival) * (frame.reducedFlash ? 0.3 : 1);
+      pm.emissiveIntensity = 0.55 + 1.0 * flash;
+      (r.jewels.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.8 + 0.7 * flash;
     }
 
-    // ガラス片（見どころの花）
+    // ガラス片（見どころの花。触れたガラス片の回転も、ここで時刻から作る）
     placeShards(t, frame.comfort);
-    // 触れたガラス片は、くるりと一回転する
-    for (const ts of touchShards) {
-      const k = (t - ts.touchAt) / 0.8;
-      if (k >= 0 && k < 1) ts.shard.mesh.quaternion.multiply(tmpQ.setFromAxisAngle(zAxis, Math.PI * 2 * smooth(0, 1, k)));
-    }
 
     if (hidden) {
       const b = hidden.base;
@@ -526,8 +536,6 @@ export function createKaleidoscopeRoom(): RoomModule {
       setDoorChoice(d);
     },
     dispose() {
-      offDoor?.();
-      offDoor = null;
       for (const h of handles) h.dispose();
       handles.length = 0;
       disposeTree(root, owned);

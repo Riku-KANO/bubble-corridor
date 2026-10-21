@@ -2,8 +2,10 @@
 
     pnpm blender blender/scripts/rooms/rain.py [-- --samples 512 --size 2048 --quick --no-env]
 
-出力: public/assets/rooms/rain.glb・rain.lightmap.png（焼いた光。焼いた後にざらつきを取る）・rain.env.png（中庭から撮った正距円筒の環境画像。
-濡れた床・水面・真鍮の映り込みと、止まった雨粒の簡易な屈折に使う）、blender/scenes/rain.blend。
+出力: public/assets/rooms/rain.glb・rain.lightmap.png（焼いた光。焼いた後にざらつきを取る）、環境画像
+（正距円筒。回廊 rain.env_a.png・中庭 rain.env.png・突き当たり rain.env_c.png。濡れた床・水面・真鍮の映り込みは
+ゴンドラの位置の前後の 2 枚を混ぜ、止まった雨粒の簡易な屈折は中庭の 1 枚）、blender/scenes/rain.blend。
+このスクリプトが原本。.blend は書き出しの記録（人が開いて確かめてよいが、直すならこのスクリプトを直して回し直す）。
 
 絵コンテ（入口で視界が開ける一枚絵）:
   温室の広さから一転して、低いガラスの穹窿（ヴォールト）の回廊がゆるく右へ曲がりながら灰青の霧の奥へ続く。
@@ -55,6 +57,7 @@ if SCRIPTS not in sys.path:
 from common.bake import bake_lightmaps  # noqa: E402
 from common.cli import script_args  # noqa: E402
 from common.coords import blender_to_three, three_to_blender  # noqa: E402
+from common.bake import png_info, write_png_rgb8  # noqa: E402
 from common.export import export_glb, room_load_report  # noqa: E402
 from common.naming import check_names  # noqa: E402
 from common.visibility import cull_hidden  # noqa: E402
@@ -68,6 +71,10 @@ CULL_MARGIN = 30.0
 CLEAR = 1.2 + 0.5
 #: 殻（clearance_exempt）に求める本当の距離（余裕を 0.1m 足す）
 SHELL_CLEAR = CLEAR + 0.1
+#: 物との距離を測るレールの範囲: 区間の前後この m まで（ADR-0013 の 3m）
+CHECK_MARGIN = 3.0
+#: 環境画像を撮る所（ファイル名、区間の頭からの m。負なら区間の終わりから）。ゴンドラの位置の前後の 2 枚を混ぜて使う
+ENV_SHOTS = (('rain.env_a.png', 30.0), ('rain.env.png', None), ('rain.env_c.png', -6.0))
 
 # ── 回廊の寸法（m。Blender の座標、z が上。床は z=0） ──
 HALF_W = 3.4  # ガラスの壁の位置（レールの中心から左右）
@@ -88,9 +95,9 @@ CANOPY_Z0 = 3.70  # 庇の縁の下面
 CANOPY_Z1 = 3.92  # 庇の中央
 # 突き当たり
 END_S_OFFSET = 0.5  # 区間の終わりからの壁の位置（膜はこの手前）
-PORTAL_R = 1.86  # 膜の輪の半径（輪の太さ 0.05 → 内側 1.81m）
-DOOR_U = 2.72  # 扉の中心（左右）
-DOOR_HALF = 0.42  # 扉の半幅
+PORTAL_R = 1.82  # 膜の口の半径（真鍮の輪は 1.87、太さ 0.045 → 内側 1.825m。ゴンドラの表面から 0.5m 以上）
+DOOR_U = 2.4  # 扉の中心（左右）。縦持ちの画面でも扉が端で切れにくいよう、膜の口のすぐ外に寄せる
+DOOR_HALF = 0.36  # 扉の半幅
 DOOR_Z0 = 0.16
 DOOR_Z1 = 3.05
 FACADE_R = 5.3  # 突き当たりの壁（万華鏡の館の六角の正面）の角までの半径。万華鏡の筒（5.0、端の壁 5.1）より大きい
@@ -449,7 +456,7 @@ def wall_cut(rail: Rail, court: Court, side: float, s0: float, s1: float):
 def build(rail: Rail, rng: random.Random) -> dict:
     s0, s1 = rail.sections[ROOM]
     end_s = s1 + END_S_OFFSET
-    start_s = s0 - 0.5
+    start_s = s0 + 1.0  # 入る側の部屋の形は区間の始まりから +1m 以降（ADR-0013。温室の形と重ねない）
     court = Court(rail)
     cutL = wall_cut(rail, court, -1, start_s, end_s)
     cutR = wall_cut(rail, court, 1, start_s, end_s)
@@ -672,7 +679,7 @@ def build(rail: Rail, rng: random.Random) -> dict:
     # court の extras: [中心の x, 中心の z, 長軸の向きの x, z, 長半径, 短半径]（three の座標。TS が雨を降らせる範囲に使う）
     ccx, _, ccz = blender_to_three((court.c[0], court.c[1], 0.0))
     fx3, _, fz3 = blender_to_three((court.f[0], court.f[1], 0.0))
-    face_toward(mesh_object(f'{ROOM}.pool', pool_v, pool_f, 'water', {'role': 'water', 'look': 'pool', 'court': [ccx, ccz, fx3, fz3, COURT_A, COURT_B], 'vault_in': float(vault_in), 'vault_out': float(vault_out)}, smooth=False, uvs=pool_uv), direction=(0, 0, 1))
+    face_toward(mesh_object(f'{ROOM}.pool', pool_v, pool_f, 'water', {'role': 'water', 'look': 'pool', 'court': [ccx, ccz, fx3, fz3, COURT_A, COURT_B], 'vault_in': float(vault_in), 'vault_out': float(vault_out), 'env': [f for f, _ in ENV_SHOTS], 'env_s': [float(rail_s_of(ds, s0, s1)) for _, ds in ENV_SHOTS]}, smooth=False, uvs=pool_uv), direction=(0, 0, 1))
 
     def court_arc(side: float):
         """楕円の、回廊の口より外の弧（|u| ≥ HALF_W）の角度の列"""
@@ -808,8 +815,8 @@ def build(rail: Rail, rng: random.Random) -> dict:
     mesh_object(f'{ROOM}.facade_frame', hexf.v, hexf.f, 'brass', {'look': 'brass', 'clearance_exempt': True, 'shell': True})
     # 膜の輪（真鍮）と膜
     ring = Builder()
-    ring.add(*torus_points(at_end(0, zc, -0.06), re_, (0, 0, 1), PORTAL_R + 0.03, 0.05, 64, 10))
-    ring.add(*torus_points(at_end(0, zc, -0.24), re_, (0, 0, 1), PORTAL_R + 0.04, 0.025, 64, 8))
+    ring.add(*torus_points(at_end(0, zc, -0.06), re_, (0, 0, 1), PORTAL_R + 0.05, 0.045, 64, 10))
+    ring.add(*torus_points(at_end(0, zc, -0.24), re_, (0, 0, 1), PORTAL_R + 0.06, 0.025, 64, 8))
     mesh_object(f'{ROOM}.portal_ring', ring.v, ring.f, 'brass', {'look': 'brass', 'clearance_exempt': True, 'shell': True})
     disc = [at_end(0, zc, -0.6)]
     for i in range(64):
@@ -1021,7 +1028,8 @@ def _wall_with_holes(outline, holes, to_world, thickness: float):
 # ── 物との距離（殻は本当の形で測る） ──────────────────────────────────────
 def check_shell_clearance(rail: Rail, objs) -> dict:
     s0, s1 = rail.sections[ROOM]
-    samples = [Vector(rail.point(s)) for s in np.arange(s0, s1 + 0.01, 0.25)]
+    # 区間の前後 CHECK_MARGIN m まで（隣の区間から見える所、部屋の境目の物も。ADR-0013）
+    samples = [Vector(rail.point(s)) for s in np.arange(max(0.0, s0 - CHECK_MARGIN), s1 + CHECK_MARGIN + 0.01, 0.25)]
     worst = {}
     bad = []
     for o in objs:
@@ -1048,7 +1056,7 @@ def check_shell_clearance(rail: Rail, objs) -> dict:
 def check_box_clearance(rail: Rail, objs) -> list:
     """TS の検査と同じ（軸に沿った箱。three の座標で同じになる）。殻以外の物の違反の一覧"""
     s0, s1 = rail.sections[ROOM]
-    samples = np.array([rail.point(s) for s in np.arange(s0, s1 + 0.01, 0.5)])
+    samples = np.array([rail.point(s) for s in np.arange(max(0.0, s0 - CHECK_MARGIN), s1 + CHECK_MARGIN + 0.01, 0.5)])
     bad = []
     for o in objs:
         if o.get('clearance_exempt') or o.type != 'MESH' or len(o.data.vertices) == 0 or o.location.z < -50:
@@ -1066,15 +1074,26 @@ def check_box_clearance(rail: Rail, objs) -> list:
     return bad
 
 
-# ── 環境画像（反射と雨粒の屈折に使う。中庭の中心から撮る） ───────────────────
-def render_env(rail: Rail, path: str, size=(1024, 512), samples=48):
+def rail_s_of(ds, s0: float, s1: float) -> float:
+    """ENV_SHOTS の位置 → レールの s（None は中庭の中心、負は区間の終わりから）"""
+    if ds is None:
+        return COURT_S
+    return s1 + ds if ds < 0 else s0 + ds
+
+
+#: 環境画像の中の街の霞（TS の街の材質は距離で灰青に溶ける。撮る画像も同じ霞で、黒い板と鋭い窓を映さない）
+ENV_CITY_HAZE = (0.06, 0.076, 0.096)
+
+
+# ── 環境画像（床・水面・真鍮の映り込みと、雨粒の屈折に使う。回廊・中庭・突き当たりの 3 か所から撮る） ─────────────
+def render_env(rail: Rail, path: str, s_at: float, size=(1024, 512), samples=48):
     sc = bpy.context.scene
     cam = bpy.data.cameras.new(f'{ROOM}.envcam')
     cam.type = 'PANO'
     cam.panorama_type = 'EQUIRECTANGULAR'
     co = bpy.data.objects.new(f'{ROOM}.envcam', cam)
     sc.collection.objects.link(co)
-    c = rail.point(COURT_S)
+    c = rail.point(s_at)
     co.location = (float(c[0]), float(c[1]), float(c[2]) + 0.15)
     co.rotation_euler = (math.pi / 2, 0.0, 0.0)  # 前 = +Y（Blender）。u = 0.5 + atan2(x, y)/2π、上が画像の上
     sc.camera = co
@@ -1084,6 +1103,25 @@ def render_env(rail: Rail, path: str, size=(1024, 512), samples=48):
             if not o.hide_render:
                 o.hide_render = True
                 hidden.append(o)
+    # 街は霞の色で光る板に、窓は弱く（あとで画像を少しぼかしてにじませる）
+    haze = bpy.data.materials.new(f'{ROOM}.cityhaze.env')
+    haze.use_nodes = True
+    hp = haze.node_tree.nodes.get('Principled BSDF')
+    hp.inputs['Base Color'].default_value = (0.0, 0.0, 0.0, 1.0)
+    hp.inputs['Emission Color'].default_value = (*ENV_CITY_HAZE, 1.0)
+    hp.inputs['Emission Strength'].default_value = 1.0
+    swapped = {}
+    for o in OBJECTS:
+        if o.get('look') == 'city':
+            swapped[o.name] = list(o.data.materials)
+            o.data.materials.clear()
+            o.data.materials.append(haze)
+    city_light = MATS.bake.get('citylight')
+    keep_emit = None
+    if city_light is not None:
+        node = city_light.node_tree.nodes.get('Principled BSDF')
+        keep_emit = node.inputs['Emission Strength'].default_value
+        node.inputs['Emission Strength'].default_value = keep_emit * 0.45
     keep = (sc.render.engine, sc.render.resolution_x, sc.render.resolution_y, sc.render.filepath)
     sc.render.engine = 'CYCLES'
     sc.cycles.samples = samples
@@ -1100,9 +1138,41 @@ def render_env(rail: Rail, path: str, size=(1024, 512), samples=48):
     bpy.ops.render.render(write_still=True)
     for o in hidden:
         o.hide_render = False
+    for o in OBJECTS:
+        if o.name in swapped:
+            o.data.materials.clear()
+            for m in swapped[o.name]:
+                o.data.materials.append(m)
+    if city_light is not None and keep_emit is not None:
+        city_light.node_tree.nodes.get('Principled BSDF').inputs['Emission Strength'].default_value = keep_emit
+    bpy.data.materials.remove(haze)
     sc.render.engine, sc.render.resolution_x, sc.render.resolution_y, sc.render.filepath = keep
     bpy.data.objects.remove(co)
+    soften_env(path, sigma=1.4)
     return round(time.time() - t0, 1)
+
+
+def soften_env(path: str, sigma: float) -> None:
+    """環境画像を少しぼかす（雨の空気のにじみ。濡れた床の映り込みに鋭い窓が並ばない）。左右は回り込み、上下は端で止める"""
+    img = bpy.data.images.load(path, check_existing=False)
+    img.colorspace_settings.name = 'Non-Color'
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    enc = px.reshape(h, w, 4)[::-1, :, :3]
+    lin = srgb_decode(enc)
+    r = max(1, int(math.ceil(sigma * 2.5)))
+    k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2).astype(np.float32)
+    k /= k.sum()
+    out = np.zeros_like(lin)
+    for i, kv in enumerate(k):
+        out += kv * np.roll(lin, i - r, axis=1)  # 正距円筒の左右はつながっている
+    pad = np.pad(out, ((r, r), (0, 0), (0, 0)), mode='edge')
+    res = np.zeros_like(out)
+    for i, kv in enumerate(k):
+        res += kv * pad[i:i + h]
+    write_png_rgb8(path, (np.rint(srgb_encode(res) * 255.0)).astype(np.uint8))
 
 
 def setup_world(strength: float = 1.0):
@@ -1135,6 +1205,17 @@ def setup_world(strength: float = 1.0):
 
 
 
+def srgb_encode(lin: np.ndarray) -> np.ndarray:
+    """線形 → sRGB の符号（0〜1）。common の非公開の関数に頼らず、ここに持つ"""
+    lin = np.clip(lin, 0.0, 1.0)
+    return np.where(lin <= 0.0031308, lin * 12.92, 1.055 * np.power(lin, 1.0 / 2.4) - 0.055)
+
+
+def srgb_decode(enc: np.ndarray) -> np.ndarray:
+    """sRGB の符号 → 線形"""
+    return np.where(enc <= 0.04045, enc / 12.92, ((enc + 0.055) / 1.055) ** 2.4).astype(np.float32)
+
+
 # ── ライトマップのざらつきを取る（焼いた後の後処理） ─────────────────────────────
 def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     """焼いたライトマップの細かなモンテカルロのざらつき（小さな灯りの光の粒）を取る。
@@ -1142,7 +1223,6 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     線形に直して、3×3 の中央値（1 テクセルの突起を消す）→ 島の中だけのガウスのぼかし（島の外の黒を混ぜない）をかけ、
     8bit の sRGB に戻して同じ場所に書く。σ は約 1 テクセル（2048px の部屋で数 cm。光と影の形はほぼ変わらない）。
     """
-    from common.bake import _srgb_encode, png_info, write_png_rgb8
 
     img = bpy.data.images.load(path, check_existing=False)
     img.colorspace_settings.name = 'Non-Color'  # 画素の値をそのまま（sRGB の符号のまま）読む
@@ -1151,7 +1231,7 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     img.pixels.foreach_get(px)
     bpy.data.images.remove(img)
     enc = px.reshape(h, w, 4)[::-1, :, :3]
-    lin = np.where(enc <= 0.04045, enc / 12.92, ((enc + 0.055) / 1.055) ** 2.4).astype(np.float32)
+    lin = srgb_decode(enc)
     mask = (enc.max(axis=2) > 0.5 / 255).astype(np.float32)
 
     def shifted(a, dy, dx):
@@ -1171,12 +1251,18 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     k /= k.sum()
 
     def blur(a):
+        # 端は回り込ませない（アトラスの上下・左右の端の島に、反対側の端を混ぜない）
+        h_, w_ = a.shape[0], a.shape[1]
+        widths = ((r, r), (0, 0)) + ((0, 0),) * (a.ndim - 2)
+        pad = np.pad(a, widths, mode='constant')
         out = np.zeros_like(a)
         for i, kv in enumerate(k):
-            out += kv * np.roll(a, i - r, axis=0)
-        a2 = np.zeros_like(out)
+            out += kv * pad[i:i + h_]
+        widths = ((0, 0), (r, r)) + ((0, 0),) * (a.ndim - 2)
+        pad = np.pad(out, widths, mode='constant')
+        a2 = np.zeros_like(a)
         for i, kv in enumerate(k):
-            a2 += kv * np.roll(out, i - r, axis=1)
+            a2 += kv * pad[:, i:i + w_]
         return a2
 
     num = blur(med * mask[..., None])
@@ -1184,7 +1270,7 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     sm = np.where(den > 1e-4, num / np.maximum(den, 1e-4), med)
     sm = np.where(mask[..., None] > 0, sm, 0.0)
     grain = float(np.abs(lin - sm).mean())
-    rgb = (np.rint(_srgb_encode(sm) * 255.0)).astype(np.uint8)
+    rgb = (np.rint(srgb_encode(sm) * 255.0)).astype(np.uint8)
     write_png_rgb8(path, rgb)
     info = png_info(path)
     if info['depth'] != 8 or info['color_type'] != 2:
@@ -1277,7 +1363,10 @@ def main() -> None:
 
     env_sec = None
     if not args.no_env:
-        env_sec = render_env(rail, os.path.join(args.out_dir, f'{ROOM}.env.png'), size=(512, 256) if args.quick else (1024, 512), samples=8 if args.quick else 48)
+        env_sec = 0.0
+        for fname, ds in ENV_SHOTS:
+            env_sec += render_env(rail, os.path.join(args.out_dir, fname), rail_s_of(ds, s0, s1), size=(512, 256) if args.quick else (1024, 512), samples=8 if args.quick else 48)
+        env_sec = round(env_sec, 1)
 
     # 書き出し（材質は glTF の基本だけの物に替える）。元の型（z=-100）も書き出す（TS がインスタンスの形に使う）
     MATS.use('export', objs)

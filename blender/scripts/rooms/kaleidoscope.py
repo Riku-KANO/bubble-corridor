@@ -4,6 +4,7 @@
 
 出力: public/assets/rooms/kaleidoscope.glb・kaleidoscope.lightmap.png・kaleidoscope.env.png（筒の中から撮った本物の多重の鏡の
 環境画像。TS が金・青の色を掛けて鏡の板と真鍮に映す）、blender/scenes/kaleidoscope.blend。
+このスクリプトが原本。.blend は書き出しの記録（直すならこのスクリプトを直して回し直す）。
 
 絵コンテ（入口で視界が開ける一枚絵）:
   雨の回廊の円い膜を抜けると、六角の長い筒（巨大な万華鏡の胴）がまっすぐ奥の光の点へ伸びる。
@@ -49,6 +50,7 @@ if SCRIPTS not in sys.path:
 from common.bake import bake_lightmaps  # noqa: E402
 from common.cli import script_args  # noqa: E402
 from common.coords import three_to_blender  # noqa: E402
+from common.bake import png_info, write_png_rgb8  # noqa: E402
 from common.export import export_glb, room_load_report  # noqa: E402
 from common.naming import check_names  # noqa: E402
 from common.visibility import cull_hidden  # noqa: E402
@@ -59,6 +61,8 @@ ROOM = 'kaleidoscope'
 CULL_MARGIN = 30.0
 CLEAR = 1.2 + 0.5
 SHELL_CLEAR = CLEAR + 0.1
+#: 物との距離を測るレールの範囲: 区間の前後この m まで（ADR-0013 の 3m）
+CHECK_MARGIN = 3.0
 
 # ── 筒の寸法（m） ──
 HEX_R = 5.0  # 六角の角までの半径（内接は 4.33）
@@ -436,7 +440,9 @@ def frame_matrix(origin, x_axis, y_axis, z_axis, scale: float = 1.0) -> Matrix:
 # ── 造形 ──────────────────────────────────────────────────────────────
 def build(rail: Rail, rng: random.Random) -> dict:
     s0, s1 = rail.sections[ROOM]
-    a_s = s0 + 1.2  # 入口の壁の表（雨の回廊の突き当たりの壁は s0+0.5〜s0+0.85。その奥の扉の光の板と重ならないよう離す）
+    # 入口の壁の表。厚みは手前（雨の側）へ 0.25m なので、壁は s0+1.05〜s0+1.3（入る側の形は s0+1m 以降。ADR-0013。
+    # 雨の回廊の突き当たりの壁は s0+0.5〜s0+0.85、扉の奥の光の板は s0+0.83 で、重ならない）
+    a_s = s0 + 1.3
     b_s = s1 + 0.55  # 出口の壁
     c0, F, R = rail.frame((s0 + s1) / 2)
     UP = np.array([0.0, 0.0, 1.0])
@@ -636,7 +642,8 @@ def build(rail: Rail, rng: random.Random) -> dict:
 # ── 検査 ──────────────────────────────────────────────────────────────
 def check_shell_clearance(rail: Rail, objs) -> dict:
     s0, s1 = rail.sections[ROOM]
-    samples = [Vector(rail.point(s)) for s in np.arange(s0, s1 + 0.01, 0.25)]
+    # 区間の前後 CHECK_MARGIN m まで（隣の区間から見える所、部屋の境目の物も。ADR-0013）
+    samples = [Vector(rail.point(s)) for s in np.arange(max(0.0, s0 - CHECK_MARGIN), s1 + CHECK_MARGIN + 0.01, 0.25)]
     worst = {}
     bad = []
     for o in objs:
@@ -656,7 +663,7 @@ def check_shell_clearance(rail: Rail, objs) -> dict:
 
 def check_box_clearance(rail: Rail, objs) -> list:
     s0, s1 = rail.sections[ROOM]
-    samples = np.array([rail.point(s) for s in np.arange(s0, s1 + 0.01, 0.5)])
+    samples = np.array([rail.point(s) for s in np.arange(max(0.0, s0 - CHECK_MARGIN), s1 + CHECK_MARGIN + 0.01, 0.5)])
     bad = []
     for o in objs:
         if o.get('clearance_exempt') or o.type != 'MESH' or len(o.data.vertices) == 0:
@@ -747,6 +754,17 @@ def _glb_extensions(path: str) -> list:
 
 
 
+def srgb_encode(lin: np.ndarray) -> np.ndarray:
+    """線形 → sRGB の符号（0〜1）。common の非公開の関数に頼らず、ここに持つ"""
+    lin = np.clip(lin, 0.0, 1.0)
+    return np.where(lin <= 0.0031308, lin * 12.92, 1.055 * np.power(lin, 1.0 / 2.4) - 0.055)
+
+
+def srgb_decode(enc: np.ndarray) -> np.ndarray:
+    """sRGB の符号 → 線形"""
+    return np.where(enc <= 0.04045, enc / 12.92, ((enc + 0.055) / 1.055) ** 2.4).astype(np.float32)
+
+
 # ── ライトマップのざらつきを取る（焼いた後の後処理） ─────────────────────────────
 def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     """焼いたライトマップの細かなモンテカルロのざらつき（小さな灯りの光の粒）を取る。
@@ -754,7 +772,6 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     線形に直して、3×3 の中央値（1 テクセルの突起を消す）→ 島の中だけのガウスのぼかし（島の外の黒を混ぜない）をかけ、
     8bit の sRGB に戻して同じ場所に書く。σ は約 1 テクセル（2048px の部屋で数 cm。光と影の形はほぼ変わらない）。
     """
-    from common.bake import _srgb_encode, png_info, write_png_rgb8
 
     img = bpy.data.images.load(path, check_existing=False)
     img.colorspace_settings.name = 'Non-Color'  # 画素の値をそのまま（sRGB の符号のまま）読む
@@ -763,7 +780,7 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     img.pixels.foreach_get(px)
     bpy.data.images.remove(img)
     enc = px.reshape(h, w, 4)[::-1, :, :3]
-    lin = np.where(enc <= 0.04045, enc / 12.92, ((enc + 0.055) / 1.055) ** 2.4).astype(np.float32)
+    lin = srgb_decode(enc)
     mask = (enc.max(axis=2) > 0.5 / 255).astype(np.float32)
 
     def shifted(a, dy, dx):
@@ -783,12 +800,18 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     k /= k.sum()
 
     def blur(a):
+        # 端は回り込ませない（アトラスの上下・左右の端の島に、反対側の端を混ぜない）
+        h_, w_ = a.shape[0], a.shape[1]
+        widths = ((r, r), (0, 0)) + ((0, 0),) * (a.ndim - 2)
+        pad = np.pad(a, widths, mode='constant')
         out = np.zeros_like(a)
         for i, kv in enumerate(k):
-            out += kv * np.roll(a, i - r, axis=0)
-        a2 = np.zeros_like(out)
+            out += kv * pad[i:i + h_]
+        widths = ((0, 0), (r, r)) + ((0, 0),) * (a.ndim - 2)
+        pad = np.pad(out, widths, mode='constant')
+        a2 = np.zeros_like(a)
         for i, kv in enumerate(k):
-            a2 += kv * np.roll(out, i - r, axis=1)
+            a2 += kv * pad[:, i:i + w_]
         return a2
 
     num = blur(med * mask[..., None])
@@ -796,7 +819,7 @@ def smooth_lightmap(path: str, sigma: float = 1.1) -> dict:
     sm = np.where(den > 1e-4, num / np.maximum(den, 1e-4), med)
     sm = np.where(mask[..., None] > 0, sm, 0.0)
     grain = float(np.abs(lin - sm).mean())
-    rgb = (np.rint(_srgb_encode(sm) * 255.0)).astype(np.uint8)
+    rgb = (np.rint(srgb_encode(sm) * 255.0)).astype(np.uint8)
     write_png_rgb8(path, rgb)
     info = png_info(path)
     if info['depth'] != 8 or info['color_type'] != 2:

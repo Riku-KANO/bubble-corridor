@@ -133,8 +133,9 @@ export function planRain(ride: Ride, spec: RainPlanSpec): RainPlan {
     floorY.push(f);
   };
 
-  // 中庭: 楕円の中（縁の壁から少し内側）、庇の下と柱のまわりを除く。55% はレールの左右 2.15〜4.2m に集める
-  const nCourt = Math.round(COURT_DROPS * spec.scale);
+  // 中庭: 楕円の中（縁の壁から少し内側）、庇の下と柱のまわりを除く。55% はレールの左右 2.15〜4.2m に集める。
+  // 品質を下げるときは外の雨から先に減らし、見どころの中庭の雨を残す
+  const nCourt = Math.round(COURT_DROPS * courtScale(spec.scale));
   for (let tries = 0, n = 0; n < nCourt && tries < nCourt * 20; tries++) {
     let x: number;
     let z: number;
@@ -165,7 +166,7 @@ export function planRain(ride: Ride, spec: RainPlanSpec): RainPlan {
     n++;
   }
   // 庇の上: 庇（レールの真上）に落ちて消える雨。止まると、ゴンドラの頭上のガラス越しに浮かぶ
-  const nCanopy = Math.round(CANOPY_DROPS * spec.scale);
+  const nCanopy = Math.round(CANOPY_DROPS * courtScale(spec.scale));
   for (let tries = 0, n = 0; n < nCanopy && tries < nCanopy * 20; tries++) {
     const s = spec.vaultIn + 0.6 + rnd() * (spec.vaultOut - spec.vaultIn - 1.2);
     const p = ride.pointAt(s);
@@ -177,7 +178,7 @@ export function planRain(ride: Ride, spec: RainPlanSpec): RainPlan {
     n++;
   }
   // 回廊の外: 壁の向こう（壁ぎわを濃く）。中庭の楕円の中は中庭の雨が受け持つ
-  const nOut = Math.round(OUTSIDE_DROPS * spec.scale);
+  const nOut = Math.round(OUTSIDE_DROPS * outsideScale(spec.scale));
   for (let tries = 0, n = 0; n < nOut && tries < nOut * 20; tries++) {
     const s = spec.s0 + 1 + rnd() * (spec.s1 - spec.s0 - 0.5);
     const p = ride.pointAt(s);
@@ -213,6 +214,18 @@ export function planRain(ride: Ride, spec: RainPlanSpec): RainPlan {
     touch.push({ x, y, z, tf, r: 0.042 + rnd() * 0.01 });
   }
   return { rest: Float32Array.from(rest), freeze: Float32Array.from(freeze), radius: Float32Array.from(radius), floor: Float32Array.from(floorY), count: freeze.length, touch };
+}
+
+/** 品質の粒の倍率（0〜1）→ 中庭の雨の倍率。見どころなので減らし方を緩く（low の 0.4 で 7 割） */
+export function courtScale(particleScale: number): number {
+  const k = Math.min(1, Math.max(0, particleScale));
+  return 0.5 + 0.5 * k;
+}
+
+/** 品質の粒の倍率 → 回廊の外の雨の倍率。先に減らす（low の 0.4 で 1.6 割） */
+export function outsideScale(particleScale: number): number {
+  const k = Math.min(1, Math.max(0, particleScale));
+  return k * k;
 }
 
 /** 流れの時刻: 雨が止まると、ゆっくり（d 秒で）止まる。ガラスを伝う水と波紋はこの時刻で動く */

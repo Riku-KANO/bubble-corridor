@@ -46,14 +46,61 @@ const floatUniform = (v = 0) => uniform(v);
 export type FloatUniform = ReturnType<typeof floatUniform>;
 export { floatUniform };
 
-/** 部屋の時刻（乗車の秒）と、流れの時刻（雨が止まると止まる） */
+/** 部屋の時刻（乗車の秒）と、流れの時刻（雨が止まると止まる）、触れた光の強さの倍率（光の点滅を抑えるモードで下げる） */
 export interface RainClock {
   readonly uTime: FloatUniform;
   readonly uFlow: FloatUniform;
+  readonly uFlash: FloatUniform;
 }
 
 export function createRainClock(): RainClock {
-  return { uTime: floatUniform(0), uFlow: floatUniform(0) };
+  return { uTime: floatUniform(0), uFlow: floatUniform(0), uFlash: floatUniform(1) };
+}
+
+// ── 環境画像（Blender で撮った正距円筒のパノラマ） ─────────────────────────────
+
+type TextureNode = THREE.TextureNode;
+
+/**
+ * 場所で 2 枚を混ぜる環境画像。雨の回廊は回廊・中庭・突き当たりの 3 か所から撮り、ゴンドラの位置（s）の前後の 2 枚を混ぜる
+ * （1 か所から撮った画像を全体で使うと、床の映り込みの灯りや街が場所と合わない）。基の TextureNode の値を差し替えると、
+ * sample() で作った読み出しにも効く（three の TextureNode は複製が基の値を読む）。
+ */
+export interface EnvBlend {
+  readonly a: TextureNode;
+  readonly b: TextureNode;
+  readonly mix: FloatUniform;
+}
+
+export type EnvSource = THREE.Texture | EnvBlend;
+
+export function createEnvBlend(first: THREE.Texture, second: THREE.Texture = first): EnvBlend {
+  return { a: texture(first), b: texture(second), mix: floatUniform(0) };
+}
+
+/** 撮った場所（s の昇順）と位置 s から、混ぜる 2 枚の番号と割合。両端の外は端の 1 枚 */
+export function envPair(stations: readonly number[], s: number, out: { i: number; j: number; w: number }): { i: number; j: number; w: number } {
+  const n = stations.length;
+  if (n === 0) return Object.assign(out, { i: 0, j: 0, w: 0 });
+  if (!(s > stations[0])) return Object.assign(out, { i: 0, j: Math.min(1, n - 1), w: 0 });
+  for (let k = 0; k < n - 1; k++) {
+    if (s <= stations[k + 1]) {
+      const w = (s - stations[k]) / Math.max(1e-6, stations[k + 1] - stations[k]);
+      return Object.assign(out, { i: k, j: k + 1, w: Math.min(1, Math.max(0, w)) });
+    }
+  }
+  return Object.assign(out, { i: Math.max(0, n - 2), j: n - 1, w: 1 });
+}
+
+function isTexture(env: EnvSource): env is THREE.Texture {
+  return (env as THREE.Texture).isTexture === true;
+}
+
+/** 向き dir の環境画像の色（線形） */
+export function envRead(env: EnvSource, dir: V3): V3 {
+  const uvN = envUv(dir);
+  if (isTexture(env)) return texture(env, uvN).rgb;
+  return mix(env.a.sample(uvN).rgb, env.b.sample(uvN).rgb, env.mix);
 }
 
 /**
@@ -80,7 +127,7 @@ function fresnel(n: V3, i: V3, f0 = 0.02): F {
  * 焼き込んだ濡れた石の床: 回廊に沿った石の目地（UV は m 単位）、石ごとのわずかな色のむら、水たまりの映り込み。
  * 拡散の光はライトマップ（材質の lightMap）、映り込みは環境画像を emissive で足す。
  */
-export function decorateWetFloor(m: THREE.MeshStandardNodeMaterial, env: THREE.Texture, opts: { tile: number; wet: number }): void {
+export function decorateWetFloor(m: THREE.MeshStandardNodeMaterial, env: EnvSource, opts: { tile: number; wet: number }): void {
   const p = uv().div(opts.tile);
   const row = floor(p.y);
   const q = vec2(p.x.add(row.mul(0.5)), p.y); // 1列ごとに半分ずらす
@@ -96,12 +143,12 @@ export function decorateWetFloor(m: THREE.MeshStandardNodeMaterial, env: THREE.T
   m.roughnessNode = mix(float(0.38), float(0.08), puddle);
   const i = viewDir();
   const r = reflect(i, normalWorld);
-  const refl = texture(env, envUv(r)).rgb;
+  const refl = envRead(env, r);
   m.emissiveNode = refl.mul(fresnel(normalWorld, i, 0.03)).mul(mix(float(opts.wet * 0.45), float(opts.wet), puddle));
 }
 
 /** 水面（水路は回廊に沿って流れ、中庭の池は雨の波紋）。映り込みは環境画像。雨が止まると波紋も止まる */
-export function waterMaterial(env: THREE.Texture, clock: RainClock, kind: 'channel' | 'pool'): THREE.MeshBasicNodeMaterial {
+export function waterMaterial(env: EnvSource, clock: RainClock, kind: 'channel' | 'pool'): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial();
   const p = uv();
   let slope: V2;
@@ -128,7 +175,7 @@ export function waterMaterial(env: THREE.Texture, clock: RainClock, kind: 'chann
   const n = normalize(vec3(slope.x, 1, slope.y));
   const i = viewDir();
   const r = reflect(i, n);
-  const refl = texture(env, envUv(r)).rgb;
+  const refl = envRead(env, r);
   const deep = vec3(0.012, 0.016, 0.02);
   m.colorNode = deep.add(refl.mul(fresnel(n, i, 0.02).mul(0.95).add(0.04)));
   return m;
@@ -171,11 +218,18 @@ export function waterFilmMaterial(clock: RainClock, kind: 'wall' | 'roof', stren
   return m;
 }
 
-/** 焼き込まない暗い遠景（建物の影）。霧に溶ける */
-export function cityMaterial(): THREE.MeshBasicNodeMaterial {
+/**
+ * 焼き込まない遠景（雨の街の建物）。雨の霞で、遠いほど灰青に溶ける（15〜30m で約 4〜7 割。黒い板にしない）。
+ * 霞の色は部屋の空気の色（haze）。場面の霧（遠くで効く）とは別に、近い距離から効かせる。
+ */
+export function cityMaterial(haze: THREE.ColorRepresentation): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ color: 0x1e252e });
+  const h = new THREE.Color(haze);
   // 下ほど暗く（雨の街の足もと）
-  m.colorNode = vec3(0.012, 0.016, 0.022).add(vec3(0.02, 0.025, 0.032).mul(smoothstep(0, 18, positionWorld.y)));
+  const body = vec3(0.012, 0.016, 0.022).add(vec3(0.02, 0.025, 0.032).mul(smoothstep(0, 18, positionWorld.y)));
+  const dist = length(positionWorld.sub(cameraPosition));
+  const k = float(1).sub(exp(max(dist.sub(4), 0).mul(-1 / 22)));
+  m.colorNode = mix(body, vec3(h.r, h.g, h.b), k.mul(0.92));
   return m;
 }
 
@@ -186,7 +240,7 @@ export function cityLightsMaterial(intensity: number): THREE.MeshBasicNodeMateri
   const d = length(uv().sub(0.5)).mul(2);
   const disc = pow(smoothstep(1, 0, d), 1.6).add(smoothstep(1, 0.75, d).mul(0.15));
   const dist = length(positionWorld.sub(cameraPosition));
-  const haze = exp(dist.mul(-1 / 55));
+  const haze = exp(dist.mul(-1 / 42));
   m.colorNode = vertexColor().rgb.mul(disc).mul(haze).mul(intensity);
   return m;
 }
@@ -271,29 +325,48 @@ export function rainStreakMaterial(attr: RainAttributes, clock: RainClock, spec:
   return m;
 }
 
+/** 触れた雨粒の記録（インスタンスごと）: x = 触れた時刻、y = 弾ける時刻、z = 縁の光（0〜1）。触れていなければ大きな値 */
+export const NOT_TOUCHED = 1e9;
+
 /**
  * 止まった雨粒（ガラス玉）の材質を core のガラスに重ねる: 止まる時刻に現れ（scale）、中に環境画像を逆さに映す（球のレンズの簡易な屈折）。
- * instanced: InstancedMesh の雨粒（止まる時刻は属性）。個別の雨粒（触れられる物）は scaleNode を省き、CPU で大きさを動かす。
+ * 触れられる雨粒も同じインスタンスの中にあり（材質と描画は 1 つ。読み込みの時に組まれる）、touch の属性で
+ * 縁の光・触れた光・ふくらんで弾ける動きを出す（core のガラスの縁の光・波紋は材質の単位なので、インスタンスごとにはここで作る）。
  */
-export function decorateDropGlass(material: THREE.Material, env: THREE.Texture, opts: { attr?: RainAttributes; clock?: RainClock; strength: number }): void {
+export function decorateDropGlass(
+  material: THREE.Material,
+  env: EnvSource,
+  opts: { attr: RainAttributes; clock: RainClock; touch: THREE.InstancedBufferAttribute; strength: number },
+): void {
   const m = material as THREE.MeshStandardNodeMaterial;
-  if (opts.attr && opts.clock) {
-    const d = instancedBufferAttribute<'vec4'>(opts.attr.drop, 'vec4');
-    const tf = instancedBufferAttribute<'float'>(opts.attr.freeze, 'float');
-    const grow = smoothstep(tf.sub(0.06), tf.add(0.28), opts.clock.uTime);
-    // 一瞬だけ少し大きくなってから落ち着く（雨粒がガラス玉に「変わる」）
-    const pop = float(1).add(sin(smoothstep(tf, tf.add(0.5), opts.clock.uTime).mul(Math.PI)).mul(0.18));
-    m.positionNode = d.xyz.add(positionLocal.sub(d.xyz).mul(grow.mul(pop)));
-  }
+  const clock = opts.clock;
+  const t = clock.uTime;
+  const d = instancedBufferAttribute<'vec4'>(opts.attr.drop, 'vec4');
+  const tf = instancedBufferAttribute<'float'>(opts.attr.freeze, 'float');
+  const touch = instancedBufferAttribute<'vec4'>(opts.touch, 'vec4');
+  const grow = smoothstep(tf.sub(0.06), tf.add(0.28), t);
+  // 一瞬だけ少し大きくなってから落ち着く（雨粒がガラス玉に「変わる」）
+  const pop = float(1).add(sin(smoothstep(tf, tf.add(0.5), t).mul(Math.PI)).mul(0.18));
+  // 触れた: ひと回りふくらみ（触れてから弾けるまで）、弾けると一瞬広がって消える
+  const touched = step(touch.x, t);
+  const burst = step(touch.y, t);
+  const k = t.sub(touch.y).div(0.16);
+  const burstScale = float(1.3).add(k.mul(0.7)).mul(float(1).sub(step(1, k)));
+  const scale = mix(mix(grow.mul(pop), float(1.3), touched), burstScale, burst);
+  m.positionNode = d.xyz.add(positionLocal.sub(d.xyz).mul(scale));
   // 球のレンズ: 視線に垂直な法線の成分の分だけ逆へ曲げる（縁ほど強く曲がり、像は上下左右が逆になる）
   const i = viewDir();
   const n = normalWorld;
   const perp = n.sub(i.mul(dot(n, i)));
   const out = normalize(i.sub(perp.mul(1.15)));
-  const img = texture(env, envUv(out)).rgb;
+  const img = envRead(env, out);
   const centerW = dot(n, i.negate()).clamp(0, 1);
   const prev = m.emissiveNode as V3 | null;
-  const add = img.mul(smoothstep(0.05, 0.6, centerW)).mul(opts.strength);
+  // 縁の光（近づくと）と、触れた瞬間の光（0.1 秒以内に灯り、0.3 秒ほどで引く）
+  const rim = pow(float(1).sub(centerW), 3);
+  const highlight = vec3(0.92, 0.97, 1.0).mul(touch.z).mul(rim.mul(1.1).add(0.06));
+  const flash = exp(max(t.sub(touch.x), 0).div(-0.3)).mul(touched).mul(clock.uFlash).mul(0.9);
+  const add = img.mul(smoothstep(0.05, 0.6, centerW)).mul(opts.strength).add(highlight).add(vec3(1.0, 0.98, 0.94).mul(flash));
   m.emissiveNode = prev ? prev.add(add) : add;
   // 中心ほど向こうを隠す（屈折した像が向こうの景色の代わりになる）
   const prevA = m.opacityNode as F | null;
@@ -301,15 +374,15 @@ export function decorateDropGlass(material: THREE.Material, env: THREE.Texture, 
   m.opacityNode = prevA ? max(prevA, a) : a;
 }
 
-/** 触れた雨粒が残す虹色の輪（足し算の光。ガラスではない）。uFade は 0〜1 */
-export function rainbowRingMaterial(uFade: FloatUniform): THREE.MeshBasicNodeMaterial {
+/** 触れた雨粒が残す虹色の輪（足し算の光。ガラスではない）。インスタンスごとの薄れ具合 fade（0〜1） */
+export function rainbowRingMaterial(fade: THREE.InstancedBufferAttribute): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
   m.fog = false;
   // 輪の角度で色相を回す（TorusGeometry の局所座標）
   const a = atan(positionGeometry.y, positionGeometry.x);
   const hue = vec3(0, 0.33, 0.67).add(a.mul(1 / (2 * Math.PI)));
   const rainbow = vec3(0.5).add(vec3(0.5).mul(cos(hue.mul(Math.PI * 2))));
-  m.colorNode = mix(vec3(0.85), rainbow, 0.85).mul(uFade).mul(2.2);
+  m.colorNode = mix(vec3(0.85), rainbow, 0.85).mul(instancedBufferAttribute<'float'>(fade, 'float')).mul(2.2);
   return m;
 }
 
@@ -317,22 +390,22 @@ export function rainbowRingMaterial(uFade: FloatUniform): THREE.MeshBasicNodeMat
  * 金属（core の createBrass）に環境画像の映り込みを足す。金属は映り込みで見える物なので、環境画像を使わない場面では
  * 黒く沈む（core の擬似反射は控えめ）。tint は映り込みの色を部屋の光に寄せる倍率（例: 金の万華鏡）。
  */
-export function decorateMetal(material: THREE.Material, env: THREE.Texture, opts: { strength: number; tint?: THREE.Node<'vec3'> | THREE.Node<'color'> }): void {
+export function decorateMetal(material: THREE.Material, env: EnvSource, opts: { strength: number; tint?: THREE.Node<'vec3'> | THREE.Node<'color'> }): void {
   const m = material as THREE.MeshStandardNodeMaterial;
   const i = viewDir();
   const r = reflect(i, normalWorld);
-  let add: V3 = texture(env, envUv(r)).rgb.mul(materialColor.rgb).mul(opts.strength);
+  let add: V3 = envRead(env, r).mul(materialColor.rgb).mul(opts.strength);
   if (opts.tint) add = add.mul(vec3(opts.tint as THREE.Node<'vec3'>));
   const prev = m.emissiveNode as V3 | null;
   m.emissiveNode = prev ? prev.add(add) : add;
 }
 
 /** 環境画像の映り込み（鏡・磨いた板）。焼き込んだ拡散の光に足す。縁ほど強く（フレネル）、tint で部屋の光の色に寄せる */
-export function decorateMirror(material: THREE.Material, env: THREE.Texture, opts: { strength: number; f0: number; tint?: THREE.Node<'vec3'> | THREE.Node<'color'> }): void {
+export function decorateMirror(material: THREE.Material, env: EnvSource, opts: { strength: number; f0: number; tint?: THREE.Node<'vec3'> | THREE.Node<'color'> }): void {
   const m = material as THREE.MeshStandardNodeMaterial;
   const i = viewDir();
   const r = reflect(i, normalWorld);
-  let add: V3 = texture(env, envUv(r)).rgb.mul(fresnel(normalWorld, i, opts.f0)).mul(opts.strength);
+  let add: V3 = envRead(env, r).mul(fresnel(normalWorld, i, opts.f0)).mul(opts.strength);
   if (opts.tint) add = add.mul(vec3(opts.tint as THREE.Node<'vec3'>));
   const prev = m.emissiveNode as V3 | null;
   m.emissiveNode = prev ? prev.add(add) : add;

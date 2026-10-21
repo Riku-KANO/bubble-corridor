@@ -2,12 +2,19 @@
 //   ・5:50（DOORS）に床から立ち上がる。立ち上がってから触れられる
 //   ・触れた／見つめた扉を選ぶ（扉が開き、奥の光が強まる）。決まる（branch.decide）までは選び直せる
 //   ・何もしなければ、決まる時刻にアプリの扉（setDoor。既定は瑠璃）が開く
+//   ・決まった後、選ばなかった扉は閉じて暗くなる（ADR-0013: 選んだ扉の光と色で膜が満たされ、その中を進む）
 //   ・2周目は前回と違う扉（suggestedDoor）が少し強く光る
+// 毎フレーム呼ぶ look・selectedAt は、渡した入れ物に書く（確保しない）。選んだ記録の配列は出来事のときだけ変える。
 import type { DoorChoice } from '../../contracts/ids';
 
 export const DOOR_RISE_SEC = 2.8;
 export const DOOR_OPEN_SEC = 1.6;
 export const DOOR_CLOSE_SEC = 1.2;
+/** 決まった後に、選ばなかった扉の光が落ちきるまでの秒と、残る明るさの割合 */
+export const DOOR_DIM_SEC = 2;
+export const DOOR_DIM_TO = 0.12;
+
+const DOORS: readonly DoorChoice[] = ['amber', 'lapis'];
 
 const ease = (x: number) => {
   const t = Math.min(1, Math.max(0, x));
@@ -16,16 +23,29 @@ const ease = (x: number) => {
 
 export interface DoorLook {
   /** 立ち上がり（0〜1） */
-  readonly rise: number;
+  rise: number;
   /** 開き具合（0〜1） */
   readonly open: Record<DoorChoice, number>;
   /** 奥の光の強さ（0〜1 くらい） */
   readonly glow: Record<DoorChoice, number>;
 }
 
+export function createDoorLook(): DoorLook {
+  return { rise: 0, open: { amber: 0, lapis: 0 }, glow: { amber: 0, lapis: 0 } };
+}
+
+export interface DoorSelection {
+  door: DoorChoice | null;
+  since: number;
+}
+
 export class DoorChoices {
   private picks: { door: DoorChoice; t: number }[] = [];
   private appDoor: DoorChoice;
+  // look の作業用（同じ扉が続く間にまとめた区間）
+  private readonly runDoor: DoorChoice[] = [];
+  private readonly runStart: number[] = [];
+  private readonly sel: DoorSelection = { door: null, since: 0 };
 
   constructor(
     /** 扉が現れる時刻 */
@@ -38,7 +58,7 @@ export class DoorChoices {
     this.appDoor = defaultDoor;
   }
 
-  /** 触れられるか（現れてから、決まるまで。決まった後も触れれば光るが、選び直しはしない） */
+  /** 触れられるか（現れてから。決まった後も触れれば光るが、選び直しはしない） */
   enabledAt(t: number): boolean {
     return t >= this.appearT;
   }
@@ -62,42 +82,59 @@ export class DoorChoices {
     if (this.picks.length > 0 && t < this.picks[this.picks.length - 1].t - 0.25) this.picks = this.picks.filter((p) => p.t <= t);
   }
 
-  /** 時刻 t に選ばれている扉と、選ばれた時刻（なければ null） */
-  selectedAt(t: number): { door: DoorChoice; since: number } | null {
-    let last: { door: DoorChoice; t: number } | null = null;
-    for (const p of this.picks) if (p.t <= t) last = p;
-    if (t >= this.decideT) {
-      // 決まった後: 決まる前に選んだ扉、なければアプリの扉（何もしなければ瑠璃）
-      if (last) return { door: last.door, since: last.t };
-      return { door: this.appDoor, since: this.decideT };
+  /** 時刻 t に選ばれている扉と、選ばれた時刻（なければ door = null）を out に書く */
+  selectedAt(t: number, out: DoorSelection): DoorSelection {
+    let door: DoorChoice | null = null;
+    let since = 0;
+    for (const p of this.picks) {
+      if (p.t > t) break;
+      door = p.door;
+      since = p.t;
     }
-    return last ? { door: last.door, since: last.t } : null;
+    if (t >= this.decideT && door === null) {
+      // 決まった後で選んでいなければ、アプリの扉（何もしなければ瑠璃）
+      door = this.appDoor;
+      since = this.decideT;
+    }
+    out.door = door;
+    out.since = since;
+    return out;
   }
 
-  look(t: number): DoorLook {
-    const rise = ease((t - this.appearT + 0.3) / DOOR_RISE_SEC);
-    const open: Record<DoorChoice, number> = { amber: 0, lapis: 0 };
+  look(t: number, out: DoorLook): DoorLook {
+    out.rise = ease((t - this.appearT + 0.3) / DOOR_RISE_SEC);
+    out.open.amber = 0;
+    out.open.lapis = 0;
     // 選んだ記録を「同じ扉が続く間」にまとめ、区間ごとに 開く（選んだ時刻から）× 閉じる（別の扉に替わった時刻から）。
     // 同じ扉の区間が複数あれば大きい方（閉じかけで選び直しても、開き具合が飛ばない）
-    const runs: { door: DoorChoice; start: number }[] = [];
+    let n = 0;
     for (const p of this.picks) {
       if (p.t > t || p.t > this.decideT) break;
-      if (runs.length === 0 || runs[runs.length - 1].door !== p.door) runs.push({ door: p.door, start: p.t });
+      if (n === 0 || this.runDoor[n - 1] !== p.door) {
+        this.runDoor[n] = p.door;
+        this.runStart[n] = p.t;
+        n++;
+      }
     }
-    if (runs.length === 0 && t >= this.decideT) runs.push({ door: this.appDoor, start: this.decideT });
-    for (let i = 0; i < runs.length; i++) {
-      const end = i + 1 < runs.length ? runs[i + 1].start : Infinity;
-      const v = ease((t - runs[i].start) / DOOR_OPEN_SEC) * (end === Infinity ? 1 : 1 - ease((t - end) / DOOR_CLOSE_SEC));
-      open[runs[i].door] = Math.max(open[runs[i].door], v);
+    if (n === 0 && t >= this.decideT) {
+      this.runDoor[0] = this.appDoor;
+      this.runStart[0] = this.decideT;
+      n = 1;
     }
-    const sel = this.selectedAt(t);
+    for (let i = 0; i < n; i++) {
+      const end = i + 1 < n ? this.runStart[i + 1] : Infinity;
+      const v = ease((t - this.runStart[i]) / DOOR_OPEN_SEC) * (end === Infinity ? 1 : 1 - ease((t - end) / DOOR_CLOSE_SEC));
+      const d = this.runDoor[i];
+      out.open[d] = Math.max(out.open[d], v);
+    }
+    const sel = this.selectedAt(t, this.sel);
     const decided = t >= this.decideT;
-    const glow: Record<DoorChoice, number> = { amber: 0, lapis: 0 };
-    for (const d of ['amber', 'lapis'] as const) {
+    for (const d of DOORS) {
       const base = 0.28 + (this.suggested === d ? 0.22 : 0);
-      const other = decided && sel && sel.door !== d ? 1 - 0.75 * ease((t - this.decideT) / 2) : 1;
-      glow[d] = rise * (base * other + open[d] * 0.9);
+      // 決まった後、選ばなかった扉は暗くなる
+      const dim = decided && sel.door !== null && sel.door !== d ? 1 - (1 - DOOR_DIM_TO) * ease((t - this.decideT) / DOOR_DIM_SEC) : 1;
+      out.glow[d] = out.rise * (base + out.open[d] * 0.9) * dim;
     }
-    return { rise, open, glow };
+    return out;
   }
 }

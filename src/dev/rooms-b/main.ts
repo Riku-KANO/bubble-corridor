@@ -10,6 +10,7 @@
 //   ?q=low          品質（粒の数）
 //   ?panel=0        操作パネルを隠す
 //   ?pick=amber@352 その時刻に扉に触れる（扉が開く見た目の確認。shard-03@400 のようにガラス片にも触れられる）
+//   ?look=shard-08  その触れられる物の方を向き続ける（触れた反応を真ん中で見る）。?fov=30 で視野角を狭める
 import * as THREE from 'three/webgpu';
 import { CAMERA, SECTIONS, SEC_PER_BAR } from '../../config';
 import type { RideEvents } from '../../contracts/events';
@@ -51,7 +52,7 @@ const stage = document.getElementById('stage');
 if (!stage) throw new Error('#stage がありません');
 stage.append(renderer.domElement);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(CAMERA.fovDeg, 1, 0.05, 2000);
+const camera = new THREE.PerspectiveCamera(num(Number(q.get('fov') ?? NaN), CAMERA.fovDeg, 10, 120), 1, 0.05, 2000);
 const gondola = createGondola();
 scene.add(gondola.root);
 gondola.seat.add(camera);
@@ -123,6 +124,19 @@ function autoPick() {
   // 触れた時刻は指定の時刻（止めた時計でも、その後の見た目になる）
   target.onTouch({ t: at, source: 'pointer', point: [p.x, p.y, p.z] });
   say(`(auto) ${target.id}`);
+}
+
+// 確認用: 触れられる物の方を向き続ける
+const lookId = q.get('look');
+const aimTmp = new THREE.Vector3();
+function aimAt() {
+  if (!lookId) return;
+  const target = rooms.flatMap((r) => r.touchables).find((x) => x.id.endsWith(`/${lookId}`));
+  if (!target) return;
+  gondola.root.updateMatrixWorld(true);
+  target.object.getWorldPosition(aimTmp);
+  gondola.seat.worldToLocal(aimTmp);
+  camera.rotation.set(Math.atan2(aimTmp.y, Math.hypot(aimTmp.x, aimTmp.z)), Math.atan2(-aimTmp.x, -aimTmp.z), 0, 'YXZ');
 }
 
 // ── 操作パネル ──
@@ -220,6 +234,7 @@ renderer.setAnimationLoop(() => {
   gondola.root.rotation.set(0, pose.yaw, 0);
   gondola.update(now / 1000, dt);
   camera.rotation.set(lookPitch, lookYaw, 0, 'YXZ');
+  aimAt();
   autoPick();
   const frame: RoomFrame = { t, dt: dt * rate, pose, camera, comfort, reducedFlash: false };
   for (const r of rooms) r.update(frame);
