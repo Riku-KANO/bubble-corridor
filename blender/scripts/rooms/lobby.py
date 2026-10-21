@@ -1,4 +1,4 @@
-"""待ち列と入口（ホーム画面の背景）。乗り場のホールの南の入口から、レールの始点の真後ろへ一直線に伸びる。
+"""待ち列と入口（ホーム画面の背景）。このスクリプトが原本（blender/scenes/lobby.blend と glb・ライトマップはその書き出し）。乗り場のホールの南の入口から、レールの始点の真後ろへ一直線に伸びる。
 
     pnpm blender blender/scripts/rooms/lobby.py            # 造形 → 見えない面の削除 → 焼き込み → glb
     pnpm blender blender/scripts/rooms/lobby.py -- --fast  # 焼き込みのサンプルを減らした下書き
@@ -29,7 +29,7 @@ import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 
 from rooms import platform as kit  # noqa: E402
-from rooms.platform import Builder, lathe, material, emitter, mesh_object, tube, uv_sphere  # noqa: E402
+from rooms.platform import Builder, dense_outline, emitter, lathe, material, mesh_object, ring_wall, tube, uv_sphere  # noqa: E402
 
 # ── 待ち列の距離（レールの始点から真後ろへ、m）。src/rooms/lobby/index.ts の LOBBY と同じ値 ──
 ORIGIN = kit.LOBBY_ORIGIN  # 7.6
@@ -85,41 +85,6 @@ def oriented(verts: np.ndarray, faces, toward: np.ndarray, center: np.ndarray | 
         n = np.cross(verts[q[1]] - verts[q[0]], verts[q[2]] - verts[q[0]])
         want = toward if center is None else (center - verts[q].mean(0))
         out.append(tuple(q) if np.dot(n, want) > 0 else tuple(reversed(q)))
-    return out
-
-
-def ring_wall(outer: list, inner: list, center_xy: tuple[float, float], n: int = 96):
-    """穴のある壁（2つの輪郭のあいだを、中心からの角度でそろえた四角でつなぐ）。輪郭は (x, y) の並び。
-    戻り値は (x, y) の頂点と面（輪郭の平面の上）"""
-    def resample(poly):
-        poly = np.asarray(poly, dtype=np.float64)
-        ang = np.arctan2(poly[:, 1] - center_xy[1], poly[:, 0] - center_xy[0])
-        order = np.argsort(ang)
-        a, p = ang[order], poly[order]
-        a = np.concatenate([a - 2 * np.pi, a, a + 2 * np.pi])
-        p = np.concatenate([p, p, p])
-        out = []
-        for t in np.linspace(-np.pi, np.pi, n, endpoint=False):
-            x = np.interp(t, a, p[:, 0])
-            y = np.interp(t, a, p[:, 1])
-            out.append((x, y))
-        return np.array(out)
-
-    o = resample(outer)
-    i = resample(inner)
-    verts = np.vstack([i, o])
-    faces = [(k, (k + 1) % n, n + (k + 1) % n, n + k) for k in range(n)]
-    return verts, faces
-
-
-def dense_outline(poly, step: float = 0.15):
-    """輪郭を細かく（角度でそろえるときに角が丸まらないように）"""
-    out = []
-    for a, b in zip(poly, poly[1:] + poly[:1]):
-        a, b = np.asarray(a), np.asarray(b)
-        k = max(1, int(np.linalg.norm(b - a) / step))
-        for j in range(k):
-            out.append(tuple(a + (b - a) * j / k))
     return out
 
 

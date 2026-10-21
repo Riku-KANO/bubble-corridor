@@ -48,6 +48,7 @@ import {
   numbers,
   rng,
   scaledCount,
+  setLightmapState,
   shaftMaterial,
   smooth,
   str,
@@ -69,10 +70,13 @@ const PLANTS = ['palm', 'treefern', 'banana', 'monstera', 'fern', 'calla', 'tuli
 /** 露の数の上限（高品質。品質で減らす） */
 const DEW_MAX = 1400;
 const GRAVITY = 9.8;
+/** 露が落ちきるまで（遅れ 0.9 秒 ＋ 最も高い葉から床まで）と、床の光の輪が消えるまでの秒 */
+const DEW_FALL_SEC = 3.2;
+const RING_SEC = 5;
 
 /**
- * ガラスの擬似反射の照明（共有の値。部屋からは書かない）。統合で Atmosphere.glassLighting（S-25）へ入れる値:
- * 若葉の明るい空、暖かい石の床、正面の低い朝日（SUN_DIR の逆）。
+ * ガラスの擬似反射の照明（Atmosphere.glassLighting。アプリが空気の変わり目だけ当てる）:
+ * 若葉の明るい空、暖かい石の床、正面の低い朝日（光の来る向き = SUN_DIR の逆）。
  */
 export const GREENHOUSE_GLASS_LIGHTING: Partial<GlassLighting> = {
   sky: 0xf2f7ec,
@@ -87,7 +91,19 @@ const ATMOSPHERE: Atmosphere = {
   background: 0xe2ebd8,
   fog: { color: 0xe3e1cd, near: 90, far: 520 },
   exposure: 0.82,
+  glassLighting: GREENHOUSE_GLASS_LIGHTING,
 };
+
+/**
+ * 光の強い場面の直前は少し暗くする（設計書「見せ方のルール」）。誘導の 5 秒前から暗くなり始め、花が開く瞬間（2:40）に戻る。
+ * 露出の下げ幅と、焼き込んだ光の下げ幅。空気は段で差し替える（アプリは空気の参照が変わったときだけ当てる。毎フレーム作らない）
+ */
+const DIM_EXPOSURE = 0.22;
+const DIM_LIGHTMAP = 0.25;
+const DIM_STEPS = 12;
+function dimAt(t: number): number {
+  return smooth(T_LURE - 5, T_LURE - 1, t) * (1 - smooth(T_BLOOM - 0.6, T_BLOOM + 0.4, t));
+}
 
 interface Leaf {
   readonly pivot: THREE.Object3D;
@@ -121,6 +137,7 @@ export function createGreenhouseRoom(): RoomModule {
   const dewGround: number[] = [];
   const dewDelay: number[] = [];
   let dewState = -1;
+  let dewGlass: GlassHandle | null = null;
   let rings: THREE.InstancedMesh | null = null;
   // 触れられる葉の露
   const leaves: Leaf[] = [];
@@ -180,7 +197,7 @@ export function createGreenhouseRoom(): RoomModule {
     if (bloomLevel) {
       const gather = smooth(T_LURE + 0.5, T_BLOOM, t);
       const after = smooth(T_BLOOM + 0.3, T_BLOOM + 5, t);
-      bloomLevel.value = (reduced ? 0.3 : 0.58) * gather * (1 - 0.7 * after);
+      bloomLevel.value = (reduced ? 0.35 : 0.62) * gather * (1 - 0.65 * after);
     }
   }
 
@@ -218,36 +235,40 @@ export function createGreenhouseRoom(): RoomModule {
 
   function updateDew(t: number) {
     if (!dew) return;
-    // 0: 葉の上、1: 落ちている、2: 落ちきった
-    const state = t < T_DEW ? 0 : t < T_DEW + 3.2 ? 1 : 2;
-    if (state !== 1 && state === dewState) return;
-    dewState = state;
-    const n = dew.count;
-    for (let i = 0; i < n; i++) {
-      const x = dewPos[i * 3];
-      const y0 = dewPos[i * 3 + 1];
-      const z = dewPos[i * 3 + 2];
-      if (state === 0) {
-        tmpV.set(x, y0, z);
-        tmpS.set(1, 1.15, 1);
-      } else {
-        const e = t - T_DEW - dewDelay[i];
-        const y = e <= 0 ? y0 : y0 - 0.5 * GRAVITY * e * e;
-        if (state === 2 || y <= dewGround[i]) {
-          dew.setMatrixAt(i, ZERO);
-          continue;
+    // 葉の上の露: 0 は葉の上、1 は落ちている、2 は落ちきった。0 と 2 は形が変わらないので、変わったときだけ書く
+    // （どの状態も時刻だけから決まる。途中から始めても同じ絵）
+    const state = t < T_DEW ? 0 : t < T_DEW + DEW_FALL_SEC ? 1 : 2;
+    if (state === 1 || state !== dewState) {
+      dewState = state;
+      const n = dew.count;
+      for (let i = 0; i < n; i++) {
+        const x = dewPos[i * 3];
+        const y0 = dewPos[i * 3 + 1];
+        const z = dewPos[i * 3 + 2];
+        if (state === 0) {
+          tmpV.set(x, y0, z);
+          tmpS.set(1, 1.15, 1);
+        } else {
+          const e = t - T_DEW - dewDelay[i];
+          const y = e <= 0 ? y0 : y0 - 0.5 * GRAVITY * e * e;
+          if (state === 2 || y <= dewGround[i]) {
+            dew.setMatrixAt(i, ZERO);
+            continue;
+          }
+          tmpV.set(x, y, z);
+          // 落ちるあいだは大きく、縦に伸びた光の筋に見える（数 px の点では落ちたのが分からない）
+          const k = e > 0 ? Math.min(1, e * 4) : 0;
+          tmpS.set(1 + 0.8 * k, 1.15 + 3.2 * k, 1 + 0.8 * k);
         }
-        tmpV.set(x, y, z);
-        // 落ちるあいだは縦に少し伸びる
-        tmpS.set(1, e > 0 ? 1.15 + Math.min(1.2, e * 2) : 1.15, 1);
+        tmpM.compose(tmpV, tmpQ.identity(), tmpS);
+        dew.setMatrixAt(i, tmpM);
       }
-      tmpM.compose(tmpV, tmpQ.identity(), tmpS);
-      dew.setMatrixAt(i, tmpM);
+      dew.instanceMatrix.needsUpdate = true;
+      if (dewGlass) (dewGlass.material as THREE.MeshStandardNodeMaterial).emissiveIntensity = state === 1 ? 1.4 : 0.4;
     }
-    dew.instanceMatrix.needsUpdate = true;
-    // 床の光の輪（落ちた所から広がって消える）
+    // 床の光の輪（落ちた所から広がって消える）。輪のある間は毎フレーム時刻から、それ以外は描かない
     if (!rings) return;
-    const live = state === 1 || (t >= T_DEW && t < T_DEW + 5);
+    const live = t >= T_DEW && t < T_DEW + RING_SEC;
     rings.visible = live;
     if (!live) return;
     for (let i = 0; i < rings.count; i++) {
@@ -315,6 +336,9 @@ export function createGreenhouseRoom(): RoomModule {
   }
 
   let atmosphere: Atmosphere = ATMOSPHERE;
+  /** 暗さの段ごとの空気（0 = 部屋の明るさ） */
+  const dimAir: Atmosphere[] = [];
+  let dimLevel = -1;
   return {
     id: 'greenhouse',
     root,
@@ -327,10 +351,15 @@ export function createGreenhouseRoom(): RoomModule {
       const g = await loadGlbRoom(ctx, 'greenhouse', res, {
         tier,
         ownGlass: (o) => typeof own(o.userData, 'touch_kind') === 'string' || own(o.userData, 'role') === 'flower_core',
+        // 花芯ははっきりした金（光を集めて輝く）
+        glassOverride: (o, _kind, params) =>
+          own(o.userData, 'role') === 'flower_core' ? { ...params, color: '#ffc25a', opacity: 0.8, emissive: '#ffa526', emissiveIntensity: 0.4 } : params,
       });
       glb = g;
       root.add(g.scene);
-      atmosphere = { ...ATMOSPHERE, environment: await loadEnvironment(ctx, res, g.instances) };
+      const env = await loadEnvironment(ctx, res, g.instances);
+      for (let k = 0; k <= DIM_STEPS; k++) dimAir.push({ ...ATMOSPHERE, environment: env, exposure: ATMOSPHERE.exposure - (DIM_EXPOSURE * k) / DIM_STEPS });
+      atmosphere = dimAir[0];
       const random = rng(160);
 
       // ── 白い鉄骨（細いので焼かず、朝日の向きと空の明るさで塗る） ──
@@ -344,12 +373,12 @@ export function createGreenhouseRoom(): RoomModule {
         for (const m of meshesOf(pond)) m.material = wm;
       }
 
-      // ── 床の光の模様（焼き込んだ日だまりの所だけ揺れる） ──
-      for (const name of ['greenhouse.floor', 'greenhouse.path']) {
+      // ── 床の光の模様（焼き込んだ日だまりの所だけ揺れる）。低品質（スマートフォン・VR）では重ねる板ごと省く ──
+      for (const name of tier === 'low' ? [] : ['greenhouse.floor', 'greenhouse.path']) {
         const o = g.byName.get(name);
         if (!o) continue;
         for (const m of meshesOf(o)) {
-          const lm = (m.material as THREE.MeshStandardMaterial).lightMap;
+          const lm = (m.material as THREE.MeshBasicMaterial).lightMap;
           if (!lm) continue;
           const overlay = new THREE.Mesh(m.geometry, res.mat(causticMaterial(lm, uT, uSun, tier)));
           overlay.name = `${name}.caustics`;
@@ -370,8 +399,15 @@ export function createGreenhouseRoom(): RoomModule {
         for (const part of proto.parts) {
           const ud = part.material.userData as Record<string, unknown>;
           const gk: GlassKind = glassKindOf(ud) ?? 'tinted';
-          const params = { ...glassParamsOf(ud), iridescence: gk === 'tinted' && !/petal/.test(part.material.name) ? 0 : 0.3 };
+          const base = glassParamsOf(ud);
+          // 低品質では不透明寄りにして深さを書く（重なった透明な葉の描き重ねを減らす。VR のフレームを守る）
+          const params = {
+            ...base,
+            iridescence: gk === 'tinted' && !/petal/.test(part.material.name) ? 0 : 0.3,
+            ...(tier === 'low' ? { opacity: Math.min(0.92, (base.opacity ?? 0.6) + 0.22) } : {}),
+          };
           const handle = res.handle(sharedGlass(gk, params, { tier }));
+          if (tier === 'low') handle.material.depthWrite = true;
           const mesh = new THREE.InstancedMesh(part.geometry, handle.material, count);
           mesh.name = `greenhouse.plants.${kind}`;
           for (let i = 0; i < count; i++) mesh.setMatrixAt(i, all[i]);
@@ -404,7 +440,7 @@ export function createGreenhouseRoom(): RoomModule {
         dewDelay.push(random() * 0.9);
       }
       if (nDew > 0) {
-        const dewGlass = res.handle(createGlass('clear', { opacity: 0.25, rim: 1, iridescence: 0.3, emissive: 0xfffbea, emissiveIntensity: 0.4 }, { tier }));
+        dewGlass = res.handle(createGlass('clear', { opacity: 0.25, rim: 1, iridescence: 0.3, emissive: 0xfffbea, emissiveIntensity: 0.4 }, { tier }));
         dew = new THREE.InstancedMesh(res.geo(new THREE.IcosahedronGeometry(0.03, tier === 'low' ? 0 : 1)), dewGlass.material, nDew);
         dew.name = 'greenhouse.dew';
         dew.frustumCulled = false;
@@ -516,7 +552,7 @@ export function createGreenhouseRoom(): RoomModule {
       if (petalProto && headAt) {
         head.copy(headAt);
         hasFlower = true;
-        petalGlass = res.handle(createGlass('tinted', { color: 0xf6a0bb, opacity: 0.36, iridescence: 0.85, rim: 1 }, { tier }));
+        petalGlass = res.handle(createGlass('tinted', { color: 0xff5f7e, opacity: 0.46, iridescence: 0.55, rim: 1 }, { tier }));
         petals = new THREE.InstancedMesh(petalProto.geometry, petalGlass.material, 12);
         petals.name = 'greenhouse.flower_petals';
         petals.frustumCulled = false;
@@ -563,8 +599,8 @@ export function createGreenhouseRoom(): RoomModule {
         g.scene.add(glowMesh);
       }
 
-      // ── 斜めに差し込む朝日の筋 ──
-      const shafts = buildShafts(ctx, res);
+      // ── 斜めに差し込む朝日の筋（低品質では省く: 画面いっぱいの加算の描き重ね） ──
+      const shafts = tier === 'low' ? null : buildShafts(ctx, res);
       if (shafts) {
         g.scene.add(shafts.mesh);
         shaftLevel = shafts.level;
@@ -598,6 +634,14 @@ export function createGreenhouseRoom(): RoomModule {
       // 光の筋はごくゆっくり息をする（明滅にならない速さと深さ）
       if (shaftLevel) shaftLevel.value = 0.13 * (0.85 + 0.15 * Math.sin(t * 0.21));
       uSun.value = frame.reducedFlash ? 0.6 : 1;
+      // 花の直前の暗さ（空気の露出と焼き込んだ光）
+      const dim = dimAt(t);
+      const level = Math.round(dim * DIM_STEPS);
+      if (level !== dimLevel && dimAir.length > level) {
+        dimLevel = level;
+        atmosphere = dimAir[level];
+        setLightmapState(glb.baked, null, 1 - (DIM_LIGHTMAP * level) / DIM_STEPS);
+      }
       updateFlower(t, frame.reducedFlash);
       updateMotes(t, frame.reducedFlash);
       updateDew(t);
@@ -684,7 +728,7 @@ function bloomGlowMaterial(): { material: THREE.MeshBasicNodeMaterial; level: { 
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
   const view = cameraPosition.sub(positionWorld).normalize();
   const facing = normalWorld.dot(view).abs();
-  m.colorNode = vec4(vec3(1.0, 0.78, 0.42), pow(facing, 2.2).mul(u as unknown as THREE.Node<'float'>));
+  m.colorNode = vec4(vec3(1.0, 0.66, 0.22), pow(facing, 2.0).mul(u as unknown as THREE.Node<'float'>));
   return { material: m, level: u as unknown as { value: number } };
 }
 

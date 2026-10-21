@@ -1,4 +1,5 @@
 """乗り場「泡の発着場」（乗り場と降車で同じホール。光だけ変える）と、部屋A（待ち列・乗り場・温室）の共通の道具。
+このスクリプトが原本（blender/scenes/platform.blend と glb・ライトマップ・環境画像はその書き出し）。
 
     pnpm blender blender/scripts/rooms/platform.py            # 造形 → 見えない面の削除 → 焼き込み（夜明け前・朝） → glb
     pnpm blender blender/scripts/rooms/platform.py -- --fast  # 焼き込みのサンプルを減らした下書き
@@ -15,7 +16,15 @@
   - 円の中心 HALL_C、内壁の半径 HALL_R。北の門（乗り場 → 温室の膜、s = 乗り場の区間の終わり）と
     東の水門（夜明けの岸 → 降車の膜）がちょうど壁の厚みの中に来るように中心を選んである（下の solve_hall）。
   - 床はほぼ全面が水（y = WATER_Y）。南の壁沿いに乗り場の桟橋、壁沿いに細い回廊。
-  - 東の水門は、降車のレールが壁を斜めに横切るので、短い水路（canal）として壁から外へ突き出す。
+  - 東の水門は、降車のレールが壁を斜めに横切るので、ホールの円の岸の側を「水門の湾」として切り欠き（降車の区間の
+    始まり +1m より岸の側には、飾りも含めて乗り場の形を置かない。ADR-0013 の部屋の境目）、水門の館（正面と北・南の返しの
+    厚い壁。正面は s0 +1.5m）で閉じる。正面の水路のアーチから、短い水路（canal）がホールの中へ入る。夜明けの岸の膜の輪は正面の 1.5m 手前に立ち、
+    水路のアーチ（半幅 CANAL_HALF）の中に収まる。
+
+外側（夜明けの岸から遠くに見え、温室の頭で振り返ると見える）:
+  外壁（内壁と同じ丸い高窓の穴を正確に縫った円筒）、外の蛇腹と腰、鉛色のドームの屋根と乳白のガラスの帯、頂の塔。
+  外側は別のアトラス（lightmap_exterior、1024px）に焼く。基本の光は温室の昼（温室から見るとき）、朝は岸の空と
+  ホールの向こうの低い朝日（岸から見ると逆光）。TS は朝日の時刻に合わせて外側の明るさを上げる。
 
 共通の道具（待ち列 lobby.py と温室 greenhouse.py も `from rooms import platform as kit` で使う）:
   レールの読み込みと評価（TS の createRide と同じ Catmull-Rom）、メッシュを作る道具（管、回転体、板）、材質、
@@ -314,6 +323,9 @@ class Builder:
     def empty(self) -> bool:
         return self.n == 0
 
+    def data(self) -> tuple[np.ndarray, list[list[int]]]:
+        return (np.concatenate(self.v) if self.v else np.zeros((0, 3))), self.f
+
     def build(self, name: str, mat=None, coll=None, smooth=True, props=None, mats=None):
         verts = np.concatenate(self.v) if self.v else np.zeros((0, 3))
         return mesh_object(name, verts, self.f, mat, coll, smooth, props, mats=mats, face_mats=self.fm if mats else None)
@@ -426,6 +438,197 @@ def uv_sphere(center, radius, seg: int = 24, rings: int = 14, scale=(1.0, 1.0, 1
         faces.append((last, b0 + k, b0 + (k + 1) % seg))
     return np.asarray(verts), faces
 
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 壁の道具: 丸い穴を正確に縫う円筒の壁、輪郭のあいだを埋める面、領域の切り落とし
+# ═══════════════════════════════════════════════════════════════════════
+def cylinder_wall(cx: float, cz: float, r: float, y0: float, y1: float, seg: int, rows: int, inward: bool, holes=(), keep_fn=None):
+    """中心 (cx, cz)、半径 r の円筒の壁（内向きか外向きの面）。
+
+    holes = [(角度, 高さ, 半径)] か [(角度, 高さ, 輪郭)]: 穴のまわりの升目をくり抜き、升目の縁の頂点と穴の輪郭の頂点を
+    同じ向きで結んで、穴を正確に縫う（隣の升目と頂点を共有するので隙間ができない）。輪郭は壁に沿って広げた平面
+    （横 = 角度 × 半径、縦 = 高さ。穴の中心から）の点の並びで、中心から見て星形であること（門の円・入口のアーチ）。
+    keep_fn(升目の4頂点) が偽の升目は落とす（水路など）。
+    """
+    ang = np.linspace(0, 2 * np.pi, seg, endpoint=False)
+    ys = np.linspace(y0, y1, rows)
+    da = 2 * np.pi / seg
+    dy = (y1 - y0) / (rows - 1)
+    pt = lambda a, y: np.array([cx + r * math.cos(a), y, cz + r * math.sin(a)])  # noqa: E731
+    verts = [pt(a, y) for y in ys for a in ang]
+    removed = set()
+    patches = []
+    for ac, yc, shape in holes:
+        if isinstance(shape, (int, float)):
+            rho = (lambda hr: (lambda th: hr))(float(shape))
+            s_lo, s_hi, y_lo, y_hi = -shape, shape, -shape, shape
+        else:
+            pts = np.asarray(shape, dtype=np.float64)
+            rho = polar_outline(pts)
+            s_lo, s_hi = float(pts[:, 0].min()), float(pts[:, 0].max())
+            y_lo, y_hi = float(pts[:, 1].min()), float(pts[:, 1].max())
+        i0 = int(math.floor((ac + (s_lo - 0.3) / r) / da))
+        i1 = int(math.ceil((ac + (s_hi + 0.3) / r) / da))
+        j0 = max(0, int(math.floor((yc + y_lo - 0.3 - y0) / dy)))
+        j1 = min(rows - 1, int(math.ceil((yc + y_hi + 0.3 - y0) / dy)))
+        for i in range(i0, i1):
+            for j in range(j0, j1):
+                removed.add((i % seg, j))
+        # 長方形の縁を、格子の頂点を通って一周（角度順）
+        edge = [(i, j0) for i in range(i0, i1)] + [(i1, j) for j in range(j0, j1)] + [(i, j1) for i in range(i1, i0, -1)] + [(i0, j) for j in range(j1, j0, -1)]
+        patches.append((ac, yc, rho, edge))
+    faces = []
+    for j in range(rows - 1):
+        for i in range(seg):
+            if (i, j) in removed:
+                continue
+            q = (j * seg + i, j * seg + (i + 1) % seg, (j + 1) * seg + (i + 1) % seg, (j + 1) * seg + i)
+            if keep_fn is not None and not keep_fn(np.array([verts[k] for k in q])):
+                continue
+            faces.append(q)
+    for ac, yc, rho, edge in patches:
+        ring_idx = []
+        circ_idx = []
+        for i, j in edge:
+            ring_idx.append(j * seg + i % seg)
+            # 縁の頂点の、穴の中心からの向き（壁に沿って広げた平面で）。その向きの輪郭の点と結ぶ
+            s_off = (i * da - ac) * r
+            y_off = ys[j] - yc
+            th = math.atan2(y_off, s_off)
+            hr = rho(th)
+            verts.append(pt(ac + hr * math.cos(th) / r, yc + hr * math.sin(th)))
+            circ_idx.append(len(verts) - 1)
+        n = len(edge)
+        for k in range(n):
+            k2 = (k + 1) % n
+            faces.append((ring_idx[k], ring_idx[k2], circ_idx[k2], circ_idx[k]))
+    verts = np.array(verts)
+    out = []
+    for f in faces:
+        q = list(f)
+        c = verts[q].mean(0)
+        nrm = np.cross(verts[q[1]] - verts[q[0]], verts[q[2]] - verts[q[0]])
+        if np.linalg.norm(nrm) < 1e-12 and len(q) > 3:
+            nrm = np.cross(verts[q[2]] - verts[q[0]], verts[q[3]] - verts[q[0]])
+        radial = np.array([c[0] - cx, 0.0, c[2] - cz])
+        want = -radial if inward else radial
+        out.append(tuple(q) if np.dot(nrm, want) > 0 else tuple(reversed(q)))
+    return verts, out
+
+
+def polar_outline(pts: np.ndarray):
+    """中心 (0, 0) から見て星形の輪郭の点の並び → 向き th の輪郭までの距離を返す関数（点のあいだは線分で）"""
+    pts = np.asarray(pts, dtype=np.float64)
+    n = len(pts)
+
+    def rho(th: float) -> float:
+        d = np.array([math.cos(th), math.sin(th)])
+        best = None
+        for k in range(n):
+            a, b = pts[k], pts[(k + 1) % n]
+            e = b - a
+            den = d[0] * (-e[1]) - d[1] * (-e[0])
+            if abs(den) < 1e-12:
+                continue
+            # t d = a + u e を解く
+            t = (a[0] * (-e[1]) - a[1] * (-e[0])) / den
+            u = (d[0] * a[1] - d[1] * a[0]) / den
+            if t > 0 and -1e-9 <= u <= 1 + 1e-9 and (best is None or t < best):
+                best = t
+        return float(best if best is not None else np.max(np.linalg.norm(pts, axis=1)))
+    return rho
+
+
+def wall_hole_outline(cx: float, cz: float, r: float, origin, axis, ring_pts) -> tuple[float, float, np.ndarray]:
+    """開口（origin を通り axis の向きの筒。ring_pts は筒の断面の点、世界の座標）が半径 r の円筒の壁と交わる輪郭。
+    戻り値は (中心の角度, 中心の高さ, 輪郭の点 (横 = 角度の差 × r, 縦 = 高さの差))"""
+    axis = np.asarray(axis, dtype=np.float64)
+    c = np.array([cx, 0.0, cz])
+
+    def hit(p0) -> np.ndarray:
+        p = np.asarray(p0, dtype=np.float64) - c
+        dx, dz = axis[0], axis[2]
+        a = dx * dx + dz * dz
+        b = 2 * (p[0] * dx + p[2] * dz)
+        cc = p[0] ** 2 + p[2] ** 2 - r * r
+        disc = math.sqrt(max(0.0, b * b - 4 * a * cc))
+        ts = [(-b - disc) / (2 * a), (-b + disc) / (2 * a)]
+        t = min(ts, key=abs)
+        return np.asarray(p0, dtype=np.float64) + axis * t
+
+    ctr = hit(origin)
+    ac = math.atan2(ctr[2] - cz, ctr[0] - cx)
+    out = []
+    for q in ring_pts:
+        w = hit(q)
+        da = (math.atan2(w[2] - cz, w[0] - cx) - ac + math.pi) % (2 * math.pi) - math.pi
+        out.append((da * r, w[1] - ctr[1]))
+    return ac, float(ctr[1]), np.array(out)
+
+
+def ring_wall(outer: list, inner: list, center_xy: tuple[float, float], n: int = 96):
+    """穴のある板（2つの輪郭のあいだを、中心からの角度でそろえた四角でつなぐ）。輪郭は (横, 高さ) の並び。
+    戻り値は (横, 高さ) の頂点と面（輪郭の平面の上）"""
+    def resample(poly):
+        poly = np.asarray(poly, dtype=np.float64)
+        ang = np.arctan2(poly[:, 1] - center_xy[1], poly[:, 0] - center_xy[0])
+        order = np.argsort(ang)
+        a, p = ang[order], poly[order]
+        a = np.concatenate([a - 2 * np.pi, a, a + 2 * np.pi])
+        p = np.concatenate([p, p, p])
+        return np.array([(np.interp(t, a, p[:, 0]), np.interp(t, a, p[:, 1])) for t in np.linspace(-np.pi, np.pi, n, endpoint=False)])
+
+    o = resample(outer)
+    i = resample(inner)
+    verts = np.vstack([i, o])
+    faces = [(k, (k + 1) % n, n + (k + 1) % n, n + k) for k in range(n)]
+    return verts, faces
+
+
+def dense_outline(poly, step: float = 0.15):
+    """輪郭を細かく（角度でそろえるときに角が丸まらないように）"""
+    out = []
+    for a, b in zip(poly, poly[1:] + poly[:1]):
+        a, b = np.asarray(a), np.asarray(b)
+        k = max(1, int(np.linalg.norm(b - a) / step))
+        for j in range(k):
+            out.append(tuple(a + (b - a) * j / k))
+    return out
+
+
+def cut_region(objs, origin, axis_a, axis_l, a_max: float, l_max: float, l_min: float = -12.0) -> None:
+    """平面 a = a_max と l = l_max で面を正確に切り、a < a_max かつ l_min < l < l_max の面を落とす（a, l は origin からの
+    axis_a・axis_l の向きの距離）。乗り場の東の水門の湾（隣の部屋との境目の手前）を空けるのに使う"""
+    from mathutils import Vector
+    o3 = np.asarray(origin, dtype=np.float64)
+    planes = [(o3 + np.asarray(axis_a) * a_max, np.asarray(axis_a)), (o3 + np.asarray(axis_l) * l_max, np.asarray(axis_l))]
+    for ob in objs:
+        if ob.type != 'MESH':
+            continue
+        me = ob.data
+        inv = ob.matrix_world.inverted()
+        m3t = ob.matrix_world.to_3x3().transposed()
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        for pco, pno in planes:
+            pl = inv @ Vector(to_blender(pco).tolist())
+            nl = (m3t @ Vector(to_blender(pno).tolist())).normalized()
+            bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=pl, plane_no=nl, dist=1e-4)
+        mw = np.array(ob.matrix_world)
+        dead = []
+        for f in bm.faces:
+            c = to_three(mw[:3, :3] @ np.array(f.calc_center_median()) + mw[:3, 3])
+            a = float(np.dot(c - o3, axis_a))
+            lat = float(np.dot(c - o3, axis_l))
+            if a < a_max - 1e-3 and l_min < lat < l_max - 1e-3:
+                dead.append(f)
+        bmesh.ops.delete(bm, geom=dead, context='FACES')
+        loose = [v for v in bm.verts if not v.link_faces]
+        bmesh.ops.delete(bm, geom=loose, context='VERTS')
+        bm.to_mesh(me)
+        bm.free()
+        me.update()
 
 # ═══════════════════════════════════════════════════════════════════════
 # 物との最短距離（RIDE-8 / MOTION.clearanceMin）
@@ -702,6 +905,8 @@ def finish_room(
     keep_unculled: tuple = (),
     percentile: float = 99.99,
     webp: int = 0,
+    more_bakes: list | None = None,
+    hide_while_baking: dict | None = None,
 ) -> dict:
     """部屋の仕上げ。objs は書き出す物すべて（インスタンスの元の形と extras の入れ物を含む）。
 
@@ -710,7 +915,15 @@ def finish_room(
     bake_targets: 光を焼き込む物（不透明・インスタンスでない物）。焼き込みは物の分割の後。
     extra_bakes: [(名前の接尾辞, 準備の関数)] 別の光の状態のライトマップ（例: 朝）。焼いた物には
                  lightmap_<接尾辞> と lightmap_<接尾辞>_scale を残す（UV は同じ）。
+    more_bakes: [(名前, 物の一覧, 大きさ[, 準備の関数[, {接尾辞: 準備の関数}]])] 別のアトラスに焼く物（例: 遠くから見る
+                 外側は小さなアトラスに）。名前は <部屋>.<名前>.png。光の状態（extra_bakes）は同じ名前で焼く。準備の関数が
+                 あれば、その組だけ基本や別の光の状態をそれで焼く（例: 乗り場の外側は、温室の昼と夜明けの岸の朝日で見られる）。
+    hide_while_baking: {組の名前: [物の名前]} その組を焼くあいだ光線から隠す物（例: 乗り場の内側を焼くときの外の殻。
+                 内と外は別の時刻・別の光で見られるので、外の屋根で内のドームの帯の光を遮らない）。
     """
+    groups = [('lightmap', bake_targets, size)] + [(e[0], e[1], e[2]) for e in (more_bakes or [])]
+    base_prepare = {e[0]: e[3] for e in (more_bakes or []) if len(e) > 3 and e[3]}
+    state_prepare = {e[0]: e[4] for e in (more_bakes or []) if len(e) > 4}
     t0 = time.time()
     report: dict = {'room': room}
     # 物の変換（location）を matrix_world に反映してから測る
@@ -728,8 +941,9 @@ def finish_room(
                 print(f'cull: {name} は全部見えないので消す')
                 if ob in objs:
                     objs.remove(ob)
-                if ob in bake_targets:
-                    bake_targets.remove(ob)
+                for _n, lst, _sz in groups:
+                    if ob in lst:
+                        lst.remove(ob)
                 bpy.data.objects.remove(ob)
         bpy.context.view_layer.update()
     # 箱の検査と分割（焼き込みの前。ライトマップは物ごとに付くので）
@@ -739,13 +953,13 @@ def finish_room(
             if ob.type != 'MESH' or is_exempt(ob) or ob.get('role') == 'proto' or ob.get('no_split'):
                 new_objs.append(ob)
                 continue
-            was_target = ob in bake_targets
+            owner = next((lst for _n, lst, _sz in groups if ob in lst), None)
             parts = partition_for_clearance(ob, clear_points_three)
             if len(parts) > 1:
                 print(f'partition: {parts[0].name.rsplit(".", 1)[0]} → {len(parts)} 個')
-                if was_target:
-                    bake_targets.remove(ob)
-                    bake_targets.extend(parts)
+                if owner is not None:
+                    owner.remove(ob)
+                    owner.extend(parts)
             new_objs.extend(parts)
         objs[:] = new_objs
         bad = clearance_report(objs, clear_points_three, label=room)
@@ -760,23 +974,36 @@ def finish_room(
         raise RuntimeError(f'名前の規則に合わない物: {bad_names}')
     # 焼き込み（消した物を反映してから）
     bpy.context.view_layer.update()
-    bake_targets[:] = [o for o in bake_targets if o.name in bpy.data.objects and len(o.data.polygons) > 0]
     tb = time.time()
-    for suffix, prepare in extra_bakes or []:
-        restore = prepare()
-        res = bake_lightmaps(bake_targets, OUT_DIR, size=size, samples=samples, name=f'{room}.lightmap_{suffix}', percentile=percentile)
-        for o in bake_targets:
-            o[f'lightmap_{suffix}'] = o['lightmap']
-            o[f'lightmap_{suffix}_scale'] = o['lightmap_scale']
+    all_targets = []
+    for gname, lst, gsize in groups:
+        lst[:] = [o for o in lst if o.name in bpy.data.objects and len(o.data.polygons) > 0]
+        if not lst:
+            continue
+        all_targets.extend(lst)
+        hidden = [bpy.data.objects[n] for n in (hide_while_baking or {}).get(gname, []) if n in bpy.data.objects]
+        for ob in hidden:
+            ob.hide_render = True
+        for suffix, prepare in extra_bakes or []:
+            restore = state_prepare.get(gname, {}).get(suffix, prepare)()
+            res = bake_lightmaps(lst, OUT_DIR, size=gsize, samples=samples, name=f'{room}.{gname}_{suffix}', percentile=percentile)
+            for o in lst:
+                o[f'lightmap_{suffix}'] = o['lightmap']
+                o[f'lightmap_{suffix}_scale'] = o['lightmap_scale']
+            if restore:
+                restore()
+            report[f'bake_{gname}_{suffix}'] = res[0]['scale'] if res else None
+        restore = base_prepare[gname]() if gname in base_prepare else None
+        res = bake_lightmaps(lst, OUT_DIR, size=gsize, samples=samples, name=f'{room}.{gname}', percentile=percentile, repack=not extra_bakes)
         if restore:
             restore()
-        report[f'bake_{suffix}'] = res[0]['scale'] if res else None
-    res = bake_lightmaps(bake_targets, OUT_DIR, size=size, samples=samples, name=f'{room}.lightmap', percentile=percentile, repack=not extra_bakes)
+        for ob in hidden:
+            ob.hide_render = False
+        report[f'bake_{gname}_scale'] = res[0]['scale'] if res else None
     report['bake_seconds'] = round(time.time() - tb, 1)
-    report['bake_scale'] = res[0]['scale'] if res else None
     if webp:
         keys = ['lightmap'] + [f'lightmap_{suffix}' for suffix, _ in (extra_bakes or [])]
-        report['webp'] = lightmaps_to_webp(bake_targets, keys, webp)
+        report['webp'] = lightmaps_to_webp(all_targets, keys, webp)
     # 書き出し
     glb = os.path.join(OUT_DIR, f'{room}.glb')
     with emission_clamped(objs):
@@ -1055,17 +1282,19 @@ def build_platform(rail: Rail, fast: bool) -> None:
     coll = collection('platform')
     h = solve_hall(rail)
     print(f"hall: 中心 ({h['cx']:.2f}, {h['cz']:.2f}) 内壁 {h['r_in']:.2f}m 外壁 {h['r_out']:.2f}m")
-    cx, cz, r_in = h['cx'], h['cz'], h['r_in']
+    cx, cz, r_in, r_out = h['cx'], h['cz'], h['r_in'], h['r_out']
     objs: list = []
     bake: list = []
+    bake_ext: list = []
 
     s_plat1 = rail.sections['platform'][1]
     s_dep0 = rail.sections['departure'][0]
-    north, east = h['north'], h['east']
+    north = h['north']
     start = h['start']
     a_south = hall_angle(h, np.array([start[0], 0, start[2] + 10]))  # 桟橋の向き
     # 降車のレールは南の壁沿いを通る（水平の距離で床や柱を避ける）
     dep_path = rail.samples(*rail.span('departure', before=2.0), 0.25)
+    bay = water_gate_bay(rail, h)
 
     # ── 材質（色は sRGB。base color は TS でもそのまま使う） ──
     m_plaster = material('platform.plaster', '#8792a2', 0.85)
@@ -1074,35 +1303,97 @@ def build_platform(rail: Rail, fast: bool) -> None:
     m_brass = material('platform.brass', '#b8925a', 0.35, metallic=1.0)
     m_water = material('platform.water', '#0d1824', 0.08)
     m_glass = material('platform.glass', '#dfe8f2', 0.05, alpha=0.15)
+    m_ext = material('platform.exterior', '#a3a7ad', 0.8)
+    m_roof = material('platform.roof', '#5f6c7a', 0.6)
 
     # 材質ごとにまとめる（物の数 = 描く回数を減らす。レールに近い物は後で塊に分ける）
     plaster = Builder()
     plaster_dark = Builder()
     stone = Builder()
     brass = Builder()
+    ext = Builder()  # 外壁・外の蛇腹・水門の館（夜明けの岸と温室から見える外側）
+    roof = Builder()  # ドームの屋根と頂の塔
+    ext_brass = Builder()
+    canal = Builder()  # 水路（内も外も）
 
-    # ── 壁（内側の面だけ。外は見えない）と腰と蛇腹 ──
+    # ── 壁: 内側の面（丸い高窓の穴を正確に縫う）、腰と蛇腹 ──
     seg = 200
     rows = 26
-    ang = np.linspace(0, 2 * np.pi, seg, endpoint=False)
-    ys = np.linspace(DECK_Y - 0.5, WALL_H, rows)
-    verts = np.array([[cx + r_in * math.cos(a), y, cz + r_in * math.sin(a)] for y in ys for a in ang])
-    faces = []
-    for j in range(rows - 1):
-        for i in range(seg):
-            i2 = (i + 1) % seg
-            # 内側を向く面（上 × 角度の向き は外向きなので逆に回す）
-            faces.append((j * seg + i, j * seg + i2, (j + 1) * seg + i2, (j + 1) * seg + i))
-    keep = openings_keep(verts, faces, h, rail, windows=True)
-    plaster.add(verts, [f for f, k in zip(faces, keep) if k])
+    keep_canal = lambda quad: opening_keep(quad, h, rail, gate_door=False)  # noqa: E731
+
+    def holes_at(rr: float) -> list:
+        """半径 rr の壁の穴: 高窓（円）、北の門（門の筒が壁と交わる輪郭）、南の入口（アーチの通路が壁と交わる輪郭）"""
+        out = [(a, WINDOW_Y, WINDOW_R) for a in window_angles(h, rail, bay)]
+        g_fwd = rail.forward(s_plat1)
+        g_right = np.array([-g_fwd[2], 0.0, g_fwd[0]])
+        ring = [h['north'] + (math.cos(t) * g_right + np.array([0.0, math.sin(t), 0.0])) * GATE_OPEN_R for t in np.linspace(0, 2 * math.pi, 96, endpoint=False)]
+        out.append(wall_hole_outline(cx, cz, rr, h['north'], g_fwd, ring))
+        dc, dout = south_door(h, rail)
+        dside = np.array([-dout[2], 0.0, dout[0]])
+        arch = dense_outline(arch_outline(SOUTH_DOOR_HALF, SOUTH_DOOR_TOP, DECK_Y - 0.05, 32), 0.2)
+        ring = [dc + dside * x + np.array([0.0, y, 0.0]) for x, y in arch]
+        mid = dc + np.array([0.0, (DECK_Y + SOUTH_DOOR_TOP) / 2, 0.0])
+        out.append(wall_hole_outline(cx, cz, rr, mid, dout, ring))
+        return out
+
+    v, f = cylinder_wall(cx, cz, r_in, DECK_Y - 0.5, WALL_H, seg, rows, True, holes_at(r_in), keep_canal)
+    plaster.add(v, f)
     v, f = lathe([(r_in - 0.02, DECK_Y - 0.4), (r_in - 0.12, DECK_Y - 0.2), (r_in - 0.12, DECK_Y + 1.0), (r_in - 0.03, DECK_Y + 1.15)], seg, (cx, 0, cz))
     f = [tuple(reversed(x)) for x in f]
-    keep = openings_keep(v, f, h, rail)
+    keep = [opening_keep(v[list(x)], h, rail) for x in f]
     plaster_dark.add(v, [x for x, k in zip(f, keep) if k])
     v, f = lathe([(r_in - 0.02, WALL_H - 0.9), (r_in - 0.35, WALL_H - 0.75), (r_in - 0.45, WALL_H - 0.45), (r_in - 0.8, WALL_H - 0.1), (r_in - 0.8, WALL_H + 0.05)], seg, (cx, 0, cz))
     plaster.add(v, [tuple(reversed(x)) for x in f])
 
-    # ── ドーム: 壁の上から頂へ。頂に乳白の丸窓（オクルス） ──
+    # ── 外壁（外向きの面）と外の蛇腹。夜明けの岸から遠くに見え、温室の頭から振り返ると見える ──
+    v, f = cylinder_wall(cx, cz, r_out, WATER_Y - 0.4, WALL_H + 0.3, 160, 18, False, holes_at(r_out), keep_canal)
+    ext.add(v, f)
+    for prof in ([(r_out - 0.02, WALL_H + 0.25), (r_out + 0.35, WALL_H + 0.35), (r_out + 0.5, WALL_H + 0.6), (r_out + 0.5, WALL_H + 0.78), (r_out + 0.2, WALL_H + 0.9)],
+                 [(r_out + 0.06, WATER_Y - 0.4), (r_out + 0.28, WATER_Y - 0.2), (r_out + 0.28, DECK_Y + 0.9), (r_out + 0.02, DECK_Y + 1.05)]):
+        v, f = lathe(prof, 160, (cx, 0, cz))
+        # 外の腰と蛇腹も、開口（南の入口・水路）の中は切る
+        ext.add(v, [x for x in f if opening_keep(v[list(x)], h, rail)])
+    # 高窓の見込み（壁の厚みの筒。窓の軸の方を向く）と、内と外の乳白のガラス
+    win_in = Builder()
+    win_out = Builder()
+    for a in window_angles(h, rail, bay):
+        n_out = np.array([math.cos(a), 0, math.sin(a)])
+        t_dir = np.array([-math.sin(a), 0, math.cos(a)])
+        ci = hall_point(h, a, r_in, WINDOW_Y)
+        co = hall_point(h, a, r_out, WINDOW_Y)
+        disc_a = np.linspace(0, 2 * np.pi, 40, endpoint=False)
+        ring_d = np.cos(disc_a)[:, None] * t_dir[None, :] + np.sin(disc_a)[:, None] * np.array([0, 1.0, 0])[None, :]
+        rv = np.vstack([ci[None, :] + ring_d * WINDOW_R, co[None, :] + ring_d * WINDOW_R])
+        rf = []
+        for i in range(40):
+            i2 = (i + 1) % 40
+            q = (i, i2, 40 + i2, 40 + i)
+            nrm = np.cross(rv[q[1]] - rv[q[0]], rv[q[2]] - rv[q[0]])
+            mid = rv[list(q)].mean(0)
+            axis_pt = ci + n_out * float(np.dot(mid - ci, n_out))
+            rf.append(q if np.dot(nrm, axis_pt - mid) > 0 else tuple(reversed(q)))
+        plaster_dark.add(rv, rf)
+        for c, want, b in ((ci + n_out * 0.08, -n_out, win_in), (co - n_out * 0.08, n_out, win_out)):
+            ring = c[None, :] + ring_d * WINDOW_R
+            vv = np.vstack([c, ring])
+            ff = []
+            for i in range(40):
+                q = (0, 1 + i, 1 + (i + 1) % 40)
+                nrm = np.cross(vv[q[1]] - vv[q[0]], vv[q[2]] - vv[q[0]])
+                ff.append(q if np.dot(nrm, want) > 0 else tuple(reversed(q)))
+            b.add(vv, ff)
+        # 内の真鍮の縁と十字の桟、外の真鍮の縁
+        brass.add(*tube(ci[None, :] + ring_d * WINDOW_R - n_out * 0.04, 0.06, 8, caps=False, closed=True))
+        brass.add(*tube(np.array([ci - t_dir * WINDOW_R, ci + t_dir * WINDOW_R]) + n_out * 0.06, 0.025, 5))
+        brass.add(*tube(np.array([ci - np.array([0, WINDOW_R, 0]), ci + np.array([0, WINDOW_R, 0])]) + n_out * 0.06, 0.025, 5))
+        ext_brass.add(*tube(co[None, :] + ring_d * (WINDOW_R + 0.06) + n_out * 0.04, 0.07, 8, caps=False, closed=True))
+    # 高窓は乳白（夜明け前は藍がにじみ、朝は明るく光る。窓越しに隣の温室が見えて門の驚きが漏れないように）
+    win_props = {'glass': 'milky', 'glass_color': '#7f8fa8', 'glass_opacity': 0.6, 'glass_emissive': '#5f7cae', 'glass_emissive_intensity': 0.32,
+                 'role': 'window', 'clearance_exempt': True}
+    objs.append(win_in.build('platform.windows', m_glass, coll, smooth=False, props=win_props))
+    objs.append(win_out.build('platform.windows_out', m_glass, coll, smooth=False, props={**win_props, 'exterior': True}))
+
+    # ── ドーム: 壁の上から頂へ。中ほどの帯はガラス、頂に乳白の丸窓（オクルス） ──
     dome_r = r_in - 0.8
     oculus_r = 3.2
     prof = []
@@ -1114,7 +1405,6 @@ def build_platform(rail: Rail, fast: bool) -> None:
         prof.append((rr, WALL_H + 0.05 + (DOME_TOP - WALL_H) * math.sin(a)))
     v, f = lathe(prof, 160, (cx, 0, cz))
     f = [tuple(reversed(x)) for x in f]
-    # ドームの中ほどの帯はガラス（夜明け前は藍の空がにじみ、朝は光が差し込む）。帯の面は漆喰から外してガラスの物へ
     radial = np.array([math.hypot(*(v[list(x)].mean(0) - [cx, 0, cz])[[0, 2]]) for x in f])
     band = (radial > DOME_GLASS[0] * dome_r) & (radial < DOME_GLASS[1] * dome_r)
     plaster.add(v, [x for x, b in zip(f, band) if not b])
@@ -1128,14 +1418,10 @@ def build_platform(rail: Rail, fast: bool) -> None:
     ob = mesh_object('platform.oculus', v, [tuple(reversed(x)) for x in f], m_glass, coll,
                      props={'glass': 'milky', 'glass_color': '#7d8ca4', 'glass_opacity': 0.5, 'glass_emissive': '#8ea6cc', 'glass_emissive_intensity': 0.3, 'clearance_exempt': True})
     objs.append(ob)
-
     # ドームの真鍮のリブ（放射状に24本）と、オクルスの真鍮の輪
     for k in range(24):
         a = 2 * math.pi * k / 24
-        path = []
-        for i in range(24):
-            rr = dome_r - 0.05 - (dome_r - top_r - 0.1) * i / 23
-            path.append((cx + rr * math.cos(a), dome_y_at(rr) - 0.06, cz + rr * math.sin(a)))
+        path = [(cx + rr * math.cos(a), dome_y_at(rr) - 0.06, cz + rr * math.sin(a)) for rr in np.linspace(dome_r - 0.05, top_r + 0.05, 24)]
         brass.add(*tube(np.array(path), 0.07, 6, caps=False))
     a = np.linspace(0, 2 * np.pi, 96, endpoint=False)
     for rr, at_top in ((top_r + 0.05, True), (dome_r * DOME_GLASS[1], False), (dome_r * DOME_GLASS[0], False), (dome_r * (DOME_GLASS[0] + DOME_GLASS[1]) / 2, False)):
@@ -1143,11 +1429,40 @@ def build_platform(rail: Rail, fast: bool) -> None:
         path = np.stack([cx + rr * np.cos(a), np.full_like(a, yy), cz + rr * np.sin(a)], axis=1)
         brass.add(*tube(path, 0.09 if at_top else 0.06, 8, caps=False, closed=True))
 
-    # ── 柱: 壁沿いの細い真鍮の柱。開口の前と、降車のレールのそばには立てない ──
+    # ── ドームの屋根（外）: 鉛色の屋根、乳白のガラスの帯、真鍮の外のリブ、頂の塔（小さなドームと真鍮の頂飾り） ──
+    ext_r = r_out + 0.2
+    ext_y = lambda rr: WALL_H + 0.85 + (DOME_TOP + 0.65 - WALL_H - 0.85) * math.sqrt(max(0.0, 1 - (rr / ext_r) ** 2))  # noqa: E731
+    lantern_r = 3.7
+    roof_rr = lantern_r + (ext_r - lantern_r) * np.sin(np.linspace(math.pi / 2, 0, 44))
+    prof = [(rr, ext_y(rr)) for rr in roof_rr]
+    v, f = lathe(prof, 120, (cx, 0, cz))
+    radial = np.array([math.hypot(*(v[list(x)].mean(0) - [cx, 0, cz])[[0, 2]]) for x in f])
+    band = (radial > DOME_GLASS[0] * ext_r) & (radial < DOME_GLASS[1] * ext_r)
+    roof.add(v, [x for x, b in zip(f, band) if not b])
+    ob = mesh_object('platform.dome_band_out', v, [x for x, b in zip(f, band) if b], m_glass, coll,
+                     props={'glass': 'milky', 'glass_color': '#7d8ca6', 'glass_opacity': 0.55, 'glass_emissive': '#6f8cbd', 'glass_emissive_intensity': 0.35,
+                            'role': 'dome_band', 'exterior': True, 'clearance_exempt': True})
+    objs.append(ob)
+    ring_a = np.linspace(0, 2 * np.pi, 96, endpoint=False)
+    for rr in (DOME_GLASS[0] * ext_r, DOME_GLASS[1] * ext_r):
+        path = np.stack([cx + rr * np.cos(ring_a), np.full_like(ring_a, ext_y(rr) + 0.06), cz + rr * np.sin(ring_a)], axis=1)
+        ext_brass.add(*tube(path, 0.08, 8, caps=False, closed=True))
+    lt0 = ext_y(lantern_r)
+    v, f = lathe([(lantern_r, lt0 - 0.2), (lantern_r, lt0 + 1.3), (lantern_r + 0.25, lt0 + 1.45), (lantern_r + 0.25, lt0 + 1.65), (lantern_r * 0.9, lt0 + 1.75)], 64, (cx, 0, cz))
+    ext.add(v, f)
+    v, f = lathe([(lantern_r * 0.9, lt0 + 1.75)] + [(lantern_r * 0.9 * math.cos(t), lt0 + 1.75 + 2.2 * math.sin(t)) for t in np.linspace(0.08, math.pi / 2 - 0.02, 12)], 64, (cx, 0, cz))
+    ob = mesh_object('platform.lantern_glass', v, f, m_glass, coll,
+                     props={'glass': 'milky', 'glass_color': '#8a99b2', 'glass_opacity': 0.6, 'glass_emissive': '#8ea6cc', 'glass_emissive_intensity': 0.35,
+                            'role': 'dome_band', 'exterior': True, 'clearance_exempt': True})
+    objs.append(ob)
+    ext_brass.add(*uv_sphere(np.array([cx, lt0 + 4.2, cz]), 0.32, 16, 10))
+    ext_brass.add(*tube(np.array([[cx, lt0 + 3.8, cz], [cx, lt0 + 5.6, cz]]), 0.06, 8))
+
+    # ── 柱: 壁沿いの細い真鍮の柱。開口の前と、降車のレールのそば、水門の湾には立てない ──
     for k in range(24):
         a = 2 * math.pi * (k + 0.5) / 24
         p = hall_point(h, a, r_in - 0.35, 0)
-        if near_opening(h, rail, p, 2.2) or horizontal_distance(dep_path, p) < 3.4:
+        if near_opening(h, rail, p, 2.2) or horizontal_distance(dep_path, p) < 3.4 or bay.inside(p, 1.2):
             continue
         brass.add(*tube(np.array([[p[0], DECK_Y, p[2]], [p[0], WALL_H - 0.85, p[2]]]), 0.11, 10))
         for yy, rr in ((DECK_Y + 0.12, 0.17), (WALL_H - 1.0, 0.16)):
@@ -1156,21 +1471,21 @@ def build_platform(rail: Rail, fast: bool) -> None:
             brass.add(*tube(ring, 0.035, 6, caps=False, closed=True))
 
     # ── 床: 水面（ホールいっぱい）、回廊（壁沿い）、桟橋（南の入口から始点の手前まで） ──
+    water = Builder()
     v, f = lathe([(0.0, WATER_Y), (r_in + 0.1, WATER_Y)], 160, (cx, 0, cz))
-    ob = mesh_object('platform.water', v, [tuple(reversed(x)) for x in f], m_water, coll, smooth=False,
-                     props={'role': 'water', 'clearance_exempt': True})
-    objs.append(ob)
+    water.add(v, [tuple(reversed(x)) for x in f])
+    water.add(*canal_water(bay.front, bay.d, bay.l, CANAL_LEN))
+    water_ob = water.build('platform.water', m_water, coll, smooth=False, props={'role': 'water', 'clearance_exempt': True})
+    objs.append(water_ob)
     walk_w = 2.2
     for prof, b in (([(r_in - walk_w + 0.15, DECK_Y), (r_in + 0.05, DECK_Y)], stone),
                     ([(r_in - walk_w, DECK_Y - 0.3), (r_in - walk_w, DECK_Y - 0.02), (r_in - walk_w + 0.02, DECK_Y), (r_in - walk_w + 0.15, DECK_Y)], plaster_dark)):
         v, f = lathe(prof, seg, (cx, 0, cz))
         f = [tuple(reversed(x)) for x in f]
-        keep = openings_keep(v, f, h, rail, canal_only=True)
         # 降車のレールのそば（水平 2.7m 以内）は回廊を切る（ゴンドラは南の壁沿いの水面を進む）
         cen = np.array([v[list(x)].mean(0) for x in f])
-        keep &= np.array([horizontal_distance(dep_path, c) >= 2.7 for c in cen])
+        keep = np.array([horizontal_distance(dep_path, c) >= 2.7 for c in cen])
         b.add(v, [x for x, k in zip(f, keep) if k])
-    # 回廊の縁の真鍮の低い手すり（回廊が切れる所では切る）
     for a0, a1 in balustrade_arcs(h, rail):
         aa = np.linspace(a0, a1, max(8, int((a1 - a0) * 60)))
         pts = np.stack([cx + (r_in - walk_w + 0.12) * np.cos(aa), np.full_like(aa, DECK_Y + 0.95), cz + (r_in - walk_w + 0.12) * np.sin(aa)], axis=1)
@@ -1182,8 +1497,6 @@ def build_platform(rail: Rail, fast: bool) -> None:
             brass.add(*tube(seg_pts, 0.025, 6))
             for q in seg_pts[::4]:
                 brass.add(*tube(np.array([[q[0], DECK_Y, q[2]], [q[0], DECK_Y + 0.95, q[2]]]), 0.012, 5, caps=False))
-
-    # 桟橋: 南の入口から始点の手前（ゴンドラの殻から少し離す）。先が丸い板
     pier_tip = start[2] + GONDOLA_R + 0.75
     pier_end = hall_point(h, a_south, r_in + 0.1, 0)[2]
     stone.add(*rounded_slab(-1.55, 1.55, pier_tip, pier_end, DECK_Y, 0.35))
@@ -1195,7 +1508,7 @@ def build_platform(rail: Rail, fast: bool) -> None:
         for z in np.arange(pier_tip + 1.6, pier_end - 0.2, 0.6):
             brass.add(*tube(np.array([[side * 1.42, DECK_Y, z], [side * 1.42, DECK_Y + 0.9, z]]), 0.014, 5, caps=False))
 
-    # ── 北の門: 真鍮の丸い門（膜は TS が張る）。開口のまわりに3重の輪と放射の飾り ──
+    # ── 北の門: 真鍮の丸い門（膜は TS が張る）。開口のまわりに3重の輪と放射の飾り。内と外の縁 ──
     gfwd = rail.forward(s_plat1)
     gright = np.array([-gfwd[2], 0.0, gfwd[0]])
     gup = np.array([0.0, 1.0, 0.0])
@@ -1208,25 +1521,24 @@ def build_platform(rail: Rail, fast: bool) -> None:
         d = math.cos(aa) * gright + math.sin(aa) * gup
         brass.add(*tube(np.array([north + d * (GATE_RING_R + 0.09), north + d * (GATE_RING_R + 0.42) - gfwd * 0.2]), 0.014, 5))
     plaster_dark.add(*gate_reveal(north, gfwd, gright, GATE_OPEN_R, WALL_T + 0.9))
-    # 門のまわりの縁（壁の格子の穴のぎざぎざを隠す輪。ホールの側を向く）
     ca = np.linspace(0, 2 * np.pi, 96, endpoint=False)
     ring_dir = np.cos(ca)[:, None] * gright[None, :] + np.sin(ca)[:, None] * gup[None, :]
-    face_c = north + gfwd * (-(WALL_T + 0.9) * 0.5)
-    inner = face_c[None, :] + ring_dir * GATE_OPEN_R
-    outer = face_c[None, :] + ring_dir * (GATE_OPEN_R + 1.15)
-    cv = np.vstack([inner, outer])
-    cf = []
-    for i in range(96):
-        i2 = (i + 1) % 96
-        q = (i, i2, 96 + i2, 96 + i)
-        nrm = np.cross(cv[q[1]] - cv[q[0]], cv[q[2]] - cv[q[0]])
-        cf.append(q if np.dot(nrm, -gfwd) > 0 else tuple(reversed(q)))
-    plaster_dark.add(cv, cf)
-    brass.add(*tube(outer + gfwd * -0.02, 0.05, 8, caps=False, closed=True))
+    for face_off, want, b in ((-(WALL_T + 0.9) * 0.5, -gfwd, plaster_dark), ((WALL_T + 0.9) * 0.5, gfwd, ext)):
+        face_c = north + gfwd * face_off
+        inner = face_c[None, :] + ring_dir * GATE_OPEN_R
+        outer = face_c[None, :] + ring_dir * (GATE_OPEN_R + 1.15)
+        cv = np.vstack([inner, outer])
+        cf = []
+        for i in range(96):
+            i2 = (i + 1) % 96
+            q = (i, i2, 96 + i2, 96 + i)
+            nrm = np.cross(cv[q[1]] - cv[q[0]], cv[q[2]] - cv[q[0]])
+            cf.append(q if np.dot(nrm, want) > 0 else tuple(reversed(q)))
+        b.add(cv, cf)
+        (brass if b is plaster_dark else ext_brass).add(*tube(outer + want * 0.02, 0.05, 8, caps=False, closed=True))
 
     # ── 南の入口（待ち列のアーチへ）: 壁の厚みのアーチの通路、ホール側の縁、乳白のガラスの扉2枚 ──
-    # 待ち列はレールの始点の真後ろに一直線に置く（lobby.py と TS の lobbyViews が同じ距離を使う）。
-    # 入口の通路も同じ向きにして、内壁から待ち列の始まり（LOBBY_ORIGIN）までをつなぐ
+    # 待ち列はレールの始点の真後ろに一直線に置く（lobby.py と TS の lobbyViews が同じ距離を使う）
     door_c, door_out = south_door(h, rail)
     door_side = np.array([-door_out[2], 0, door_out[0]])
     outline = arch_outline(SOUTH_DOOR_HALF, SOUTH_DOOR_TOP, DECK_Y - 0.05, 48)
@@ -1246,13 +1558,11 @@ def build_platform(rail: Rail, fast: bool) -> None:
         to_axis -= door_out * np.dot(to_axis, door_out)
         rf.append(q if np.dot(nrm, to_axis) > 0 else tuple(reversed(q)))
     plaster_dark.add(np.array(rv), rf)
-    # 通路の床（桟橋から待ち列の始まりまで）
     fl = [door_c - door_out * 0.6 - door_side * SOUTH_DOOR_HALF, door_c - door_out * 0.6 + door_side * SOUTH_DOOR_HALF,
           door_c + door_out * depth + door_side * SOUTH_DOOR_HALF, door_c + door_out * depth - door_side * SOUTH_DOOR_HALF]
     fl = np.array([p + [0, DECK_Y, 0] for p in fl])
     nrm = np.cross(fl[1] - fl[0], fl[2] - fl[0])
     stone.add(fl, [(0, 1, 2, 3) if nrm[1] > 0 else (3, 2, 1, 0)])
-    # ホール側の縁（壁の格子の穴のぎざぎざを隠す）
     outer = arch_outline(SOUTH_DOOR_HALF + 0.85, SOUTH_DOOR_TOP + 0.85, DECK_Y - 0.05, 48)
     cv = [door_c + door_side * x + np.array([0, y, 0]) - door_out * 0.04 for x, y in outline] + [door_c + door_side * x + np.array([0, y, 0]) - door_out * 0.04 for x, y in outer]
     n_o = len(outline)
@@ -1264,121 +1574,112 @@ def build_platform(rail: Rail, fast: bool) -> None:
     plaster_dark.add(np.array(cv), cf)
     brass.add(*tube(np.array(cv[n_o:]) - door_out * 0.02, 0.05, 8))
     brass.add(*tube(np.array(cv[:n_o]) - door_out * 0.03, 0.04, 8))
-    # 扉: 左右2枚。蝶番（外の縁）を原点にして、TS が開け閉めする（乗車の頭は開いていて、走り出すと閉まる）
     m_door = material('platform.door_glass', '#f3e6d2', 0.3, alpha=0.4)
-    door_y0 = DECK_Y
     for side, label in ((-1, 1), (1, 2)):
         hinge = door_c + door_side * side * (SOUTH_DOOR_HALF - 0.04) + door_out * (depth - 0.25)
-        # 半分の形: 中心の下 → 外の下 → 外の縦の縁 → アーチの半分 → 中心の上（左右で同じ回り方にする）
         spring = SOUTH_DOOR_TOP - SOUTH_DOOR_HALF
-        half_outline = [(0.0, door_y0), (side * SOUTH_DOOR_HALF, door_y0), (side * SOUTH_DOOR_HALF, spring)]
+        half_outline = [(0.0, DECK_Y), (side * SOUTH_DOOR_HALF, DECK_Y), (side * SOUTH_DOOR_HALF, spring)]
         for i in range(1, 24):
-            a = math.pi / 2 * i / 24
-            half_outline.append((side * SOUTH_DOOR_HALF * math.cos(a), spring + SOUTH_DOOR_HALF * math.sin(a)))
+            t = math.pi / 2 * i / 24
+            half_outline.append((side * SOUTH_DOOR_HALF * math.cos(t), spring + SOUTH_DOOR_HALF * math.sin(t)))
         half_outline.append((0.0, SOUTH_DOOR_TOP))
-        poly = [door_c + door_side * x + np.array([0, max(y, door_y0), 0]) + door_out * (depth - 0.25) for x, y in half_outline]
-        poly = np.array(poly)
-        cen = poly.mean(0)
-        dv = np.vstack([cen, poly])
+        poly = np.array([door_c + door_side * x + np.array([0, max(y, DECK_Y), 0]) + door_out * (depth - 0.25) for x, y in half_outline])
+        dv = np.vstack([poly.mean(0), poly])
         df = []
         for i in range(len(poly)):
             q = (0, 1 + i, 1 + (i + 1) % len(poly))
             nrm = np.cross(dv[q[1]] - dv[q[0]], dv[q[2]] - dv[q[0]])
             df.append(q if np.dot(nrm, -door_out) > 0 else tuple(reversed(q)))
+        # 扉の乳白のガラスは琥珀（向こうの待ち列の暖かい光。白く飛ばさない）
         ob = mesh_object(f'platform.door.{label:03d}', dv, df, m_door, coll, smooth=False, origin=hinge,
-                         props={'glass': 'milky', 'glass_color': '#a89e90', 'glass_opacity': 0.5, 'glass_emissive': '#ffcf98', 'glass_emissive_intensity': 0.22,
+                         props={'glass': 'milky', 'glass_color': '#8f7a62', 'glass_opacity': 0.5, 'glass_emissive': '#ffb877', 'glass_emissive_intensity': 0.18,
                                 'role': 'door_leaf', 'hinge_side': side, 'door_axis': [round(float(x), 4) for x in door_out], 'no_split': True})
         objs.append(ob)
         frame = np.vstack([poly, poly[:1]])
         fr = mesh_object(f'platform.door_frame.{label:03d}', *tube(frame, 0.035, 6), m_brass, coll, origin=hinge, props={'brass': True, 'frame_of': ob.name, 'no_split': True})
         objs.append(fr)
 
-    # ── 東の水路: 壁から外へ。両側の壁と円い天井、ホール側の口に真鍮の縁 ──
-    dfwd = rail.forward(s_dep0)  # 西向き（ホールの中へ）
-    dright = np.array([-dfwd[2], 0.0, dfwd[0]])
-    canal_in = east - dfwd * (WALL_T * 0.5)
-    canal_len = 7.5
-    plaster_dark.add(*canal_shell(canal_in, dfwd, dright, canal_len))
-    mouth = canal_in + dfwd * canal_len
-    brass.add(*tube(canal_arch_path(mouth, dright, CANAL_HALF - 0.05, CANAL_TOP - 0.05), 0.07, 8))
+    # ── 東の水門: 水門の館の正面（降車の区間の始まり +BAY_FRONT_AT m）から、ホールの中へ短い水路 ──
+    canal_len = CANAL_LEN
+    canal.add(*canal_shell(bay.front, bay.d, bay.l, canal_len))
+    brass.add(*tube(canal_arch_path(bay.front + bay.d * canal_len, bay.l, CANAL_HALF - 0.05, CANAL_TOP - 0.05), 0.07, 8))
+    gatehouse(bay, h, ext, plaster, dome_y_at, ext_y)
 
-    # ── 高窓: 壁の上の丸窓。ガラスは TS、焼き込みでは光を通す ──
-    win = Builder()
-    for c, n_in, t_dir in window_centers(h, rail):
-        wr = WINDOW_R
-        disc_a = np.linspace(0, 2 * np.pi, 40, endpoint=False)
-        ring = c[None, :] + (np.cos(disc_a)[:, None] * t_dir[None, :] + np.sin(disc_a)[:, None] * gup[None, :]) * wr
-        vv = np.vstack([c, ring])
-        ff = [(0, 1 + (i + 1) % 40, 1 + i) if np.dot(np.cross(ring[(i + 1) % 40] - c, ring[i] - c), n_in) > 0 else (0, 1 + i, 1 + (i + 1) % 40) for i in range(40)]
-        win.add(vv, ff)
-        # 窓のまわりの縁（壁の格子で開けた穴のぎざぎざを隠す、濃い色の輪）
-        outer = c[None, :] + (np.cos(disc_a)[:, None] * t_dir[None, :] + np.sin(disc_a)[:, None] * gup[None, :]) * (wr + 0.62) + n_in * 0.03
-        inner = ring + n_in * 0.03
-        av = np.vstack([inner, outer])
-        af = []
-        for i in range(40):
-            i2 = (i + 1) % 40
-            q = (i, i2, 40 + i2, 40 + i)
-            nrm = np.cross(av[q[1]] - av[q[0]], av[q[2]] - av[q[0]])
-            af.append(q if np.dot(nrm, n_in) > 0 else tuple(reversed(q)))
-        plaster_dark.add(av, af)
-        brass.add(*tube(ring + n_in * 0.04, 0.06, 8, caps=False, closed=True))
-        brass.add(*tube(outer + n_in * 0.01, 0.035, 6, caps=False, closed=True))
-        brass.add(*tube(np.array([c - t_dir * wr, c + t_dir * wr]) + n_in * 0.03, 0.025, 5))
-        brass.add(*tube(np.array([c - gup * wr, c + gup * wr]) + n_in * 0.03, 0.025, 5))
-    ob = win.build('platform.windows', m_glass, coll, smooth=False,
-                   props={'glass': 'clear', 'glass_color': '#cfdcec', 'glass_opacity': 0.12, 'clearance_exempt': True})
-    objs.append(ob)
-
-    # ── 天井の乳白の灯り: ドームの中ほどに12の大きな乳白の玉（焼き込みの光源。TS は乳白の発光のガラス） ──
+    # ── 天井の乳白の灯り（ドームの中ほどに12。水門の湾の上には吊らない） ──
     lamp_v = Builder()
     lamp_r = 0.62
     lamp_centers = []
     for k in range(12):
         a = 2 * math.pi * (k + 0.5) / 12
         rr = dome_r * 0.6
-        yy = dome_y_at(rr) - 2.6
-        c = hall_point(h, a, rr, yy)
+        c = hall_point(h, a, rr, dome_y_at(rr) - 2.6)
+        if bay.inside(c, 1.5):
+            continue
         lamp_centers.append(c)
         lamp_v.add(*uv_sphere(c, lamp_r, 24, 14, scale=(1, 0.9, 1)))
         brass.add(*tube(np.array([c + [0, lamp_r * 0.85, 0], [c[0], dome_y_at(rr) - 0.1, c[2]]]), 0.02, 5))
         brass.add(*lathe([(lamp_r * 0.25, lamp_r * 0.95), (lamp_r * 0.78, lamp_r * 0.72), (lamp_r * 0.82, lamp_r * 0.6)], 24, c))
     ob = lamp_v.build('platform.lamps', emitter('platform.lamp_light', '#ffe2bc', 16.0), coll,
                       props={'glass': 'milky', 'glass_color': '#fbf1e2', 'glass_opacity': 0.8, 'glass_emissive': '#ffdcae', 'glass_emissive_intensity': 1.3, 'role': 'ceiling_lamp',
-                             'lamp_centers': [round(float(x), 3) for c in lamp_centers for x in c], 'lamp_radius': lamp_r})
+                             'lamp_centers': [round(float(x), 3) for c in lamp_centers for x in c], 'lamp_radius': lamp_r, 'clearance_exempt': True})
     objs.append(ob)
 
-    # ── 壁の燭台: 窓のあいだの低い位置に乳白の玉（壁と回廊に暖かい光のたまりを作る。水に映る） ──
+    # ── 壁の燭台（窓のあいだの低い位置の乳白の玉） ──
     sconce_v = Builder()
     sconce_centers = []
     sconce_r = 0.26
     for k in range(20):
         a = 2 * math.pi * (k + 0.75) / 20
         base = hall_point(h, a, r_in, 4.3)
-        if near_opening(h, rail, base, 2.6) or horizontal_distance(dep_path, base) < 3.0:
+        if near_opening(h, rail, base, 2.6) or horizontal_distance(dep_path, base) < 3.0 or bay.inside(base, 1.5):
             continue
         n_in = np.array([-math.cos(a), 0, -math.sin(a)])
         c = base + n_in * 0.55
         sconce_centers.append(c)
         sconce_v.add(*uv_sphere(c, sconce_r, 20, 12))
-        # 真鍮の腕と、壁の丸い座金
         brass.add(*tube(np.array([base + n_in * 0.02 - np.array([0, 0.25, 0]), base + n_in * 0.3 - np.array([0, 0.32, 0]), c - np.array([0, sconce_r * 0.9, 0])]), 0.018, 6))
-        # 玉を受ける浅い杯
         brass.add(*tube(np.array([c - np.array([0, sconce_r * 1.05, 0]), c - np.array([0, sconce_r * 0.75, 0])]), 0.07, 10))
     ob = sconce_v.build('platform.sconces', emitter('platform.sconce_light', '#ffcf94', 22.0), coll,
                         props={'glass': 'milky', 'glass_color': '#fff1dc', 'glass_opacity': 0.82, 'glass_emissive': '#ffd09a', 'glass_emissive_intensity': 1.6, 'role': 'sconce',
                                'lamp_centers': [round(float(x), 3) for c in sconce_centers for x in c], 'lamp_radius': sconce_r})
     objs.append(ob)
 
-    for name, b, m, bk in (('platform.plaster', plaster, m_plaster, True), ('platform.plaster_dark', plaster_dark, m_plaster_dark, True),
-                           ('platform.stone', stone, m_stone, True), ('platform.brass', brass, m_brass, False)):
-        ob = b.build(name, m, coll, smooth=True, props={'brass': True} if not bk else None)
+    # 物にする。漆喰の壁とドーム・外の殻は、レールを囲む連続した形なので箱では測らず、面までの本当の距離で確かめる（ADR-0013）
+    exempt = {'clearance_exempt': True, 'check_true_clearance': True}
+    for name, b, m, group, props in (
+        ('platform.plaster', plaster, m_plaster, bake, exempt),
+        ('platform.plaster_dark', plaster_dark, m_plaster_dark, bake, None),
+        ('platform.stone', stone, m_stone, bake, None),
+        ('platform.brass', brass, m_brass, None, {'brass': True}),
+        ('platform.exterior', ext, m_ext, bake_ext, {**exempt, 'exterior': True}),
+        ('platform.roof', roof, m_roof, bake_ext, {**exempt, 'exterior': True}),
+        ('platform.exterior_brass', ext_brass, m_brass, None, {'brass': True, 'exterior': True, 'clearance_exempt': True, 'check_true_clearance': True}),
+        ('platform.canal', canal, m_plaster_dark, bake, {**exempt, 'exterior': True}),
+    ):
+        if b.empty():
+            continue
+        ob = b.build(name, m, coll, smooth=True, props=props)
         objs.append(ob)
-        if bk:
-            bake.append(ob)
+        if group is not None:
+            group.append(ob)
+
+    # ── 水門の湾を空ける: 水門の館の正面より手前（岸の側）に、ホールの形を残さない（ADR-0013 の部屋の境目） ──
+    interior = [o for o in objs if o.type == 'MESH' and not o.get('exterior') and o.get('role') not in ('proto', 'door_leaf', 'water')
+                and o.name not in ('platform.lamps', 'platform.sconces')]
+    cut_region(interior, bay.front, bay.d, bay.l, WALL_T, BAY_N + WALL_T)
+    exterior = [o for o in objs if o.type == 'MESH' and o.get('exterior') and o.name != 'platform.canal'] + [water_ob]
+    cut_region(exterior, bay.front, bay.d, bay.l, 0.0, BAY_N)
+    # 水門の館の飾り（正面より岸の側に出る蛇腹・腰・額縁）は切った後に足す
+    trim, trim_dark, trim_brass = Builder(), Builder(), Builder()
+    gatehouse_dressing(bay, h, trim, trim_dark, trim_brass)
+    append_geometry(bpy.data.objects['platform.exterior'], *trim.data(), smooth=False)
+    append_geometry(bpy.data.objects['platform.exterior_brass'], *trim_brass.data())
+    ob = trim_dark.build('platform.exterior_dark', m_plaster_dark, coll, smooth=False, props={**exempt, 'exterior': True})
+    objs.append(ob)
+    bake_ext.append(ob)
 
     # ── 吊られた泡 ──
-    protos, holder = build_bubbles(rail, h, coll, rng, objs, dome_y_at)
+    protos, holder = build_bubbles(rail, h, coll, rng, objs, dome_y_at, bay)
     objs.extend(protos)
     objs.append(holder)
 
@@ -1399,8 +1700,9 @@ def build_platform(rail: Rail, fast: bool) -> None:
     lamp_mat = bpy.data.materials['platform.lamp_light']
 
     def morning():
-        set_world('#e2e0d8', 2.6)
-        sun_ob = sun('platform.sun', MORNING_SUN_DIR, '#ffd8a8', 8.5, 1.0)
+        # 降車の朝: 暖かい空の光（ドームのガラスの帯から）と低い朝日（高窓とガラスの帯から壁に金色の斑）
+        set_world('#f0dcc0', 4.4)
+        sun_ob = sun('platform.sun', MORNING_SUN_DIR, '#ffcf96', 13.0, 1.0)
         lamp_mat.node_tree.nodes['Emission'].inputs['Strength'].default_value = 1.5
         sc = bpy.data.materials['platform.sconce_light'].node_tree.nodes['Emission'].inputs['Strength']
         sc.default_value = 1.0
@@ -1422,33 +1724,334 @@ def build_platform(rail: Rail, fast: bool) -> None:
     holder['env_morning'] = render_env('platform.env_morning', env_at, samples=24 if fast else 96)
     restore()
 
-    vp = np.vstack([rail.samples(*rail.span('platform', after=25.0), 0.5), rail.samples(*rail.span('departure', before=30.0), 0.5)])
+    # 見えない面の削除の視点: 乗り場と降車（前後の余裕も）、夜明けの岸の朝日の誘導から先（遠くに乗り場が見える）、
+    # 温室の頭の 12 秒（膜から振り返る）
+    sunrise_lure_t = MOMENT_DAWN_SUNRISE_BAR * SEC_PER_BAR - LURE_LEAD
+    vp = np.vstack([
+        rail.samples(*rail.span('platform', after=25.0), 0.5),
+        rail.samples(*rail.span('departure', before=30.0), 0.5),
+        rail.samples(rail.s_at(sunrise_lure_t), rail.sections['dawn'][1], 1.0),
+        rail.samples(rail.sections['greenhouse'][0], rail.s_at(rail.time_of(rail.sections['greenhouse'][0]) + 12.0), 0.5),
+    ])
     cp = np.vstack([rail.samples(*rail.sections['platform'], 0.25), rail.samples(*rail.sections['departure'], 0.25)])
+    def greenhouse_day():
+        """外側の基本の光（夜明け前の時刻に外側が見えるのは、温室の頭で振り返ったときだけなので、温室の昼の光で焼く）"""
+        set_world('#d4e3d6', 0.55)
+        sun_ob = sun('platform.greenhouse_sun', GREENHOUSE_SUN_DIR, '#ffe2b4', 10.0, 0.9)
+        lamp_mat.node_tree.nodes['Emission'].inputs['Strength'].default_value = 1.5
+
+        def restore():
+            set_world('#27406b', 1.1)
+            bpy.data.objects.remove(sun_ob)
+            lamp_mat.node_tree.nodes['Emission'].inputs['Strength'].default_value = 16.0
+        return restore
+
+    def shore_morning():
+        """外側の朝（夜明けの岸から見る）。岸の空の色（src/rooms/dawn/sky.ts の朝日の頃の地平と天頂のあいだ）の空と、
+        ホールの向こう（西北西）の低い朝日。岸に向いた正面は空の光だけの逆光になり、ドームの頂に朝日が乗る"""
+        set_world('#8f86a8', 1.6)
+        sun_ob = sun('platform.shore_sun', MORNING_SUN_DIR, '#ffbe8a', 7.0, 1.5)
+        lamp_mat.node_tree.nodes['Emission'].inputs['Strength'].default_value = 1.5
+
+        def restore():
+            set_world('#27406b', 1.1)
+            bpy.data.objects.remove(sun_ob)
+            lamp_mat.node_tree.nodes['Emission'].inputs['Strength'].default_value = 16.0
+        return restore
+
     samples = 48 if fast else 320
-    finish_room('platform', rail, objs, vp, cp, bake, size=2048, samples=samples, extra_bakes=[('morning', morning)], webp=90)
+    finish_room('platform', rail, objs, vp, cp, bake, size=2048, samples=samples, extra_bakes=[('morning', morning)], webp=90,
+                more_bakes=[('lightmap_exterior', bake_ext, 1024, greenhouse_day, {'morning': shore_morning})],
+                hide_while_baking={'lightmap': [o.name for o in objs if o.get('exterior') and o not in bake]})
     for ob in helpers:
         bpy.data.objects.remove(ob)
     save_blend('platform')
 
 
-#: 朝の光の進む向き（three.js の座標）。東（+X）の低い所から西へ、少し北へ
-MORNING_SUN_DIR = (-0.78, -0.42, 0.46)
+#: 温室の日の光の進む向き（blender/scripts/rooms/greenhouse.py の SUN_DIR の写し）
+GREENHOUSE_SUN_DIR = (-0.32, -0.40, 0.86)
+#: 朝の光の進む向き（three.js の座標）。夜明けの岸と同じ朝日（src/rooms/dawn/sky.ts の方位 30°、高さ約 15°）から来る光
+MORNING_SUN_DIR = (0.837, -0.259, 0.483)
+#: 夜明けの岸の朝日の小節と、誘導の秒（src/config.ts の MOMENT_BARS.dawnSunrise と LURE_LEAD_SEC の写し）
+MOMENT_DAWN_SUNRISE_BAR = 213
+SEC_PER_BAR = 10.0 / 3.0
+LURE_LEAD = 3.0
+#: 水門の湾の北の幅（レールから、m）
+BAY_N = 6.4
+#: 水門の館の正面は、降車の区間の始まりからこの距離だけホールの側。正面から岸の側へ出る飾り（蛇腹 0.5m・腰・額縁）も
+#: 含めて、乗り場の形は s0 +1m より岸の側に置かない（ADR-0013: 入る側の部屋は s0 +1m 以降）
+BAY_FRONT_AT = 1.5
+
+
+class Bay:
+    """東の水門の湾: 降車の区間の始まり +BAY_FRONT_AT m の面（front）の岸の側で、レールの北 BAY_N m まで。
+    d はホールの中への向き（レールの進む向き）、l は横（北が正）"""
+
+    def __init__(self, front, d, l):
+        self.front = front
+        self.d = d
+        self.l = l
+
+    def local(self, p) -> tuple[float, float]:
+        q = np.asarray(p, dtype=np.float64) - self.front
+        q[1] = 0.0
+        return float(np.dot(q, self.d)), float(np.dot(q, self.l))
+
+    def inside(self, p, margin: float = 0.0) -> bool:
+        a, lat = self.local(p)
+        return a < WALL_T + margin and -12.0 < lat < BAY_N + WALL_T + margin
+
+
+def water_gate_bay(rail: Rail, h: dict) -> Bay:
+    s0 = rail.sections['departure'][0]
+    front = rail.point(s0 + BAY_FRONT_AT)
+    front[1] = 0.0
+    d = rail.forward(s0)
+    lat = np.array([-d[2], 0.0, d[0]])
+    if lat[2] > 0:  # 北（-Z）を正に
+        lat = -lat
+    return Bay(front, d, lat)
+
+
+def gatehouse(bay: Bay, h: dict, ext: Builder, plaster: Builder, dome_y_at, ext_y) -> None:
+    """水門の館: 湾を囲む2枚の厚い壁（正面と、北の返し）。外の面は外の殻、内の面はホールの漆喰。
+    上の縁はドームの高さ（内はドームの内、外は屋根）に合わせ、内と外のあいだに天端を張る。正面には水路のアーチの穴"""
+    cx, cz, r_in, r_out = h['cx'], h['cz'], h['r_in'], h['r_out']
+    d, lat = bay.d, bay.l
+
+    def to_world(a: float, l: float, y: float) -> np.ndarray:
+        return bay.front + d * a + lat * l + np.array([0.0, y, 0.0])
+
+    def radius(a: float, l: float) -> float:
+        p = to_world(a, l, 0.0)
+        return math.hypot(p[0] - cx, p[2] - cz)
+
+    def top_in(a: float, l: float) -> float:
+        rr = radius(a, l)
+        return dome_y_at(rr) - 0.02 if rr < r_in - 0.8 else WALL_H + 0.05
+
+    def top_out(a: float, l: float) -> float:
+        rr = radius(a, l)
+        return ext_y(rr) + 0.02 if rr < r_out + 0.2 else WALL_H + 0.9
+
+    def slab(points_out, points_in, want_out):
+        """外と内の面（下 y=水面の下 から上の縁まで）と天端。points_* は (a, l) の並び"""
+        for pts, top, want, b in ((points_out, top_out, want_out, ext), (points_in, top_in, -want_out, plaster)):
+            verts, faces = [], []
+            for k, (a, l) in enumerate(pts):
+                verts.append(to_world(a, l, WATER_Y - 0.4))
+                verts.append(to_world(a, l, top(a, l)))
+                if k:
+                    q = (2 * k - 2, 2 * k, 2 * k + 1, 2 * k - 1)
+                    faces.append(q)
+            verts = np.array(verts)
+            faces = orient(verts, faces, want)
+            b.add(verts, faces)
+        cv, cf = [], []
+        for k, ((ao, lo), (ai, li)) in enumerate(zip(points_out, points_in)):
+            cv.append(to_world(ao, lo, top_out(ao, lo)))
+            cv.append(to_world(ai, li, top_in(ai, li)))
+            if k:
+                cf.append((2 * k - 2, 2 * k, 2 * k + 1, 2 * k - 1))
+        cv = np.array(cv)
+        ext.add(cv, orient(cv, cf, np.array([0.0, 1.0, 0.0])))
+
+    # 正面（a = 0 の外の面、a = WALL_T の内の面）。横は南の水路の外の皮から北の返しまで。水路のアーチの穴を抜いた
+    # 1枚の面（列ごとに頂点を共有して、穴の縁や継ぎ目に隙間を作らない）
+    south = -(CANAL_HALF + CANAL_SKIN)
+    n = 40
+    split = canal_y_custom(CANAL_HALF, CANAL_HALF, CANAL_TOP)
+
+    def facade(a0: float, l_lo: float, l_hi: float, top, want, b: Builder) -> None:
+        ls = sorted(set(np.round(np.linspace(l_lo, l_hi, 72), 6).tolist()) | {-CANAL_HALF, CANAL_HALF})
+        verts, cols = [], []
+        for l in ls:
+            if abs(l) < CANAL_HALF - 1e-9:
+                ys = [canal_y_custom(l, CANAL_HALF, CANAL_TOP), top(a0, l)]
+            else:
+                ys = [WATER_Y - 0.4, split, top(a0, l)]
+            cols.append(list(range(len(verts), len(verts) + len(ys))))
+            verts += [to_world(a0, l, y) for y in ys]
+        faces = []
+        for c0, c1 in zip(cols, cols[1:]):
+            if len(c0) == 3 and len(c1) == 3:
+                faces += [(c0[0], c1[0], c1[1], c0[1]), (c0[1], c1[1], c1[2], c0[2])]
+            elif len(c0) == 3:
+                faces.append((c0[1], c1[0], c1[1], c0[2]))
+            elif len(c1) == 3:
+                faces.append((c0[0], c1[1], c1[2], c0[1]))
+            else:
+                faces.append((c0[0], c1[0], c1[1], c0[1]))
+        verts = np.array(verts)
+        b.add(verts, orient(verts, faces, want))
+
+    facade(0.0, south, BAY_N, top_out, -d, ext)
+    facade(WALL_T, south, BAY_N + WALL_T, top_in, d, plaster)
+    cv, cf = [], []
+    for k, (lo, li) in enumerate(zip(np.linspace(south, BAY_N, n), np.linspace(south, BAY_N + WALL_T, n))):
+        cv.append(to_world(0.0, lo, top_out(0.0, lo)))
+        cv.append(to_world(WALL_T, li, top_in(WALL_T, li)))
+        if k:
+            cf.append((2 * k - 2, 2 * k, 2 * k + 1, 2 * k - 1))
+    cv = np.array(cv)
+    ext.add(cv, orient(cv, cf, np.array([0.0, 1.0, 0.0])))
+    # 北の返し（l = BAY_N の外の面、l = BAY_N + WALL_T の内の面）。岸の側へ外壁・内壁の円まで
+    def reach(l: float, rr: float) -> float:
+        # 中心より岸の側では、a が増えるほど中心に近づく
+        lo, hi = -40.0, 16.0
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            if radius(mid, l) < rr:
+                hi = mid
+            else:
+                lo = mid
+        return hi
+    a_out = reach(BAY_N, r_out)
+    a_in = reach(BAY_N + WALL_T, r_in)
+    pts_out = [(a, BAY_N) for a in np.linspace(0.0, a_out, n)]
+    pts_in = [(a, BAY_N + WALL_T) for a in np.linspace(WALL_T, a_in, n)]
+    slab(pts_out, pts_in, -lat)
+    # 南の返し（水路の外の皮の南）: 正面の南の端から、ホールの外壁まで。正面とホールのあいだの隙間を岸から見せない
+    a_s = reach(south, r_out) + 0.3
+    pts_out = [(a, south) for a in np.linspace(0.0, a_s, 12)]
+    pts_in = [(a, south + 0.5) for a in np.linspace(WALL_T, a_s, 12)]
+    slab(pts_out, pts_in, -lat)
+
+
+#: 外の蛇腹と腰の断面（壁の面から外への出, 高さ）。ホールの外壁の lathe と同じ形
+EXT_CORNICE = [(-0.02, WALL_H + 0.25), (0.35, WALL_H + 0.35), (0.5, WALL_H + 0.6), (0.5, WALL_H + 0.78), (0.2, WALL_H + 0.9)]
+EXT_PLINTH = [(0.06, WATER_Y - 0.4), (0.28, WATER_Y - 0.2), (0.28, DECK_Y + 0.9), (0.02, DECK_Y + 1.05)]
+
+
+def extrude_profile(p0, p1, out_n, profile, caps: bool = True):
+    """壁の面の上の直線 p0 → p1（水平）に沿って、断面 profile（外への出, 高さ）を押し出す（蛇腹・腰）。面は外を向く"""
+    verts = []
+    for p in (p0, p1):
+        for off, y in profile:
+            verts.append(np.array([p[0], y, p[2]]) + out_n * off)
+    verts = np.array(verts)
+    m = len(profile)
+    faces = []
+    for k in range(m - 1):
+        q = (k, k + 1, m + k + 1, m + k)
+        c = verts[list(q)].mean(0)
+        want = out_n * 1.0 + np.array([0.0, (c[1] - (profile[0][1] + profile[-1][1]) / 2) * 0.01, 0.0])
+        faces.append(orient(verts, [q], want)[0])
+    if caps:
+        along = np.asarray(p1) - np.asarray(p0)
+        along[1] = 0.0
+        along /= np.linalg.norm(along)
+        for base, want in ((0, -along), (m, along)):
+            cap = list(range(base, base + m))
+            faces.append(orient(verts, [tuple(cap)], want)[0])
+    return verts, faces
+
+
+def gatehouse_dressing(bay: Bay, h: dict, ext: Builder, ext_dark: Builder, ext_brass: Builder) -> None:
+    """水門の館を、ホールの外壁と同じ言葉で飾る: 正面と北の返しに外の蛇腹と腰を回し、水路の口のまわりに暗い石の額縁と
+    真鍮の輪を重ねる（夜明けの岸から、ドームの建物の水門に見えるように）"""
+    d, lat = bay.d, bay.l
+    south = -(CANAL_HALF + CANAL_SKIN)
+
+    def w(a: float, l: float) -> np.ndarray:
+        return bay.front + d * a + lat * l
+
+    cx, cz, r_out = h['cx'], h['cz'], h['r_out']
+
+    def reach(l: float, rr: float) -> float:
+        lo, hi = -40.0, 16.0
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            p = w(mid, l)
+            if math.hypot(p[0] - cx, p[2] - cz) < rr:
+                hi = mid
+            else:
+                lo = mid
+        return hi
+
+    a_n = reach(BAY_N, r_out)
+    a_s = reach(south, r_out)
+    # 蛇腹: 正面（南の端から北の角の少し先まで）、北の返し（角から外壁まで）、南の返し
+    ext.add(*extrude_profile(w(0.0, south - 0.5), w(0.0, BAY_N + 0.5), -d, EXT_CORNICE))
+    ext.add(*extrude_profile(w(-0.5, BAY_N), w(a_n + 0.3, BAY_N), -lat, EXT_CORNICE))
+    ext.add(*extrude_profile(w(-0.5, south), w(a_s + 0.3, south), -lat, EXT_CORNICE))
+    # 腰: 水路の口を避けて
+    edge = CANAL_HALF + 1.0
+    ext.add(*extrude_profile(w(0.0, south - 0.3), w(0.0, -edge), -d, EXT_PLINTH))
+    ext.add(*extrude_profile(w(0.0, edge), w(0.0, BAY_N + 0.3), -d, EXT_PLINTH))
+    ext.add(*extrude_profile(w(-0.3, BAY_N), w(a_n + 0.3, BAY_N), -lat, EXT_PLINTH))
+    ext.add(*extrude_profile(w(-0.3, south), w(a_s + 0.3, south), -lat, EXT_PLINTH))
+    # 水路の口の額縁（壁から 0.14m 出た暗い石のアーチ）と、その外の縁の真鍮の輪
+    frame_w = 0.95
+    inner = canal_arch_path(w(-0.14, 0.0), lat, CANAL_HALF, CANAL_TOP)
+    outer = canal_arch_path(w(-0.14, 0.0), lat, CANAL_HALF + frame_w, CANAL_TOP + frame_w)
+    inner_back = inner + d * 0.14
+    outer_back = outer + d * 0.14
+    n = len(inner)
+    verts = np.vstack([inner, outer, inner_back, outer_back])
+    faces = []
+    for i in range(n - 1):
+        faces += orient(verts, [(i, i + 1, n + i + 1, n + i)], -d)
+        # 外の縁（外を向く）と内の縁（水路の軸を向く）
+        c_o = (outer[i] + outer[i + 1]) / 2
+        out_dir = c_o - (w(0.0, 0.0) + np.array([0, CANAL_TOP * 0.4, 0]))
+        out_dir -= d * np.dot(out_dir, d)
+        faces += orient(verts, [(n + i, n + i + 1, 3 * n + i + 1, 3 * n + i)], out_dir)
+        faces += orient(verts, [(i, i + 1, 2 * n + i + 1, 2 * n + i)], -out_dir)
+    ext_dark.add(verts, faces)
+    ext_brass.add(*tube(canal_arch_path(w(-0.17, 0.0), lat, CANAL_HALF + frame_w - 0.05, CANAL_TOP + frame_w - 0.05), 0.06, 8))
+    ext_brass.add(*tube(canal_arch_path(w(-0.17, 0.0), lat, CANAL_HALF + 0.06, CANAL_TOP + 0.06), 0.05, 8))
+    # 額縁の要石（アーチの頂の真鍮の飾り）
+    key = w(-0.2, 0.0) + np.array([0, CANAL_TOP + frame_w * 0.5, 0])
+    ext_brass.add(*uv_sphere(key, 0.28, 16, 10))
+
+
+def append_geometry(ob, verts_three, faces, smooth: bool = True) -> None:
+    """できている物に面を足す（three.js の世界の座標で）"""
+    from mathutils import Vector
+    bm = bmesh.new()
+    bm.from_mesh(ob.data)
+    inv = ob.matrix_world.inverted()
+    vs = [bm.verts.new(inv @ Vector(to_blender(np.asarray(v)).tolist())) for v in verts_three]
+    bm.verts.ensure_lookup_table()
+    for f in faces:
+        try:
+            face = bm.faces.new([vs[i] for i in f])
+        except ValueError:
+            continue
+        face.smooth = smooth
+        face.material_index = 0
+    bm.to_mesh(ob.data)
+    bm.free()
+    ob.data.update()
+
+
+def orient(verts: np.ndarray, faces, want) -> list:
+    out = []
+    for f in faces:
+        q = list(f)
+        nrm = np.cross(verts[q[1]] - verts[q[0]], verts[q[2]] - verts[q[0]])
+        if np.linalg.norm(nrm) < 1e-12 and len(q) > 3:
+            nrm = np.cross(verts[q[2]] - verts[q[0]], verts[q[3]] - verts[q[0]])
+        out.append(tuple(q) if np.dot(nrm, want) > 0 else tuple(reversed(q)))
+    return out
+
+
 WINDOW_R = 1.25
 #: ドームのガラスの帯（ドームの半径に対する、内と外の半径の割合）
 DOME_GLASS = (0.4, 0.66)
 WINDOW_Y = WALL_H - 3.1
 
 
-def window_centers(h: dict, rail: Rail):
+def window_angles(h: dict, rail: Rail, bay) -> list[float]:
+    """高窓の角度（16 の候補のうち、開口の近くと水門の湾にかかる物を除く）"""
     out = []
     for k in range(16):
         a = 2 * math.pi * (k + 0.25) / 16
         c = hall_point(h, a, h['r_in'] + 0.05, WINDOW_Y)
-        if near_opening(h, rail, c, 3.0):
+        if near_opening(h, rail, c, 3.0) or bay.inside(c, WINDOW_R + 1.0):
             continue
-        n_in = np.array([-math.cos(a), 0, -math.sin(a)])
-        t_dir = np.array([-math.sin(a), 0, math.cos(a)])
-        out.append((c, n_in, t_dir))
+        out.append(a)
     return out
 
 
@@ -1470,36 +2073,32 @@ def runs(mask: np.ndarray) -> list[np.ndarray]:
     return out
 
 
-def openings_keep(verts, faces, h: dict, rail: Rail, canal_only: bool = False, windows: bool = False) -> np.ndarray:
-    """面を残すか（開口の中の面は消す）。北の門: レールから GATE_OPEN_R 以内。東の水路: 水平 CANAL_HALF 以内で天井より下。
-    南の入口: 幅と高さの中（上は半円）。windows なら高窓の丸い穴も"""
-    verts = np.asarray(verts)
-    s_plat1 = rail.sections['platform'][1]
-    s_dep0 = rail.sections['departure'][0]
-    gate_pts = rail.samples(s_plat1 - 3.0, s_plat1 + 3.0, 0.1)
-    canal_pts = rail.samples(max(0.0, s_dep0 - 3.0), s_dep0 + 12.0, 0.1)
-    door_c, door_out = south_door(h, rail)
+def opening_keep(quad, h: dict, rail: Rail, gate_door: bool = True) -> bool:
+    """壁の升目を残すか（開口の中の升目は落とす）。quad は升目の頂点（three.js の座標）。
+    北の門: 中心がレールから GATE_OPEN_R 以内。南の入口: 中心が幅と高さの中（上は半円）。
+    東の水路: 頂点のどれかが水路の内の断面の中（穴は断面より少し大きくなるが、水路の厚い皮の中に隠れる）"""
+    quad = np.asarray(quad, dtype=np.float64)
+    c = quad.mean(0)
+    key = 'gate_pts'
+    if key not in h:
+        s_plat1 = rail.sections['platform'][1]
+        h[key] = rail.samples(s_plat1 - 3.0, s_plat1 + 3.0, 0.1)
+        h['door'] = south_door(h, rail)
+        h['bay'] = water_gate_bay(rail, h)
+    if gate_door and np.min(np.linalg.norm(h[key] - c, axis=1)) < GATE_OPEN_R:
+        return False
+    door_c, door_out = h['door']
     door_side = np.array([-door_out[2], 0, door_out[0]])
-    wins = np.array([c for c, _n, _t in window_centers(h, rail)]) if windows else np.zeros((0, 3))
-    keep = np.ones(len(faces), dtype=bool)
-    for i, f in enumerate(faces):
-        c = verts[list(f)].mean(0)
-        if not canal_only:
-            if np.min(np.linalg.norm(gate_pts - c, axis=1)) < GATE_OPEN_R:
-                keep[i] = False
-                continue
-            dx = abs(float(np.dot(c - door_c, door_side)))
-            if dx < SOUTH_DOOR_HALF and float(np.dot(c - door_c, door_out)) > -3:
-                if c[1] < SOUTH_DOOR_TOP - SOUTH_DOOR_HALF + math.sqrt(max(0.0, SOUTH_DOOR_HALF ** 2 - dx * dx)):
-                    keep[i] = False
-                    continue
-            if len(wins) and np.min(np.linalg.norm(wins - c, axis=1)) < WINDOW_R:
-                keep[i] = False
-                continue
-        dh = np.linalg.norm((canal_pts - c)[:, [0, 2]], axis=1)
-        if np.min(dh) < CANAL_HALF and (canal_only or c[1] < canal_y(np.min(dh))):
-            keep[i] = False
-    return keep
+    dx = abs(float(np.dot(c - door_c, door_side)))
+    if gate_door and dx < SOUTH_DOOR_HALF and float(np.dot(c - door_c, door_out)) > -3:
+        if c[1] < SOUTH_DOOR_TOP - SOUTH_DOOR_HALF + math.sqrt(max(0.0, SOUTH_DOOR_HALF ** 2 - dx * dx)):
+            return False
+    bay = h['bay']
+    for q in quad:
+        a, lat = bay.local(q)
+        if -0.5 < a < CANAL_LEN + 0.5 and abs(lat) < CANAL_HALF and q[1] < canal_y_custom(lat, CANAL_HALF, CANAL_TOP):
+            return False
+    return True
 
 
 def near_opening(h: dict, rail: Rail, p, dist: float) -> bool:
@@ -1576,32 +2175,72 @@ def canal_y_custom(d: float, half: float, top: float) -> float:
     return top - half * 0.6 + math.sqrt(max(0.0, half * half - d * d)) * 0.6
 
 
+#: 水路の長さ（水門の館の正面からホールの中へ、m）と、皮の厚み（壁の丸くない穴を隠せる厚さ）
+CANAL_LEN = 6.2
+CANAL_SKIN = 0.9
+
+
 def canal_shell(c0, fwd, right, length: float):
-    """水路の面: 内側（両側の壁と円い天井）と、ホールに見える外側（厚み 0.45m の外の皮、向きは外）。
-    c0 は外の端、fwd へ length 進むとホールの口。外の皮のうちホールの外に出る面は見えない面として消える"""
+    """水路の面: 内側（両側の壁と円い天井、軸の方を向く）と、外の皮（厚み CANAL_SKIN、外を向く）と、ホールの側の口の縁。
+    c0 は水門の館の正面（岸の側の端）、fwd へ length 進むとホールの口。外の皮のうち見えない面は見えない面の削除で消える"""
     nu, nv = 24, 33
     verts = []
     faces = []
-    for skin, (half, top, flip) in enumerate(((CANAL_HALF, CANAL_TOP, False), (CANAL_HALF + 0.45, CANAL_TOP + 0.45, True))):
+    skins = ((CANAL_HALF, CANAL_TOP, 1.0), (CANAL_HALF + CANAL_SKIN, CANAL_TOP + CANAL_SKIN, -1.0))
+    for half, top, sign in skins:
         base_i = len(verts)
         for j in range(nu):
             t = length * j / (nu - 1)
             base = c0 + fwd * t
+            # 断面: 縦の側壁（水の下から迫り元まで）と円い天井。側壁を垂直にして、正面の穴の縁と揃える
             for i in range(nv):
-                d = -half + 2 * half * i / (nv - 1)
-                y = WATER_Y - 0.3 if i in (0, nv - 1) else canal_y_custom(d, half, top)
+                if i in (0, nv - 1):
+                    d, y = (-half if i == 0 else half), WATER_Y - 0.3
+                else:
+                    d = -half + 2 * half * (i - 1) / (nv - 3)
+                    y = canal_y_custom(d, half, top)
                 verts.append(base + right * d + np.array([0, y, 0]))
         for j in range(nu - 1):
             for i in range(nv - 1):
-                f = (base_i + j * nv + i, base_i + (j + 1) * nv + i, base_i + (j + 1) * nv + i + 1, base_i + j * nv + i + 1)
-                faces.append(tuple(reversed(f)) if flip else f)
-        if skin == 1:
-            # 口の縁（内と外の皮をつなぐ）
-            jm = nu - 1
-            for i in range(nv - 1):
-                a0 = jm * nv + i
-                faces.append((a0, a0 + 1, base_i + a0 + 1, base_i + a0))
-    return np.array(verts), faces
+                q = (base_i + j * nv + i, base_i + (j + 1) * nv + i, base_i + (j + 1) * nv + i + 1, base_i + j * nv + i + 1)
+                faces.append((q, sign))
+    verts = np.array(verts)
+    n_skin = nu * nv
+    # 口の縁（内と外の皮をつなぐ、ホールの方を向く）
+    jm = nu - 1
+    for i in range(nv - 1):
+        a0 = jm * nv + i
+        faces.append(((a0, a0 + 1, n_skin + a0 + 1, n_skin + a0), 0.0))
+    out = []
+    axis_y = CANAL_TOP * 0.45
+    for q, sign in faces:
+        c = verts[list(q)].mean(0)
+        nrm = np.cross(verts[q[1]] - verts[q[0]], verts[q[2]] - verts[q[0]])
+        if np.linalg.norm(nrm) < 1e-12:
+            nrm = np.cross(verts[q[2]] - verts[q[0]], verts[q[3]] - verts[q[0]])
+        if sign == 0.0:
+            want = fwd
+        else:
+            rel = c - c0
+            lat = float(np.dot(rel, right))
+            to_axis = -right * lat + np.array([0.0, axis_y - c[1], 0.0])
+            want = to_axis * sign
+        out.append(tuple(q) if np.dot(nrm, want) > 0 else tuple(reversed(q)))
+    return verts, out
+
+
+def canal_water(c0, fwd, right, length: float):
+    """水路の床の水面（皮の外まで。ホールの水面と重なる所も同じ高さ・同じ材質なので見分けがつかない）"""
+    half = CANAL_HALF + CANAL_SKIN * 0.5
+    nu, nv = 13, 9
+    verts = []
+    for j in range(nu):
+        for i in range(nv):
+            verts.append(c0 + fwd * (length * j / (nu - 1)) + right * (-half + 2 * half * i / (nv - 1)) + np.array([0, WATER_Y, 0]))
+    verts = np.array(verts)
+    faces = [(j * nv + i, (j + 1) * nv + i, (j + 1) * nv + i + 1, j * nv + i + 1) for j in range(nu - 1) for i in range(nv - 1)]
+    return verts, orient(verts, faces, np.array([0.0, 1.0, 0.0]))
+
 
 def gate_reveal(c, fwd, right, r: float, depth: float):
     """門の開口の筒（壁の厚み）"""
@@ -1637,7 +2276,7 @@ def rounded_slab(x0: float, x1: float, z0: float, z1: float, top: float, thick: 
         faces.append((1 + i, 1 + i2, 1 + n + i2, 1 + n + i))
     return np.array(verts), faces
 
-def build_bubbles(rail: Rail, h: dict, coll, rng: random.Random, objs: list, dome_y_at):
+def build_bubbles(rail: Rail, h: dict, coll, rng: random.Random, objs: list, dome_y_at, bay):
     """吊られた泡。触れられる泡（8つ、レールのそばに1つずつ）と、飾りの泡（8種のインスタンス）。
 
     触れられる泡はレールから箱の距離 2.0〜3.2m、目の高さの近く。吊り糸は TS が描く（吊る点を extras の hang に書く）。
@@ -1678,7 +2317,8 @@ def build_bubbles(rail: Rail, h: dict, coll, rng: random.Random, objs: list, dom
             # 糸も含めて（箱を上へ伸ばす）
             hi_t = hi.copy()
             hi_t[1] = 18.0
-            if box_distance(lo, hi_t, clear_pts).min() >= NEED + 0.05:
+            # 揺れの余裕（触れると 0.25m 振れる。TS の SWING_REACH）も足す
+            if box_distance(lo, hi_t, clear_pts).min() >= NEED + 0.3 and not bay.inside(c, 1.0):
                 placed = (c, m4)
                 break
         if placed is None:
@@ -1712,7 +2352,7 @@ def build_bubbles(rail: Rail, h: dict, coll, rng: random.Random, objs: list, dom
         lo, hi = instance_box(lo_k, hi_k, m4)
         hi_t = hi.copy()
         hi_t[1] = ceil
-        if box_distance(lo, hi_t, clear_pts).min() < NEED + 0.15:
+        if box_distance(lo, hi_t, clear_pts).min() < NEED + 0.15 or bay.inside(c, scale + 0.5):
             return False
         if placed_pts and min(float(np.linalg.norm(q[:3] - c)) - q[3] for q in placed_pts) < scale * gap:
             return False

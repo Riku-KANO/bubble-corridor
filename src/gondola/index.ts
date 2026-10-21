@@ -10,6 +10,7 @@
 import * as THREE from 'three/webgpu';
 import { positionLocal, uniform } from 'three/tsl';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Gondola } from '../contracts/gondola';
 import { CAMERA, GONDOLA_DIAMETER } from '../config';
 import { createBrass, createGlass } from '../core/materials/glass';
@@ -26,6 +27,23 @@ const FLOOR_Y = -0.98;
 const TUBE = 0.011;
 /** 閉じる途中の虹色の帯の幅（m） */
 const SEAM_WIDTH = 0.09;
+
+const UP = new THREE.Vector3(0, 1, 0);
+
+/** 形をまとめる（属性をそろえる。索引のない形が混じれば、すべて索引なしにする）。元の形は解放する */
+function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const anyNonIndexed = parts.some((g) => !g.index);
+  const ready = parts.map((g) => {
+    const n = anyNonIndexed && g.index ? g.toNonIndexed() : g;
+    for (const k of Object.keys(n.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') n.deleteAttribute(k);
+    return n;
+  });
+  const out = mergeGeometries(ready, false);
+  for (const g of parts) g.dispose();
+  for (const g of ready) g.dispose();
+  if (!out) throw new Error('ゴンドラの形をまとめられない');
+  return out;
+}
 
 /** 殻の上の高さ y の水平な輪の半径 */
 const ringRadius = (y: number) => Math.sqrt(Math.max(0, R * R - y * y));
@@ -45,7 +63,8 @@ export function createGondola(): Gondola {
   materials.push(brass, darkBrass);
 
   // ── 泡の殻 ──
-  const shellGlass = createGlass('iridescent', { doubleSided: true, opacity: 0.035, iridescence: 0.62 });
+  // 虹色は控えめに（内側から見て視界の隅に緑と紫が強く出すぎない）
+  const shellGlass = createGlass('iridescent', { doubleSided: true, opacity: 0.032, iridescence: 0.45 });
   const shellMat = shellGlass.material as THREE.MeshStandardNodeMaterial;
   /** この高さ（殻の中心から、m）より下だけを描く */
   const uCut = uniform(-R - 0.01);
@@ -69,64 +88,74 @@ export function createGondola(): Gondola {
   seam.visible = false;
   root.add(seam);
 
-  // ── 真鍮の枠（下半分） ──
-  const frame = new THREE.Group();
-  frame.name = 'gondola.frame';
-  root.add(frame);
-  const addRing = (y: number, r: number, tube: number, mat: THREE.Material, role?: string, arc = Math.PI * 2, startAngle = 0) => {
-    const m = new THREE.Mesh(keep(new THREE.TorusGeometry(r, tube, 10, 192, arc)), mat);
-    m.rotation.x = Math.PI / 2;
-    // 輪の始まりの向き（後ろを開けた手すり用）。rotation.x の後に z で回すと水平面で回る
-    m.rotation.z = startAngle;
-    m.position.y = y;
-    if (role) m.userData.role = role;
-    frame.add(m);
-    return m;
+  // ── 真鍮の枠（下半分）: 動かない真鍮は色ごとに1つの形にまとめる（乗車中ずっと描くので描く回数を減らす。VR では目ごとに倍） ──
+  const brassParts: THREE.BufferGeometry[] = [];
+  const darkParts: THREE.BufferGeometry[] = [];
+  const tmpM = new THREE.Matrix4();
+  const tmpQ = new THREE.Quaternion();
+  const tmpE = new THREE.Euler();
+  /** 形に変換を焼き込んで、まとめる一覧へ */
+  const put = (list: THREE.BufferGeometry[], g: THREE.BufferGeometry, pos: THREE.Vector3Like, rot: THREE.Quaternion, scale: THREE.Vector3Like = { x: 1, y: 1, z: 1 }) => {
+    tmpM.compose(new THREE.Vector3(pos.x, pos.y, pos.z), rot, new THREE.Vector3(scale.x, scale.y, scale.z));
+    list.push(g.applyMatrix4(tmpM));
   };
-  // 縁: 殻の内側に沿う輪（最も目に入る、動かない基準）
-  addRing(RIM_Y, ringRadius(RIM_Y) - 0.012, TUBE * 1.35, brass, 'rim');
-  // 縁のすぐ下の細い2本目（枠に厚みを見せる）
-  addRing(RIM_Y - 0.035, ringRadius(RIM_Y - 0.035) - 0.014, TUBE * 0.7, darkBrass, 'rim');
-  // 手すり: 前と左右（後ろは座席なので開ける）
-  const railArc = Math.PI * 1.5;
-  // TorusGeometry の弧は rotation.x=π/2 の後、+X から +Z の向きへ回る（角度 a の点は (cos a, 0, sin a)）。
-  // 135° から 270° 回すと、後ろ（+Z、90°）の ±45° が開く
-  addRing(RAIL_Y, RAIL_R, TUBE * 1.6, brass, 'rim', railArc, Math.PI * 0.75);
+  /** 水平な輪（TorusGeometry の弧は、寝かせた後 +X から +Z の向きへ回る。角度 a の点は (cos a, 0, sin a)） */
+  const ring = (list: THREE.BufferGeometry[], y: number, r: number, tube: number, arc = Math.PI * 2, startAngle = 0) => {
+    tmpE.set(Math.PI / 2, 0, startAngle);
+    put(list, new THREE.TorusGeometry(r, tube, 10, 192, arc), { x: 0, y, z: 0 }, tmpQ.setFromEuler(tmpE));
+  };
+  // 縁: 殻の内側に沿う輪（最も目に入る、動かない基準）と、すぐ下の細い2本目（枠に厚みを見せる）
+  ring(brassParts, RIM_Y, ringRadius(RIM_Y) - 0.012, TUBE * 1.35);
+  ring(darkParts, RIM_Y - 0.035, ringRadius(RIM_Y - 0.035) - 0.014, TUBE * 0.7);
+  // 手すり: 前と左右（後ろは座席なので開ける）。135° から 270° 回すと、後ろ（+Z、90°）の ±45° が開く
+  ring(brassParts, RAIL_Y, RAIL_R, TUBE * 1.6, Math.PI * 1.5, Math.PI * 0.75);
   // 下の輪
-  addRing(-0.62, ringRadius(-0.62) - 0.01, TUBE, darkBrass);
-  addRing(FLOOR_Y - 0.03, ringRadius(FLOOR_Y - 0.03) - 0.008, TUBE * 1.2, darkBrass);
-
-  // 経線のリブ: 縁から底へ、殻の内側に沿う細い弧
+  ring(darkParts, -0.62, ringRadius(-0.62) - 0.01, TUBE);
+  ring(darkParts, FLOOR_Y - 0.03, ringRadius(FLOOR_Y - 0.03) - 0.008, TUBE * 1.2);
+  // 経線のリブ: 縁から底へ、殻の内側に沿う細い弧（明るい真鍮と暗い真鍮を交互に）
   const ribCount = 16;
-  const ribGeo = keep(ribGeometry(RIM_Y, FLOOR_Y - 0.03));
   for (let i = 0; i < ribCount; i++) {
-    const rib = new THREE.Mesh(ribGeo, i % 2 === 0 ? brass : darkBrass);
-    rib.rotation.y = (i / ribCount) * Math.PI * 2;
-    frame.add(rib);
+    put(i % 2 === 0 ? brassParts : darkParts, ribGeometry(RIM_Y, FLOOR_Y - 0.03), { x: 0, y: 0, z: 0 }, tmpQ.setFromAxisAngle(UP, (i / ribCount) * Math.PI * 2));
   }
-  // 手すりの支柱（手すりから下の輪へ）
-  const postGeo = keep(new THREE.CylinderGeometry(TUBE * 0.9, TUBE * 0.9, 1, 8, 1));
+  // 手すりの支柱（手すりから下の輪へ）。正面のまん中は空ける（前を見る視界に縦の線を入れない）
   const postTop = RAIL_Y;
   const postBottom = -0.62;
-  for (let i = 0; i < 7; i++) {
-    // 前と左右（後ろは開ける）
-    const a = Math.PI * 0.75 + (i / 6) * Math.PI * 1.5;
-    const post = new THREE.Mesh(postGeo, darkBrass);
-    const rTop = RAIL_R;
+  for (let i = 0; i < 6; i++) {
+    const a = Math.PI * 0.75 + ((i + 0.5) / 6) * Math.PI * 1.5;
     const rBottom = ringRadius(postBottom) - 0.01;
-    const x0 = Math.cos(a) * rTop;
-    const z0 = Math.sin(a) * rTop;
+    const x0 = Math.cos(a) * RAIL_R;
+    const z0 = Math.sin(a) * RAIL_R;
     const x1 = Math.cos(a) * rBottom;
     const z1 = Math.sin(a) * rBottom;
     const len = Math.hypot(x1 - x0, postBottom - postTop, z1 - z0);
-    post.scale.set(1, len, 1);
-    post.position.set((x0 + x1) / 2, (postTop + postBottom) / 2, (z0 + z1) / 2);
-    post.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(x0 - x1, postTop - postBottom, z0 - z1).normalize());
-    frame.add(post);
+    tmpQ.setFromUnitVectors(UP, new THREE.Vector3(x0 - x1, postTop - postBottom, z0 - z1).normalize());
+    put(darkParts, new THREE.CylinderGeometry(TUBE * 0.9, TUBE * 0.9, 1, 8, 1), { x: (x0 + x1) / 2, y: (postTop + postBottom) / 2, z: (z0 + z1) / 2 }, tmpQ, { x: 1, y: len, z: 1 });
   }
+  // 座席の真鍮の脚と、背もたれの縁
+  const cushionY = CAMERA.seatEyeHeight - 0.72;
+  for (const [x, z] of [
+    [-0.4, 0.0],
+    [0.4, 0.0],
+    [-0.4, 0.4],
+    [0.4, 0.4],
+  ] as const) {
+    const top = cushionY - 0.05;
+    put(darkParts, new THREE.CylinderGeometry(TUBE, TUBE, 1, 8, 1), { x, y: (top + FLOOR_Y) / 2, z }, tmpQ.identity(), { x: 1, y: top - FLOOR_Y, z: 1 });
+  }
+  tmpE.set(Math.PI / 2, 0, Math.PI / 2 - Math.PI * 0.31);
+  put(brassParts, new THREE.TorusGeometry(0.62, TUBE * 1.2, 8, 96, Math.PI * 0.62), { x: 0, y: -0.12, z: 0 }, tmpQ.setFromEuler(tmpE));
+  const brassFrame = new THREE.Mesh(keep(merge(brassParts)), brass);
+  brassFrame.name = 'gondola.brass';
+  // 縁と手すり（明るい真鍮）。目より下にあり、視界の下側に動かない基準として常に見える
+  brassFrame.userData.role = 'rim';
+  root.add(brassFrame);
+  const darkFrame = new THREE.Mesh(keep(merge(darkParts)), darkBrass);
+  darkFrame.name = 'gondola.dark_brass';
+  root.add(darkFrame);
 
   // ── 床と座席（曇りガラス。深さを書く） ──
-  const frosted = createGlass('frosted', { color: 0x5f6a78, opacity: 0.38, roughness: 0.55 });
+  // 床は暗めの曇り（下を向いたときに白く光る円盤にしない）
+  const frosted = createGlass('frosted', { color: 0x3a4250, opacity: 0.32, roughness: 0.55 });
   const frostedMat = frosted.material;
   frostedMat.depthWrite = true;
   const floor = new THREE.Mesh(keep(floorGeometry()), frostedMat);
@@ -134,35 +163,13 @@ export function createGondola(): Gondola {
   floor.position.y = FLOOR_Y;
   root.add(floor);
 
+  // 座面と背もたれは同じ曇りガラスなので1つの形に（目の高さ +0.15 の約 0.72m 下、少し後ろ）
   const seatGlass = createGlass('frosted', { color: 0x6c7684, opacity: 0.45, roughness: 0.5 });
   seatGlass.material.depthWrite = true;
-  const cushion = new THREE.Mesh(keep(new RoundedBoxGeometry(0.92, 0.1, 0.5, 4, 0.045)), seatGlass.material);
-  cushion.name = 'gondola.cushion';
-  // 目の高さ（+0.15）の約 0.72m 下、少し後ろ
-  cushion.position.set(0, CAMERA.seatEyeHeight - 0.72, 0.2);
-  root.add(cushion);
-  const back = new THREE.Mesh(keep(backrestGeometry()), seatGlass.material);
-  back.name = 'gondola.backrest';
-  root.add(back);
-  // 座席の真鍮の脚と、背もたれの縁
-  const legGeo = keep(new THREE.CylinderGeometry(TUBE, TUBE, 1, 8, 1));
-  for (const [x, z] of [
-    [-0.4, 0.0],
-    [0.4, 0.0],
-    [-0.4, 0.4],
-    [0.4, 0.4],
-  ] as const) {
-    const leg = new THREE.Mesh(legGeo, darkBrass);
-    const top = cushion.position.y - 0.05;
-    leg.scale.set(1, top - FLOOR_Y, 1);
-    leg.position.set(x, (top + FLOOR_Y) / 2, z);
-    frame.add(leg);
-  }
-  const backTop = new THREE.Mesh(keep(new THREE.TorusGeometry(0.62, TUBE * 1.2, 8, 96, Math.PI * 0.62)), brass);
-  backTop.rotation.x = Math.PI / 2;
-  backTop.rotation.z = Math.PI / 2 - Math.PI * 0.31;
-  backTop.position.set(0, -0.12, 0.0);
-  frame.add(backTop);
+  const cushionGeo = new RoundedBoxGeometry(0.92, 0.1, 0.5, 4, 0.045).translate(0, cushionY, 0.2);
+  const seatMesh = new THREE.Mesh(keep(merge([cushionGeo, backrestGeometry()])), seatGlass.material);
+  seatMesh.name = 'gondola.seat_glass';
+  root.add(seatMesh);
 
   // 座席の目
   const seat = new THREE.Object3D();

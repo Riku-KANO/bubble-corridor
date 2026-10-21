@@ -16,6 +16,7 @@ import { TRANSITION_SEC } from '../../config';
 import { createGlass, type GlassHandle } from '../../core/materials/glass';
 import { easeGlass } from '../../core/easing';
 import { own } from '../../core/storage';
+import { PLATFORM_GLASS_LIGHTING } from '../platform';
 import { Resources, glowMaterial, haloMaterial, loadEnvironment, loadGlbRoom, setLightmapState, smooth, type GlbRoom } from '../platform/kit';
 
 /**
@@ -85,7 +86,8 @@ export function isLobbyRoom(room: RoomModule): room is LobbyRoom {
 
 /** 夜明け前の暗い空気（待ち列は薄暗い） */
 const ATMOSPHERE: Atmosphere = {
-  // 反射用の環境画像は読み込みで足す
+  // 反射用の環境画像は読み込みで足す。ガラスの擬似照明は乗り場の夜明け前と同じ（入口から乗り場が続いて見える）
+  glassLighting: PLATFORM_GLASS_LIGHTING.predawn,
   background: 0x101a2a,
   fog: { color: 0x121c2c, near: 18, far: 80 },
   exposure: 1.0,

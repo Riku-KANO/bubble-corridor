@@ -12,9 +12,10 @@ import { resetGlassLighting, setDefaultGlassTier, setGlassLighting } from '../..
 import { createAssetLoader } from '../../app/assets';
 import { createGondola } from '../../gondola';
 import { buildCueSheet, createRide, generateRideData } from '../../ride';
-import { GREENHOUSE_GLASS_LIGHTING, createGreenhouseRoom } from '../../rooms/greenhouse';
+import { createGreenhouseRoom } from '../../rooms/greenhouse';
 import * as lobbyModule from '../../rooms/lobby';
-import { PLATFORM_GLASS_LIGHTING, createPlatformRoom } from '../../rooms/platform';
+import { createDawnRoom } from '../../rooms/dawn';
+import { createPlatformRoom } from '../../rooms/platform';
 
 const q = new URLSearchParams(location.search);
 const numParam = (k: string, d: number) => {
@@ -61,9 +62,11 @@ const rooms = new Map<RoomId, RoomModule>([
   ['platform', createPlatformRoom()],
   ['greenhouse', createGreenhouseRoom()],
 ]);
+// ?with=dawn（隣の部屋も並べる。夜明けの岸から乗り場の外側を見る）
+if ((q.get('with') ?? '').split(',').includes('dawn')) rooms.set('dawn', createDawnRoom());
 const only = q.get('room');
 const t0 = performance.now();
-await Promise.all([...rooms.entries()].filter(([id]) => !only || only === id || only === 'all').map(([, r]) => r.load(ctx).then(() => scene.add(r.root))));
+await Promise.all([...rooms.entries()].filter(([id]) => !only || only === id || only === 'all' || id === 'dawn').map(([, r]) => r.load(ctx).then(() => scene.add(r.root))));
 const loadMs = performance.now() - t0;
 // ?hide=platform.stone,platform.water（名前の頭で隠す。どの物か確かめる）
 const hide = (q.get('hide') ?? '').split(',').filter(Boolean);
@@ -163,10 +166,9 @@ renderer.setAnimationLoop(() => {
     scene.fog = a.fog ? new THREE.Fog(a.fog.color, a.fog.near, a.fog.far) : null;
     renderer.toneMappingExposure = a.exposure;
     scene.environment = a.environment ?? null;
-    // 擬似反射の照明（統合では Atmosphere.glassLighting をアプリが当てる。ここではそのまねをする）
+    // 擬似反射の照明（統合では Atmosphere.glassLighting をアプリが空気の変わり目に当てる。ここではそのまねをする）
     resetGlassLighting();
-    if (roomId === 'greenhouse') setGlassLighting(GREENHOUSE_GLASS_LIGHTING);
-    else if (roomId === 'platform' || roomId === 'lobby') setGlassLighting(t >= ride.sectionTime('dawn').t0 ? PLATFORM_GLASS_LIGHTING.morning : PLATFORM_GLASS_LIGHTING.predawn);
+    if (a.glassLighting) setGlassLighting(a.glassLighting);
   }
   renderer.render(scene, camera);
 

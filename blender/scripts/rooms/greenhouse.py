@@ -1,4 +1,4 @@
-"""第1室「朝露の温室」（1:00〜3:30）。
+"""第1室「朝露の温室」（1:00〜3:30）。このスクリプトが原本（blender/scenes/greenhouse.blend と glb・ライトマップはその書き出し）。
 
     pnpm blender blender/scripts/rooms/greenhouse.py            # 造形 → 見えない面の削除 → 焼き込み → glb
     pnpm blender blender/scripts/rooms/greenhouse.py -- --fast  # 焼き込みのサンプルを減らした下書き
@@ -22,6 +22,7 @@ import math
 import os
 import random
 import sys
+import zlib
 
 sys.dont_write_bytecode = True  # __pycache__ を作らない（リポジトリを汚さない）
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +30,7 @@ SCRIPTS = os.path.dirname(HERE)
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
+import bmesh  # noqa: E402
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 
@@ -43,6 +45,8 @@ WALL_H = 12.0
 ROOF_RISE = 14.0
 #: 入口と出口の開口の半径
 GATE_R = 3.3
+#: 出口の妻壁（平らなガラスの面）を置く距離（区間の終わりから、m）。これより先は切り落とす
+END_AT = 0.9
 #: 朝日の進む向き（three.js）。南（-Z）の低い空から、北と少し西へ（入口から見て逆光）
 SUN_DIR = np.array([-0.32, -0.40, 0.86])
 SUN_DIR = SUN_DIR / np.linalg.norm(SUN_DIR)
@@ -53,8 +57,10 @@ class Shell:
 
     def __init__(self, rail: kit.Rail):
         s0, s1 = rail.sections['greenhouse']
-        n_tip = rail.point(s0 + 0.55)
-        s_tip = rail.point(s1 + 0.5)
+        # 部屋の境目（ADR-0013）: 入る側は区間の始まり +1m 以降、出る側は区間の終わり +1m まで。
+        # 南の端は出口の向きに斜めに交わるので、少し先まで作ってから出口の面（END_AT）で平らに切る
+        n_tip = rail.point(s0 + 1.05)
+        s_tip = rail.point(s1 + 3.0)
         self.n_tip, self.s_tip = n_tip, s_tip
         a = np.array([n_tip[0], 0, n_tip[2]])
         b = np.array([s_tip[0], 0, s_tip[2]])
@@ -481,7 +487,7 @@ def build_greenhouse(rail: kit.Rail, fast: bool) -> None:
         pts = [sh.world(u, -sh.half_width(u) * math.cos(bta) * 0.993, WALL_H + ROOF_RISE * (sh.half_width(u) / sh.a) * math.sin(bta) - 0.03) for u in us]
         bars.add(*tube(np.array(pts), 0.03, 4, caps=False))
     # 入口と出口の白い鉄の輪
-    for s_gate, r in ((s0 + 0.6, GATE_R - 0.05), (s1 + 0.45, GATE_R - 0.05)):
+    for s_gate, r in ((s0 + 1.1, GATE_R - 0.05), (s1 + END_AT - 0.06, GATE_R - 0.05)):
         p = rail.point(s_gate)
         f = rail.forward(s_gate)
         rgt = np.array([-f[2], 0.0, f[0]])
@@ -537,7 +543,8 @@ def build_greenhouse(rail: kit.Rail, fast: bool) -> None:
     protos = {}
     proto_objs = []
     for name, (fn, _count, _where, _sc) in PLANTS.items():
-        p = fn(random.Random(hash(name) & 0xFFFF))
+        # 種は名前の CRC32（組み込みの hash は実行ごとに変わる。書き出しを毎回同じにする）
+        p = fn(random.Random(zlib.crc32(name.encode())))
         ob = build_proto(p, coll)
         protos[name] = ob
         proto_objs.append(ob)
@@ -570,6 +577,12 @@ def build_greenhouse(rail: kit.Rail, fast: bool) -> None:
                       props={'glass': 'tinted', 'glass_color': '#7cbf92', 'glass_opacity': 0.5, 'glass_iridescence': 0.0})
     objs.append(ob)
 
+    # ── 出口の妻壁: 出口の向きに直交する平らなガラスの面（雨の回廊との境目。斜めの殻をここで平らに切る） ──
+    end_p = rail.point(s1 + END_AT)
+    end_n = rail.forward(s1)
+    end_glass = end_wall(sh, end_p - end_n * 0.03, end_n, iron, curb, coll, m_glass)
+    objs.append(end_glass)
+
     for name, b, m, bk in (('greenhouse.floor', floor, m_floor, True), ('greenhouse.path', path_b, m_path, True), ('greenhouse.curb', curb, m_curb, True),
                            ('greenhouse.soil', soil, m_soil, True), ('greenhouse.iron', iron, m_iron, False)):
         if b.empty():
@@ -580,10 +593,15 @@ def build_greenhouse(rail: kit.Rail, fast: bool) -> None:
         if bk:
             bake.append(ob)
 
+    # ── 部屋の境目で切る: 出口の妻壁より先と、入口（区間の始まり +1m）より手前の形を落とす ──
+    statics = [o for o in objs if o.type == 'MESH' and o.get('role') != 'proto' and not o.get('touch_kind')]
+    clip_plane(statics, end_p, end_n)
+    clip_plane(statics, rail.point(s0 + 1.0), -rail.forward(s0))
+
     # ── 光: 南の低い朝日（逆光）と、明るい朝の空。ガラスの殻は光を遮らない ──
     kit.set_world('#d4e3d6', 0.55)
     kit.sun('greenhouse.sun', SUN_DIR.tolist(), '#ffe2b4', 10.0, 0.9)
-    for o in [shell_obj]:
+    for o in [shell_obj, end_glass]:
         o.visible_shadow = False
         o.visible_diffuse = False
         o.visible_glossy = False
@@ -594,10 +612,90 @@ def build_greenhouse(rail: kit.Rail, fast: bool) -> None:
 
     vp = rail.samples(max(0.0, s0 - 25.0), min(rail.max_s, s1 + 15.0), 0.5)
     samples = 48 if fast else 384
-    kit.finish_room(ROOM, rail, objs, vp, clear_pts, bake, size=2048, samples=samples, webp=90)
+    # 花芯は蕾のあいだ萼と葉に隠れて、見えない面の削除で消えてしまう（TS が 2:40 に花弁を開いて見せる）ので残す
+    kit.finish_room(ROOM, rail, objs, vp, clear_pts, bake, size=2048, samples=samples, webp=90, keep_unculled=('greenhouse.flower_core',))
     for o in bake_casters:
         bpy.data.objects.remove(o)
     kit.save_blend(ROOM)
+
+
+def clip_plane(objs, p_three, n_three) -> None:
+    """three.js の点 p と向き n の平面より先（n の側）の形を、面を正確に切って落とす"""
+    from mathutils import Vector
+    pb = Vector(kit.to_blender(np.asarray(p_three, dtype=np.float64)).tolist())
+    nb = Vector(kit.to_blender(np.asarray(n_three, dtype=np.float64)).tolist()).normalized()
+    for ob in objs:
+        me = ob.data
+        inv = ob.matrix_world.inverted()
+        pl = inv @ pb
+        nl = (ob.matrix_world.to_3x3().transposed() @ nb).normalized()
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=pl, plane_no=nl, clear_outer=True, dist=1e-4)
+        bm.to_mesh(me)
+        bm.free()
+        me.update()
+
+
+def end_wall(sh: 'Shell', p, n, iron: Builder, curb: Builder, coll, m_glass):
+    """出口の妻壁: 平面（点 p、向き n）と殻の内側の重なる所に、縦の桟で割ったガラスの面を張る。レールの口は丸く抜く。
+    上の縁は殻の高さ（roof_y）にそろえる。白い鉄の桟・上の縁と、床の縁石も作る"""
+    w = np.array([-n[2], 0.0, n[0]])
+    rail_c = p + n * 0.03  # 口の中心（レールの点）
+    ts = np.arange(-60.0, 60.0 + 1e-6, 0.6)
+    cols = []
+    for t in ts:
+        q = p + w * t
+        q[1] = 0.0
+        if not sh.inside(q, 0.03):
+            continue
+        u, v = sh.local(q)
+        cols.append((t, q, sh.roof_y(u, v) - 0.06))
+    verts, faces = [], []
+    K = 10
+    for (t0, q0, h0), (t1, q1, h1) in zip(cols[:-1], cols[1:]):
+        if t1 - t0 > 0.61:
+            continue
+        b = len(verts)
+        for k in range(K + 1):
+            verts.append(q0 + np.array([0, h0 * k / K, 0]))
+            verts.append(q1 + np.array([0, h1 * k / K, 0]))
+        for k in range(K):
+            faces.append((b + 2 * k, b + 2 * k + 1, b + 2 * k + 3, b + 2 * k + 2))
+    verts = np.array(verts)
+    keep = []
+    for f in faces:
+        c = verts[list(f)].mean(0)
+        keep.append(np.linalg.norm(c - rail_c) > GATE_R - 0.05)
+    faces = [f for f, k in zip(faces, keep) if k]
+    # 面の向きは温室の中（-n）へ
+    out = []
+    for f in faces:
+        q = list(f)
+        nrm = np.cross(verts[q[1]] - verts[q[0]], verts[q[2]] - verts[q[0]])
+        out.append(tuple(q) if np.dot(nrm, -n) > 0 else tuple(reversed(q)))
+    ob = mesh_object('greenhouse.end_glass', verts, out, m_glass, coll, smooth=False,
+                     props={'glass': 'clear', 'glass_color': '#f2f8f0', 'glass_opacity': 0.035, 'glass_rim': 0.55,
+                            'clearance_exempt': True, 'check_true_clearance': True})
+    # 桟（2.3m ごと。口の上だけを残す）と上の縁、床の縁石
+    for t, q, h in cols:
+        if abs((t / 2.3) - round(t / 2.3)) > 0.13:
+            continue
+        y0 = 0.0
+        if abs(t) < GATE_R:
+            y0 = rail_c[1] + math.sqrt(max(0.0, GATE_R ** 2 - t * t)) + 0.05
+        if h - y0 > 0.3:
+            iron.add(*tube(np.array([q + np.array([0, y0, 0]), q + np.array([0, h, 0])]) - n * 0.02, 0.05, 6))
+    top = np.array([q + np.array([0, h, 0]) for _t, q, h in cols]) - n * 0.02
+    iron.add(*tube(top, 0.08, 8))
+    for (t0, q0, _h0), (t1, q1, _h1) in zip(cols[:-1], cols[1:]):
+        if abs(t0) < GATE_R or abs(t1) < GATE_R:
+            continue
+        a, b = q0 - n * 0.15, q1 - n * 0.15
+        cv = np.array([a, b, b + np.array([0, 0.32, 0]), a + np.array([0, 0.32, 0])])
+        nrm = np.cross(cv[1] - cv[0], cv[2] - cv[0])
+        curb.add(cv, [(0, 1, 2, 3) if np.dot(nrm, -n) > 0 else (3, 2, 1, 0)])
+    return ob
 
 
 def blender_matrix(m4_three: np.ndarray):
@@ -631,15 +729,15 @@ def orient_up(verts, faces):
 
 
 def flower_layout(rail: kit.Rail, bloom_s: float) -> dict:
-    """大きな花の置き場所: 見どころの時刻の正面から少し左、24m 先の頭上（レールの上の空間に花が開く）"""
+    """大きな花の置き場所: 見どころの時刻の向きから 8° だけ左、25m 先、目より約 5m 上（見上げは浅く、写真の真ん中に。
+    縦持ちの画面でも切れない）。花はレールの上の空間に開き、ゴンドラはその下をくぐる。茎は左の池から弧を描いて伸びる"""
     p = rail.point(bloom_s)
     f = rail.forward(bloom_s)
-    yaw = math.radians(10.0)
+    yaw = math.radians(8.0)
     d = np.array([f[0] * math.cos(yaw) + f[2] * math.sin(yaw), 0.0, -f[0] * math.sin(yaw) + f[2] * math.cos(yaw)])
-    head = np.array([p[0], 0.0, p[2]]) + d * 22.0 + np.array([0, 10.0, 0])
-    # 茎の根元は池の中心。頭から、レールと反対の側（左）へ 5m ずらす
+    head = np.array([p[0], 0.0, p[2]]) + d * 25.0 + np.array([0, 7.6, 0])
     left = np.array([f[2], 0.0, -f[0]])
-    base = np.array([head[0], 0.15, head[2]]) + left * 5.2 + d * 3.0
+    base = np.array([head[0], 0.15, head[2]]) + left * 6.4 + d * 1.5
     return {'head': head, 'base': base, 'pond': np.array([base[0], 0.0, base[2]]), 'forward': d}
 
 
@@ -769,7 +867,13 @@ def scatter_plants(rail, sh: Shell, rng: random.Random, beds: list, pond_c, pond
     def path_dist(p) -> float:
         return float(np.min(np.hypot(rp[:, 0] - p[0], rp[:, 2] - p[2])))
 
+    end_p = rail.point(s1 + END_AT)
+    end_n = rail.forward(s1)
+
     def try_place(name, p, sc, yaw, gap, tilt=(0.0, 0.0)) -> bool:
+        # 出口の妻壁より先（と、その手前 1m）には植えない
+        if float(np.dot(np.asarray(p) - end_p, end_n)) > -1.0 - gap:
+            return False
         m4 = matrix_three(p, yaw, tilt=tilt, scale=(sc, sc, sc))
         lo, hi = instance_box(*boxes[name], m4)
         if box_distance(lo, hi, clear_pts).min() < NEED + 0.1:
@@ -924,7 +1028,8 @@ def make_flower(fl: dict, coll, greens: Builder) -> list:
     objs = []
     head, base = fl['head'], fl['base']
     d = fl['forward']
-    path = stem_path(base, head - np.array([0, 0.6, 0]), np.array([0, 0.6, 0]) + (base - head) * np.array([0.25, 0, 0.25]), 28)
+    # 池から立ち上がり、高い所で道の上へ弧を描く（茎の中ほどもレールから十分高い）
+    path = stem_path(base, head - np.array([0, 0.6, 0]), np.array([0, 2.6, 0]) + (base - head) * np.array([0.3, 0, 0.3]), 32)
     greens.add(*tube(path, np.linspace(0.48, 0.3, len(path)), 16))
     # 茎の葉（2枚の大きな葉、池の上）
     for k, (t, yaw) in enumerate(((0.25, 0.4), (0.42, 3.2))):

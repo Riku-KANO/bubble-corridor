@@ -6,16 +6,18 @@
 //      ライトマップ（夜明け前 / 朝）・灯りの強さ・部屋の空気を同時に切り替える（膜の縞が切り替えを隠す）。
 //   2. 吊られた泡の回転・揺れ、水面の波紋、膜のたわみも時刻（と触れた時刻）から計算する。積み上げない。
 //   3. 触れられる泡は個別のガラス（縁の光と波紋が物ごと）。飾りの泡は共有のガラスのインスタンス。
+//   4. 夜明けの岸から遠くに見えるあいだ（岸の区間から降車の手前まで）は、水面の本物の映り込み（場面をもう一度描く）を
+//      環境画像の映り込みに替える。外側（外壁・ドーム・水門の館）は Blender が別のアトラスに焼いてある。
 import * as THREE from 'three/webgpu';
-import { cameraPosition, exp, float, length, max, mix, mx_noise_float, positionWorld, reflector, sin, smoothstep, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { cameraPosition, equirectUV, exp, float, length, max, mix, mx_noise_float, positionWorld, reflector, sin, smoothstep, texture, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import type { Cue, Vec3Tuple } from '../../contracts/events';
 import type { Atmosphere, RoomContext, RoomFrame, RoomModule, Touchable } from '../../contracts/room';
 import { createBrass, sharedGlass, type GlassHandle, type GlassLighting } from '../../core/materials/glass';
+import { GONDOLA_DIAMETER, MOMENT_BARS, SEC_PER_BAR } from '../../config';
 import { own } from '../../core/storage';
 import {
   Resources,
   createMembrane,
-  haloMaterial,
   haloMesh,
   instanceMatrices,
   loadEnvironment,
@@ -35,22 +37,29 @@ import {
 /** 吊られた泡の8種（platform.py の BUBBLE_KINDS と同じ） */
 const BUBBLE_KINDS = ['round', 'twin', 'trio', 'drop', 'ringed', 'nested', 'lantern', 'pearl'] as const;
 const WATER_Y = 0.06;
+/** 夜明けの岸の朝日の時刻（src/rooms/dawn と同じ）。岸から見る外側は、朝日とともに明るくなる */
+const SUNRISE_T = MOMENT_BARS.dawnSunrise * SEC_PER_BAR;
+/** 外側の明るさの段（ライトマップの強さを変える回数を抑える） */
+const SHORE_STEPS = 16;
 /** 南の入口の扉が開いたときの角度（外へ） */
 const DOOR_OPEN = (100 * Math.PI) / 180;
+
+/**
+ * ガラスと真鍮の擬似反射の照明（Atmosphere.glassLighting。アプリが空気の変わり目だけ当てる）。
+ * 夜明け前は天井の乳白の灯りが頭上から（真鍮が黒く沈まないよう空と床の色は明るめ）。
+ * 朝は夜明けの岸と同じ朝日の向き（src/rooms/dawn/sky.ts の方位 30°、高さ約 15°。光の来る向き）。
+ */
+export const PLATFORM_GLASS_LIGHTING: { readonly predawn: Partial<GlassLighting>; readonly morning: Partial<GlassLighting> } = {
+  predawn: { sky: 0xb4bccb, ground: 0x4a5466, keyDir: { x: -0.15, y: 0.8, z: 0.25 }, keyColor: 0xffdcb0, keyIntensity: 0.9 },
+  morning: { sky: 0xe6eef6, ground: 0xc9a77c, keyDir: { x: -0.837, y: 0.259, z: -0.483 }, keyColor: 0xfff0d8, keyIntensity: 1.2 },
+};
 
 /** 夜明け前の青灰（設計書「乗り場: 夜明け前、青灰と真鍮、天井の乳白の灯り」）。反射用の環境画像は読み込みで足す */
 const PREDAWN: Atmosphere = {
   background: 0x223047,
   fog: { color: 0x223047, near: 22, far: 120 },
   exposure: 1.0,
-};
-/**
- * ガラスと真鍮の擬似反射の照明（共有の値。部屋からは書かない）。統合で Atmosphere.glassLighting（S-25）へ入れる値:
- * 夜明け前は天井の乳白の灯りが頭上から（真鍮が黒く沈まないよう空と床の色は明るめ）、朝は東の高窓からの朝日。
- */
-export const PLATFORM_GLASS_LIGHTING: { readonly predawn: Partial<GlassLighting>; readonly morning: Partial<GlassLighting> } = {
-  predawn: { sky: 0xb4bccb, ground: 0x4a5466, keyDir: { x: -0.15, y: 0.8, z: 0.25 }, keyColor: 0xffdcb0, keyIntensity: 0.9 },
-  morning: { sky: 0xe6eef6, ground: 0xc9a77c, keyDir: { x: 0.78, y: 0.42, z: -0.46 }, keyColor: 0xfff0d8, keyIntensity: 1.2 },
+  glassLighting: PLATFORM_GLASS_LIGHTING.predawn,
 };
 
 /** 降車: ホールは朝の光 */
@@ -58,13 +67,19 @@ const MORNING: Atmosphere = {
   background: 0xa9c0d6,
   fog: { color: 0xb4c7d8, near: 30, far: 160 },
   exposure: 1.0,
+  glassLighting: PLATFORM_GLASS_LIGHTING.morning,
 };
 
-/** 触れた泡の揺れ（振り子）。時刻から計算する */
+/** 触れた泡の揺れ（振り子）。触れた時刻から計算する */
 interface Swing {
   t0: number;
   axis: THREE.Vector3;
+  /** 振れの角度の振幅（泡の位置で SWING_REACH m になる角度） */
+  amp: number;
 }
+
+/** 触れた泡が押されて振れる距離（泡の位置で、m）。ゴンドラとの距離の余裕（配置で 0.15m 余分に離してある）より小さく */
+const SWING_REACH = 0.25;
 
 export function createPlatformRoom(): RoomModule {
   const root = new THREE.Group();
@@ -76,6 +91,7 @@ export function createPlatformRoom(): RoomModule {
   let atmosphere: Atmosphere = predawn;
   let morning = false;
   let morningFrom = Infinity;
+  let endRipple: [number, number] = [Infinity, Infinity];
   let glb: GlbRoom | null = null;
   let membrane: Membrane | null = null;
   const pivots: { pivot: THREE.Object3D; spin: number; phase: number; swing: Swing | null }[] = [];
@@ -86,7 +102,17 @@ export function createPlatformRoom(): RoomModule {
   const halos: { level: { value: number }; on: number }[] = [];
   let oculusGlass: GlassHandle | null = null;
   let sconceGlass: GlassHandle | null = null;
+  /** 高窓（内と外）とドームの外のガラスの帯。朝は外から見て暖かく灯る（岸から見る逆光のホール） */
+  const glows: { glass: GlassHandle; predawn: [number, number]; morning: [number, number] }[] = [];
   let water: ReturnType<typeof waterMaterial> | null = null;
+  let waterMeshes: THREE.Mesh[] = [];
+  /** 遠くから見る時間（夜明けの岸の始まり〜降車の 12 秒前） */
+  let far: [number, number] = [Infinity, -Infinity];
+  let farNow = false;
+  /** 外側（外壁・ドーム・水門の館）の焼いた物。朝は岸の空とともに明るさを変える */
+  let exteriorBaked: GlbRoom['baked'] = [];
+  let shoreLevel = -1;
+  let envMaps: { predawn: THREE.Texture | null; morning: THREE.Texture | null } = { predawn: null, morning: null };
   const tmpM = new THREE.Matrix4();
   const tmpR = new THREE.Matrix4();
   const tmpQ = new THREE.Quaternion();
@@ -97,7 +123,9 @@ export function createPlatformRoom(): RoomModule {
     if (!glb || m === morning) return;
     morning = m;
     setLightmapState(glb.baked, m ? 'morning' : null);
+    shoreLevel = -1;
     atmosphere = m ? morningAir : predawn;
+    water?.setEnvironment(m ? envMaps.morning : envMaps.predawn);
     if (lampGlass) (lampGlass.material as THREE.MeshStandardNodeMaterial).emissiveIntensity = m ? 0.25 : 1.3;
     for (const h of halos) h.level.value = m ? h.on * 0.12 : h.on;
     if (sconceGlass) (sconceGlass.material as THREE.MeshStandardNodeMaterial).emissiveIntensity = m ? 0.2 : 1.6;
@@ -106,6 +134,20 @@ export function createPlatformRoom(): RoomModule {
       mat.emissive.set(m ? 0xfff2dc : 0x8ea6cc);
       mat.emissiveIntensity = m ? 1.2 : 0.3;
     }
+    for (const g of glows) {
+      const mat = g.glass.material as THREE.MeshStandardNodeMaterial;
+      const [color, level] = m ? g.morning : g.predawn;
+      mat.emissive.set(color);
+      mat.emissiveIntensity = level;
+    }
+  }
+
+  /** 遠くから見るあいだは、水面を安い映り込みに替える（時刻から決める） */
+  function applyFar(f: boolean) {
+    if (!water || f === farNow) return;
+    farNow = f;
+    const mat = f && water.far ? water.far : water.material;
+    for (const m of waterMeshes) m.material = mat;
   }
 
   return {
@@ -117,53 +159,71 @@ export function createPlatformRoom(): RoomModule {
     },
     async load(ctx: RoomContext) {
       const tier = ctx.quality.tier;
-      water = waterMaterial(tier);
-      if (water.mirror) root.add(water.mirror.target);
       morningFrom = ctx.ride.sectionTime('dawn').t0;
+      const dep = ctx.ride.sectionTime('departure');
+      far = [morningFrom, dep.t0 - 12];
+      endRipple = [dep.t0 + 15, dep.t1 - 2];
       const g = await loadGlbRoom(ctx, 'platform', res, {
         tier,
         // 触れられる泡（縁の光と波紋が物ごと）と、朝に強さを変える灯り・丸窓は個別のガラス
-        ownGlass: (o) => typeof own(o.userData, 'touch_kind') === 'string' || ['ceiling_lamp', 'sconce'].includes(String(own(o.userData, 'role'))) || o.userData.name === 'platform.oculus',
+        ownGlass: (o) =>
+          typeof own(o.userData, 'touch_kind') === 'string' ||
+          ['ceiling_lamp', 'sconce', 'window', 'dome_band'].includes(String(own(o.userData, 'role'))) ||
+          o.userData.name === 'platform.oculus',
         // 吊られた泡は澄んだ泡に（虹色は縁にだけ。面全体が色付いて見えないよう弱める）
-        glassOverride: (_o, kind, params) => (kind === 'iridescent' ? { ...params, iridescence: 0.4, opacity: 0.03 } : params),
+        // 南の入口の扉は琥珀の乳白（向こうの明るい待ち列が白く飛んで見えないよう、濃く暖かく）
+        glassOverride: (o, kind, params) =>
+          kind === 'iridescent'
+            ? { ...params, iridescence: 0.4, opacity: 0.03 }
+            : own(o.userData, 'role') === 'door_leaf'
+              ? { ...params, color: '#a8784a', opacity: 0.74, emissive: '#ffa85c', emissiveIntensity: 0.3 }
+              : params,
       });
       glb = g;
       root.add(g.scene);
+      exteriorBaked = g.baked.filter((b) => {
+        for (let o: THREE.Object3D | null = b.mesh; o; o = o.parent) if (own(o.userData, 'exterior') === true) return true;
+        return false;
+      });
       const env = await loadEnvironment(ctx, res, g.instances, 'env');
       const envMorning = (await loadEnvironment(ctx, res, g.instances, 'env_morning')) ?? env;
       predawn = { ...PREDAWN, environment: env };
       morningAir = { ...MORNING, environment: envMorning };
       atmosphere = morning ? morningAir : predawn;
+      envMaps = { predawn: env, morning: envMorning };
+      water = waterMaterial(tier, env);
+      if (water.mirror) root.add(water.mirror.target);
       lampGlass = (g.byName.get('platform.lamps')?.userData.glassHandle as GlassHandle | undefined) ?? null;
       oculusGlass = (g.byName.get('platform.oculus')?.userData.glassHandle as GlassHandle | undefined) ?? null;
       sconceGlass = (g.byName.get('platform.sconces')?.userData.glassHandle as GlassHandle | undefined) ?? null;
+      for (const [, o] of g.byName) {
+        const role = own(o.userData, 'role');
+        const handle = o.userData.glassHandle as GlassHandle | undefined;
+        if (!handle || (role !== 'window' && role !== 'dome_band')) continue;
+        const mat = handle.material as THREE.MeshStandardNodeMaterial;
+        const outside = own(o.userData, 'exterior') === true;
+        glows.push({
+          glass: handle,
+          predawn: [mat.emissive.getHex(), mat.emissiveIntensity],
+          // 朝: 内の高窓は日の差す明るい乳白。外は逆光のホールの窓とドームの帯が暖かく灯る
+          morning: outside ? [0xffc98c, role === 'window' ? 0.75 : 0.5] : [0xfff0dc, 0.85],
+        });
+      }
 
       // ── 水面: 鏡のような暗い水（縁ほど映り込みが強い）。下に灯りの鏡像を置いて、水を透かして見せる ──
       const waterObj = g.byName.get('platform.water');
       if (waterObj && water) {
         const mat = res.mat(water.material);
-        for (const m of meshesOf(waterObj)) {
+        if (water.far) res.mat(water.far);
+        waterMeshes = meshesOf(waterObj);
+        for (const m of waterMeshes) {
           m.material = mat;
           m.renderOrder = -1;
         }
-        // 中・低品質の鏡像: 灯りの暈と丸窓・高窓を水面で上下に返して置き、水を透かして見せる（縁ほど強い映り込みになる）。
-        // 灯りそのものではなく柔らかい暈を、少し縦に伸ばして映す（水面の映り込みの揺らぎ）
-        for (const name of water.cheap ? ['platform.oculus', 'platform.windows'] : []) {
-          const src = g.byName.get(name);
-          if (!src) continue;
-          for (const m of meshesOf(src)) {
-            const mirror = new THREE.Mesh(m.geometry, m.material);
-            mirror.name = `${name}.mirror`;
-            mirror.scale.set(1, -1, 1);
-            mirror.position.y = 2 * WATER_Y;
-            mirror.renderOrder = -2;
-            mirror.userData.clearanceExempt = true;
-            g.scene.add(mirror);
-          }
-        }
+        farNow = false;
       }
 
-      // ── 天井の灯りと壁の燭台の暈（とその映り込み） ──
+      // ── 天井の灯りと壁の燭台の暈 ──
       for (const [name, scale, strength] of [
         ['platform.lamps', 2.8, 0.55],
         ['platform.sconces', 3.4, 0.7],
@@ -176,17 +236,6 @@ export function createPlatformRoom(): RoomModule {
         halo.mesh.name = `${name}.halos`;
         g.scene.add(halo.mesh);
         halos.push({ level: halo.level, on: strength });
-        if (!water?.cheap) continue;
-        const mirrorMat = haloMaterial(0xffd09a, strength * 0.9);
-        const mirror = new THREE.Mesh(halo.mesh.geometry, res.mat(mirrorMat.material));
-        mirror.name = `${name}.halos.mirror`;
-        // 水面で返し、縦に伸ばす（水の映り込みの揺らぎ）。伸ばした分も水面で返るよう原点を水面に置く
-        mirror.scale.set(1, -1.6, 1);
-        mirror.position.y = WATER_Y * (1 + 1.6);
-        mirror.renderOrder = -2;
-        mirror.userData.clearanceExempt = true;
-        g.scene.add(mirror);
-        halos.push({ level: mirrorMat.level, on: strength * 0.9 });
       }
 
       // ── 膜の門（温室への出口） ──
@@ -234,12 +283,14 @@ export function createPlatformRoom(): RoomModule {
           onTouch: (e) => {
             tmpV.set(e.point[0], e.point[1], e.point[2]);
             handle.pulse(e.t, tmpV);
-            // 触れた点から泡の中心への向きに押されて揺れる（水平の向きのまわりに回る）
+            // 触れた点から泡の中心への向き（ゴンドラから離れる向き）へ押されて振れる。
+            // 軸 (-push.z, 0, push.x) のまわりの正の角度で、吊る点の下の泡は push の向きへ動く
             const c = o.getWorldPosition(new THREE.Vector3());
+            const length = Math.max(0.5, c.distanceTo(p.pivot.getWorldPosition(new THREE.Vector3())));
             const push = c.sub(tmpV).setY(0);
             if (push.lengthSq() < 1e-6) push.set(1, 0, 0);
             push.normalize();
-            p.swing = { t0: e.t, axis: new THREE.Vector3(push.z, 0, -push.x) };
+            p.swing = { t0: e.t, axis: new THREE.Vector3(-push.z, 0, push.x), amp: SWING_REACH / length };
           },
         });
         n++;
@@ -305,11 +356,21 @@ export function createPlatformRoom(): RoomModule {
       if (!glb) return;
       const t = frame.t;
       applyState(t >= morningFrom);
+      applyFar(t >= far[0] && t < far[1]);
+      // 岸から見る外側: 朝日の前は暗い逆光、昇るにつれて岸の空とともに明るく（時刻から決める。段にして変える回数を抑える）
+      if (morning) {
+        const level = Math.round(smooth(SUNRISE_T - 4, SUNRISE_T + 40, t) * SHORE_STEPS);
+        if (level !== shoreLevel) {
+          shoreLevel = level;
+          setLightmapState(exteriorBaked, 'morning', 0.6 + (0.4 * level) / SHORE_STEPS);
+        }
+      }
       res.setTime(t);
       // 水面の波紋: ゴンドラが水に触れているあいだ、その足もとから輪が広がる
       if (water) water.uT.value = t;
-      const touching = Math.max(0, 1 - Math.max(0, frame.pose.y - 1.2 - WATER_Y) / 0.25);
-      const end = smooth(765, 778, t);
+      const touching = Math.max(0, 1 - Math.max(0, frame.pose.y - GONDOLA_DIAMETER / 2 - WATER_Y) / 0.25);
+      // 降車の終わり: 殻が水面へ溶けていくあいだ、波紋を強く
+      const end = smooth(endRipple[0], endRipple[1], t);
       water?.uRipple.value.set(frame.pose.x, frame.pose.z, touching, Math.max(touching, end));
       // 吊られた泡: ゆっくり回り、触れられた泡は振り子のように揺れて戻る
       for (const p of pivots) {
@@ -318,7 +379,8 @@ export function createPlatformRoom(): RoomModule {
         if (p.swing) {
           const e = t - p.swing.t0;
           if (e >= 0 && e < 8) {
-            const a = 0.22 * Math.exp(-e * 0.55) * Math.sin(e * 2.6);
+            // 最初に押された向きへ大きく、戻りの振れは減衰でずっと小さい（ゴンドラの方へはほとんど来ない）
+            const a = p.swing.amp * Math.exp(-e * 0.9) * Math.sin(e * 2.6);
             p.pivot.quaternion.premultiply(tmpQ2.setFromAxisAngle(p.swing.axis, a));
           } else if (e >= 8 || e < 0) p.swing = null;
         }
@@ -381,10 +443,12 @@ function seedOf(kind: string): number {
 }
 
 /**
- * 水面: 暗い水と、縁ほど強い映り込み（フレネル）。premultiplied で「奥（鏡像と背景）× F ＋ 水の色 × (1 - F)」。
+ * 水面: 暗い水と、縁ほど強い映り込み（フレネル）。
+ *   高品質: 本物の平面の映り込み（半分強の解像度）。
+ *   中・低品質: 部屋の中から撮った環境画像を、水面で返した向きで読む（安い。灯りの映り込みも出る）。
  * 波紋はゴンドラが水に触れているあいだだけ、その足もとから広がる（時刻から計算）。
  */
-function waterMaterial(tier: RoomContext['quality']['tier']) {
+function waterMaterial(tier: RoomContext['quality']['tier'], env: THREE.Texture | null) {
   const uT = uniform(0);
   const uRipple = uniform(new THREE.Vector4(0, 0, 0, 0));
   const view = cameraPosition.sub(positionWorld).normalize();
@@ -400,24 +464,24 @@ function waterMaterial(tier: RoomContext['quality']['tier']) {
   // 深い水の色。遠く（浅い角度）ほどわずかに空の色を帯びる
   const deep = vec3(0.004, 0.009, 0.016);
   const sheen = vec3(0.012, 0.022, 0.04).mul(smoothstep(float(0), float(0.6), grazing));
+  // 水面で返した向き（視線の逆を、上向きの面で返す）。さざ波で少し揺らす
+  const r = vec3(view.x.negate().add(n.mul(0.6)), view.y, view.z.negate().add(rings.mul(2))).normalize();
+  const fallback = new THREE.DataTexture(new Uint8Array([40, 52, 70, 255]), 1, 1);
+  fallback.needsUpdate = true;
+  const envNode = texture(env ?? fallback, equirectUV(r));
+  const cheap = new THREE.MeshBasicNodeMaterial({ fog: false });
+  cheap.colorNode = vec4(mix(deep.add(sheen), envNode.rgb.mul(1.15), fres), float(1));
+  const setEnvironment = (t: THREE.Texture | null) => {
+    if (t && envNode.value !== t) envNode.value = t;
+  };
   if (tier === 'high') {
-    // 高品質: 本物の平面の映り込み（半分の解像度）。波紋とさざ波で少し揺らす
+    const m = new THREE.MeshBasicNodeMaterial({ fog: false });
     const refl = reflector({ resolutionScale: 0.7, samples: 4 });
     refl.target.rotateX(-Math.PI / 2);
     refl.target.position.y = WATER_Y;
     refl.uvNode = refl.uvNode!.add(vec2(n.mul(0.25), rings.mul(0.6)));
-    const m = new THREE.MeshBasicNodeMaterial({ fog: false });
     m.colorNode = vec4(mix(deep.add(sheen), refl.rgb.mul(0.92), fres), float(1));
-    return { material: m as THREE.Material, uT, uRipple, mirror: refl, cheap: false };
+    return { material: m as THREE.Material, far: cheap as THREE.Material, uT, uRipple, mirror: refl, setEnvironment };
   }
-  // 中・低品質: premultiplied で「奥（鏡像の暈と背景）× F ＋ 水の色 × (1 - F)」
-  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
-  m.blending = THREE.CustomBlending;
-  m.blendEquation = THREE.AddEquation;
-  m.blendSrc = THREE.OneFactor;
-  m.blendDst = THREE.OneMinusSrcAlphaFactor;
-  // 映り込みは「奥（背景）」なので、背景が明るい朝に水が床のように白く見えないよう、映す割合を控えめにする
-  const a = float(1).sub(fres.mul(0.6));
-  m.colorNode = vec4(deep.add(sheen).mul(a), a);
-  return { material: m as THREE.Material, uT, uRipple, mirror: null, cheap: true };
+  return { material: cheap as THREE.Material, far: null, uT, uRipple, mirror: null, setEnvironment };
 }

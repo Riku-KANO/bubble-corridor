@@ -5,7 +5,7 @@
 //   1. role=proto（インスタンスの元の形）は場面から外し、形だけ取っておく（InstancedMesh で描く）。
 //   2. glass（ガラスの種類）を持つ物は core のガラスに差し替える（触れられる物は個別、飾りは共有）。
 //   3. brass を持つ物は core の真鍮。
-//   4. lightmap（焼き込み）を持つ物は、glb の材質を複製して lightMap を付ける（sRGB、2つ目の UV、強さ π×scale）。
+//   4. lightmap（焼き込み）を持つ物は、glb の材質の色で照明なしの材質を作り lightMap を付ける（sRGB、2つ目の UV、強さ π×scale）。
 //   5. clearance_exempt（Blender のカスタムプロパティ）を userData.clearanceExempt に写す（テストと統合担当が見る名前）。
 // extras は glb から来る外のデータなので、既知のキーだけを型と範囲を確かめて読む（src/core/storage.ts の道具）。
 import * as THREE from 'three/webgpu';
@@ -118,7 +118,7 @@ export class Resources {
 /** 焼き込んだ物（ライトマップの差し替えに使う） */
 export interface BakedMesh {
   readonly mesh: THREE.Mesh;
-  readonly material: THREE.MeshStandardMaterial;
+  readonly material: THREE.MeshBasicMaterial;
   readonly scale: number;
   /** 別の光の状態（例: 朝）のライトマップと倍率 */
   readonly alt: Map<string, { texture: THREE.Texture; scale: number }>;
@@ -236,12 +236,12 @@ export async function loadGlbRoom(ctx: RoomContext, room: string, res: Resources
   const brass = res.mat(createBrass({ color: 0xbe9658, roughness: 0.32 }));
   const baked: BakedMesh[] = [];
   /** 同じ元の材質・同じライトマップ・同じ倍率の物は、複製した材質を共有する */
-  const bakedMats = new Map<string, THREE.MeshStandardMaterial>();
+  const bakedMats = new Map<string, THREE.MeshBasicMaterial>();
   const gain = opts.lightmapGain ?? 1;
   const jobs: Promise<void>[] = [];
   for (const [, o] of byName) {
     const ud = o.userData as Record<string, unknown>;
-    if (ud.clearance_exempt !== undefined) o.userData.clearanceExempt = flag(ud.clearance_exempt);
+    if (own(ud, 'clearance_exempt') !== undefined) o.userData.clearanceExempt = flag(own(ud, 'clearance_exempt'));
     // 元の形は場面から外した（材質は部屋がインスタンスごとに作る）
     if (own(ud, 'role') === 'proto') continue;
     const meshes = meshesOf(o);
@@ -278,13 +278,10 @@ export async function loadGlbRoom(ctx: RoomContext, room: string, res: Resources
             const key = `${src.uuid}|${lm}|${scale}`;
             let mat = bakedMats.get(key);
             if (!mat) {
-              mat = res.mat(src.clone());
+              // 焼いた面は照明なしの材質（色 × ライトマップ）。アプリの光や環境画像に左右されず、VR でも軽い。
               // 焼いた値は放射輝度。three の lightMap は拡散反射に 1/π を掛けるので π を掛けて揃える（blender/README.md）
-              mat.lightMap = tex;
-              mat.lightMapIntensity = Math.PI * scale * gain;
-              mat.envMapIntensity = 0;
-              mat.roughness = 1;
-              mat.metalness = 0;
+              mat = res.mat(new THREE.MeshBasicMaterial({ color: src.color, side: src.side, lightMap: tex, lightMapIntensity: Math.PI * scale * gain }));
+              mat.name = src.name;
               bakedMats.set(key, mat);
             }
             mesh.material = mat;
@@ -393,7 +390,14 @@ export function createMembrane(ride: Ride, spec: MembraneSpec): Membrane {
   geo.setIndex(idx);
   geo.computeVertexNormals();
   const rest = Float32Array.from(pos);
-  const glass = createGlass('iridescent', { color: spec.color ?? 0xf4f8ff, face: 0.07, opacity: 0.025, iridescence: 0.9, rim: 0.7 }, { tier: spec.tier });
+  const glass = createGlass('iridescent', { color: spec.color ?? 0xf4f8ff, face: 0.05, opacity: 0.025, iridescence: 0.9, rim: 0.7 }, { tier: spec.tier });
+  // 遠くからは淡く（面全体の虹色の模様が不透明な円盤に見えないよう）、近づくと膜の色と縁がはっきりする。
+  // core のガラスの出力と不透明度に、距離で決まる倍率を掛ける（この膜の材質だけ）
+  const uFade = uniform(1);
+  const gm = glass.material as THREE.MeshStandardNodeMaterial;
+  if (gm.emissiveNode) gm.emissiveNode = (gm.emissiveNode as THREE.Node<'vec3'>).mul(uFade);
+  if (gm.opacityNode) gm.opacityNode = (gm.opacityNode as THREE.Node<'float'>).mul(uFade);
+  const center = new THREE.Vector3(p.x, p.y, p.z);
   const mesh = new THREE.Mesh(geo, glass.material);
   mesh.name = 'membrane';
   mesh.userData.role = 'membrane';
@@ -420,6 +424,8 @@ export function createMembrane(ride: Ride, spec: MembraneSpec): Membrane {
   return {
     mesh,
     update(pose, t) {
+      const far = Math.hypot(pose.x - center.x, pose.y - center.y, pose.z - center.z);
+      uFade.value = 0.22 + 0.78 * (1 - smooth(9, 32, far));
       // 膜までの距離（前が正）。近づくとゴンドラの前の面に押されてたわみ、通った後は揺れながら戻る
       const d = spec.s - pose.s;
       let bulge = 0;
