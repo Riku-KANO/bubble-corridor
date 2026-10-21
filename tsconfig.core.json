@@ -4,6 +4,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noUncheckedIndexedAccess": true,
+    // 案1の tsconfig に寄せる: XR の型（webxr）と .ts 付きの import は案1にないので、core では使えないようにする
+    "types": ["vite/client", "node"],
+    "allowImportingTsExtensions": false,
     "noEmit": true
   },
   "include": ["src/core"]
