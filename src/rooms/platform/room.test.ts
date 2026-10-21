@@ -94,8 +94,8 @@ describe('乗り場と降車', () => {
   });
 
   it('柱「時刻から決める」: 通しで乗った絵と、その時刻から始めた絵が同じ', async () => {
-    for (const at of [20, 45, 58, 762, 775]) {
-      const from = at < 100 ? 0 : sectionTimes('departure').t0 - 5;
+    for (const at of [20, 45, 58, 665, 700, 740, 762, 775]) {
+      const from = at < 100 ? 0 : at < 750 ? 655 : sectionTimes('departure').t0 - 5;
       expect(await timeDeterminismDiffs(createPlatformRoom, from, at), `t=${at}`).toEqual([]);
     }
   });
