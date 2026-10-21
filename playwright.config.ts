@@ -20,6 +20,13 @@ export default defineConfig({
     // WebXR を切るのは、本物の Chrome が localhost で navigator.xr を持ち、IWER（e2e/xr.spec.ts）が入らないため
     launchOptions: { args: ['--use-angle=metal', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required', '--disable-features=WebXR'] },
   },
+  // 時間に敏感な検査（撮影の前後・部屋が見え始めるときのフレームの間隔）は、ほかの検査と同時に走らせると GPU を取り合って誤って落ちる。
+  // 3 段に分け、前の段が終わってから次の段を走らせる（1 つのファイルの中は fullyParallel: false で順に走る）
+  projects: [
+    { name: 'main', testIgnore: /(photo|prewarm)\.spec\.ts/ },
+    { name: 'photo', testMatch: /photo\.spec\.ts/, dependencies: ['main'] },
+    { name: 'prewarm', testMatch: /prewarm\.spec\.ts/, dependencies: ['photo'] },
+  ],
   webServer: {
     // 毎回ビルドしてから配信する（古いビルドでテストしない）。既存サーバーは再利用しない
     command: `pnpm build && pnpm preview --port ${port} --strictPort`,
