@@ -199,9 +199,9 @@ slices:
   requirements: [CORE-3, CAM-3]
   depends_on: [S-18, S-25]
   paths: [src/core/materials/**, src/core/README.md, src/core/CHANGELOG.md, src/core/VERSION, dev/core.html, src/dev/core/**]
-  tests: []
-  status: todo
-  notes: 'S-25 レビュー1巡目 P2-3 から: 暗い部屋（入口・乗り場・万華鏡・天球）では擬似照明の空の輝度が 0.18〜0.33 に下がり、createBrass の発光（空と地面を映す）が弱まって、座席から見下ろす縁がほぼ消える。設計書「視界の下側には常に縁」と ADR-0012（VR の暗転でも縁を残す）の基準が弱まる。真鍮に部屋の照明とは別の発光の下限を持たせる。core を変えるので版を上げる（0.5.1）。M1 の VR の確認より前に 2026-10-21 S-25 レビュー2巡目: 地面を空の 0.6 倍にして天球の真鍮の発光は既定の約21%（ride/04-stars で縁がほぼ見えない）。M1 の VR の確認より前に必須'
+  tests: [src/core/materials/brass.test.ts]
+  status: red
+  notes: 'S-25 レビュー1巡目 P2-3 から: 暗い部屋（入口・乗り場・万華鏡・天球）では擬似照明の空の輝度が 0.18〜0.33 に下がり、createBrass の発光（空と地面を映す）が弱まって、座席から見下ろす縁がほぼ消える。設計書「視界の下側には常に縁」と ADR-0012（VR の暗転でも縁を残す）の基準が弱まる。真鍮に部屋の照明とは別の発光の下限を持たせる。core を変えるので版を上げる（0.5.1）。M1 の VR の確認より前に 2026-10-21 S-25 レビュー2巡目: 地面を空の 0.6 倍にして天球の真鍮の発光は既定の約21%（ride/04-stars で縁がほぼ見えない）。M1 の VR の確認より前に必須 2026-10-21 親がテストを作成（brass.test: brassGlow がシェーダと同じ式の CPU の写し。暗い部屋でも既定の6割以上、明るい部屋で 1.6 倍まで、暖かい色）。赤の証跡: brassGlow がない（4 failed）。実装 消費 0/3'
 - id: S-27
   title: 磨き・画面（入れ子の opacity、快適モードの札、VR の初回の案内、viewMode の使い道）
   wave: 3
