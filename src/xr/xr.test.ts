@@ -106,3 +106,17 @@ describe('VR がない環境', () => {
     expect(() => xr.setVignette(2)).not.toThrow();
   });
 });
+
+describe('TRN-2 画面から VR への白い霧は、動きの曲線（glassEase）で晴れる（ADR-0011。S-28）', () => {
+  it('始まりは真っ白、TRANSITION_SEC.screenToVR で晴れきり、途中は 1 − glassEase', async () => {
+    const { whiteoutOpacity } = await import('./index');
+    const { glassEase } = await import('../core/transition/curve');
+    const { TRANSITION_SEC } = await import('../config');
+    const T = TRANSITION_SEC.screenToVR;
+    expect(whiteoutOpacity(0)).toBeCloseTo(1, 9);
+    expect(whiteoutOpacity(T)).toBeCloseTo(0, 9);
+    expect(whiteoutOpacity(T * 2)).toBe(0);
+    expect(whiteoutOpacity(-1)).toBe(1);
+    for (const k of [0.1, 0.25, 0.5, 0.75, 0.9]) expect(whiteoutOpacity(T * k), `k=${k}`).toBeCloseTo(1 - glassEase(k), 9);
+  });
+});

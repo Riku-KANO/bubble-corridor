@@ -63,10 +63,16 @@ describe('UI-1 画面の流れ', () => {
     }
   });
 
-  it('VR のセッションが乗車前の案内の途中で終わったら、入口へ戻る', () => {
-    const guide = run([{ type: 'loaded' }, { type: 'enterHome' }, { type: 'ride', mode: 'vr' }], first);
-    expect(guide.screen).toBe('guide');
-    expect(reduceFlow(guide, { type: 'xrEnded' }, first)).toMatchObject({ screen: 'home', viewMode: 'screen' });
+  it('VR では初回でも乗車前の案内（画面の DOM）を飛ばす（ヘッドセットの中からは見えず、6秒何も見えないまま待たせない。S-25 の申し送り）', () => {
+    const vr = run([{ type: 'loaded' }, { type: 'enterHome' }, { type: 'ride', mode: 'vr' }], first);
+    expect(vr).toMatchObject({ screen: 'riding', viewMode: 'vr' });
+    // 画面で乗るときの初回は、これまでどおり案内を出す
+    expect(run([{ type: 'loaded' }, { type: 'enterHome' }, { type: 'ride', mode: 'screen' }], first).screen).toBe('guide');
+  });
+
+  it('画面で乗る案内の途中に VR の終わりが届いても、何も変えない', () => {
+    const guide = run([{ type: 'loaded' }, { type: 'enterHome' }, { type: 'ride', mode: 'screen' }], first);
+    expect(reduceFlow(guide, { type: 'xrEnded' }, first)).toBe(guide);
   });
 
   it('VR のセッションが終わったら、乗車中ならポーズにして画面で続けられるようにする', () => {

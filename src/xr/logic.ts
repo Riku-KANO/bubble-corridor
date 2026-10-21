@@ -4,7 +4,8 @@ import type { Vec3Tuple } from '../contracts/events';
 import type { XRPosture } from '../contracts/ids';
 import type { Touchable } from '../contracts/room';
 import { CAMERA, INTERACTION, MOTION, TRANSITION_SEC, UI, XR } from '../config';
-import { smoothstep, wrapAngle } from '../core/easing';
+import { wrapAngle } from '../core/easing';
+import { glassEase } from '../core/transition/curve';
 import { XR_TUNING } from './tuning';
 
 const clamp01 = (v: number) => (v <= 0 ? 0 : v >= 1 ? 1 : v);
@@ -217,5 +218,7 @@ export function menuTextHeight(): number {
  * 霧は経過時間で決める（フレームの積み上げで状態を作らない）。
  */
 export function whiteoutOpacity(sinceStartSec: number): number {
-  return 1 - smoothstep(0, TRANSITION_SEC.screenToVR, sinceStartSec);
+  // 動きの曲線は1つ（glassEase。ADR-0011）。画面の白い霧（src/app の fogAt）と同じ晴れ方
+  const k = sinceStartSec / TRANSITION_SEC.screenToVR;
+  return k <= 0 ? 1 : k >= 1 ? 0 : 1 - glassEase(k);
 }

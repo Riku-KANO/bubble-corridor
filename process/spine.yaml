@@ -134,8 +134,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**, blender/scripts/rooms/lobby.py, blender/scenes/lobby.blend, public/assets/rooms/lobby*, blender/scripts/rooms/platform.py, blender/scenes/platform.blend, public/assets/rooms/platform*, blender/scripts/rooms/greenhouse.py, blender/scenes/greenhouse.blend, public/assets/rooms/greenhouse*, blender/scripts/rooms/gondola.py, blender/scenes/gondola.blend, public/assets/rooms/gondola*]
   tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts, src/gondola/gondola.test.ts]
-  status: green
-  notes: '2026-10-20 2026-10-21 親がテストを作成（lobby・platform・greenhouse・gondola。BLD-4〜7 は expectBlenderRoom で glb とライトマップの付け方まで確かめる）。赤の証跡: 4 files 20 failed / 8 passed。ゴンドラはコードで作ってよい（同期の createGondola のため。glb は任意）。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（部屋A 28件、親の本当の形の距離・rules も緑、check --quick ALL OK）。読み込み lobby 1.19MB・platform 4.84MB・greenhouse 5.00MB、初回 約6.0MB。温室 high 1.02M 三角形、乗り場の描く物 80（上限ちょうど）。親が最新の main を取り込んだ。レビュー1巡目へ'
+  status: red
+  notes: '2026-10-20 2026-10-21 親がテストを作成（lobby・platform・greenhouse・gondola。BLD-4〜7 は expectBlenderRoom で glb とライトマップの付け方まで確かめる）。赤の証跡: 4 files 20 failed / 8 passed。ゴンドラはコードで作ってよい（同期の createGondola のため。glb は任意）。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（部屋A 28件、親の本当の形の距離・rules も緑、check --quick ALL OK）。読み込み lobby 1.19MB・platform 4.84MB・greenhouse 5.00MB、初回 約6.0MB。温室 high 1.02M 三角形、乗り場の描く物 80（上限ちょうど）。親が最新の main を取り込んだ。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 触れた吊られた泡がゴンドラの中まで振れる（向きが逆・振れ幅 2.9m）、乗り場の外側がなく岸から断面に見える、露の光の輪が凍って ?t= で絵が変わる、2:40 の開花が白飛びして驚きがない。P2 Blender の hash() で出力が毎回変わる、擬似照明を空気に、ゴンドラ 38 描画、medium・low の水面、高窓、露が見えない、部屋の境目、Quest の low、HemisphereLight、花の位置、門の膜。親が main に timeDeterminismDiffs と blender-rooms-rules を足し、指摘をテストにした（赤 7件）。実装 消費 2/3'
 - id: S-21
   title: 部屋B（雨の回廊と扉の分岐、万華鏡の間の金と青）を Blender で造形・焼き込み
   wave: 2
@@ -145,8 +145,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**, blender/scripts/rooms/rain.py, blender/scenes/rain.blend, public/assets/rooms/rain*, blender/scripts/rooms/kaleidoscope.py, blender/scenes/kaleidoscope.blend, public/assets/rooms/kaleidoscope*]
   tests: [src/rooms/rain/room.test.ts, src/rooms/kaleidoscope/room.test.ts]
-  status: red
-  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（rain 10・kaleidoscope 10・担当のテスト10、check --quick ALL OK）。雨 3.2MB・万華鏡 4.6MB、60fps（WebGPU・WebGL2）。連続した壁と鏡の板は clearance_exempt にして、本当の三角形で 1.7m 以上を Blender と TS で確かめる、という判断をレビューで厳しく見る。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 触れたガラス片の回転を毎フレーム積み上げる（時刻から決まらない）、色のこだまが 3.3Hz で光る（明滅の上限を超える）。P2 exempt の距離の検査が自分の区間だけ（実測 1.838m で足りている）、黒い街と床の映り込み、隠した物のシェーダの組み立て、部屋から setGlassLighting、扉の解釈（ADR-0013 で仮、発案者に確認中）。exempt の判断は実測で RIDE-8 を弱めていない。親が testing.ts に shapeClearanceViolations と rules.test を足し（main）、P1-1 と本当の形の距離をテストにした（赤 2件）。実装 消費 2/3'
+  status: integrated
+  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（rain 10・kaleidoscope 10・担当のテスト10、check --quick ALL OK）。雨 3.2MB・万華鏡 4.6MB、60fps（WebGPU・WebGL2）。連続した壁と鏡の板は clearance_exempt にして、本当の三角形で 1.7m 以上を Blender と TS で確かめる、という判断をレビューで厳しく見る。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 触れたガラス片の回転を毎フレーム積み上げる（時刻から決まらない）、色のこだまが 3.3Hz で光る（明滅の上限を超える）。P2 exempt の距離の検査が自分の区間だけ（実測 1.838m で足りている）、黒い街と床の映り込み、隠した物のシェーダの組み立て、部屋から setGlassLighting、扉の解釈（ADR-0013 で仮、発案者に確認中）。exempt の判断は実測で RIDE-8 を弱めていない。親が testing.ts に shapeClearanceViolations と rules.test を足し（main）、P1-1 と本当の形の距離をテストにした（赤 2件）。実装 消費 2/3 2026-10-21 レビュー2巡目 request_changes（新しい P1 1件）: 扉を交互に選び直すと万華鏡の色が1秒に約6回入れ替わる（光の明滅の上限）。1巡目の P1・P2 はすべて解消（レビューが時刻から決まること・距離 1.816m〜・境目・0.1 秒の応答を測って確認）。親がテストにした（赤: 1秒に7回）。撮影の描き出しの 467ms は S-30 へ。実装 消費 3/3（最後） 2026-10-21 実装 3/3 で緑（部屋 85件、check --quick ALL OK）。扉の選び直しは1拍に1回まで、万華鏡の色は扉が変わった時刻から 0.8 秒かけて混ぜる（seq3/alt-sheet.png で急な入れ替わりなし）。レビューは 2/2 消費済みのため親が確かめた: 最新の main を取り込み、timeDeterminismDiffs を雨と万華鏡の12の時刻に当てて差 0、main の check（ビルド・e2e 10件）ALL OK。統合'
 - id: S-22
   title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）を Blender で造形・焼き込み
   wave: 2
@@ -211,8 +211,8 @@ slices:
   depends_on: [S-25]
   paths: [src/ui/**, src/styles/**, dev/ui.html, src/dev/ui/**]
   tests: []
-  status: todo
-  notes: 'S-13 レビュー2巡目の残し: 入れ子の opacity の掛け算（screens.css:53。深い文字ほど遅れて急に現れ、写真の画面で合成のレイヤーが約50）、快適モードの札の中央寄せ（screens.css:608）、ポーズの遷移の途中の撮り直し。S-25 の申し送り: VR で初回に乗ると案内（DOM）の6秒が頭の中では見えない（VR では案内を飛ばすか、3D の案内板にするかの判断。flow.ts の ride も関わる）、UiState.viewMode の使い道'
+  status: integrated
+  notes: 'S-13 レビュー2巡目の残し: 入れ子の opacity の掛け算（screens.css:53。深い文字ほど遅れて急に現れ、写真の画面で合成のレイヤーが約50）、快適モードの札の中央寄せ（screens.css:608）、ポーズの遷移の途中の撮り直し。S-25 の申し送り: VR で初回に乗ると案内（DOM）の6秒が頭の中では見えない（VR では案内を飛ばすか、3D の案内板にするかの判断。flow.ts の ride も関わる）、UiState.viewMode の使い道 2026-10-21 VR の初回の案内は親が app の flow で飛ばした（S-28 の統合で）。残り: 入れ子の opacity、快適モードの札の中央寄せ、ポーズの遷移の途中の撮り直し。テストは置かず、画像とレビューで判定（見た目の担当）。実装 消費 0/3 2026-10-21 実装 1/3 で緑（check --quick ALL OK、e2e 10件。1回の取りこぼしは e2e の作り → 親が ride.spec をページの中の毎フレームの記録に直した）。遷移中の合成レイヤー: 写真→入口 78→37、降車→写真 53→25。ポーズの項目は名前を中央の列・札を右の列（96通りで、はみ出しなし）。レビュー1巡目へ 2026-10-21 レビュー1巡目 approve（P3 のみ。レビューが17の遷移×4設定を 40ms ごとに測り、急に出る物なし、ガラスの祖先に opacity<1 なし）。親が統合時に P3: コメント2つ、写真の見出しのフォーカスの枠、語の途中の折り返し。残し（別のスライス）: 入口へ戻る 0.9 秒の stagger の間に押せる、英語 1.5 倍で切符の Ride / No.3 が折り返す、札の遅れ 0.7 秒を pause.ts の書く時刻から。統合'
 - id: S-28
   title: 磨き・VR（白い霧の曲線を glassEase に、XRSystemExtras の重複、殻を抜ける音の口）
   wave: 3
@@ -222,8 +222,8 @@ slices:
   depends_on: [S-25]
   paths: [src/xr/**, e2e/xr.spec.ts, dev/xr.html, src/dev/xr/**]
   tests: []
-  status: todo
-  notes: 'S-18・S-25 のレビューから: VR の白い霧（src/xr/logic.ts:220）は smoothstep のまま（動きの曲線は1つ。ADR-0011）、XRSystemExtras.setGazeDwell が契約と重複（S-24）。S-22 の申し送り: 天球の殻を抜けるたびの音の口がない（契約のキューか音の担当への口。xr ではなく audio・契約の判断かもしれない）'
+  status: integrated
+  notes: 'S-18・S-25 のレビューから: VR の白い霧（src/xr/logic.ts:220）は smoothstep のまま（動きの曲線は1つ。ADR-0011）、XRSystemExtras.setGazeDwell が契約と重複（S-24）。S-22 の申し送り: 天球の殻を抜けるたびの音の口がない（契約のキューか音の担当への口。xr ではなく audio・契約の判断かもしれない） 2026-10-21 親が直接: 白い霧の曲線を glassEase に（xr.test にテスト）、XRSystemExtras.setGazeDwell の重複を消した。VR では乗車前の案内（DOM）を飛ばす（app の flow。S-27 の項目から移した）。殻を抜けるたびの音の口は契約と audio の判断なので S-29 へ。統合'
 - id: S-29
   title: 統合・磨き（部屋のシェーダの先読み、小画面からの戻り先、部屋の境目の取り決め、関門1の計測）
   wave: 3
@@ -234,4 +234,15 @@ slices:
   paths: [src/app/**, src/main.ts, e2e/ride.spec.ts, e2e/smoke.spec.ts, scripts/dev/**]
   tests: []
   status: todo
-  notes: 'S-21・S-22 の申し送り: 次の部屋のシェーダを前の部屋にいる間に compileAsync で先読み（読み込み直後、部屋の最初の update の前。visible=false の物はコンパイルされない）。いまは膜を抜けるフレームで 2fps 前後まで落ちる。S-25 レビュー2巡目の P3: ライドフォトから小画面を開くと場面の時刻が 0 になる（returnTo に従わせる）、VR のまま入口へ戻ると xr.exit の数フレームが t=0。部屋の境目の取り決め（雨の突き当たりの壁 s1+0.5〜0.85 など、S-21）を decisions に。関門1の PC 60fps（天球の見どころ）を部屋の統合後に測って docs/gates.md に'
+  notes: 'S-21・S-22 の申し送り: 次の部屋のシェーダを前の部屋にいる間に compileAsync で先読み（読み込み直後、部屋の最初の update の前。visible=false の物はコンパイルされない）。いまは膜を抜けるフレームで 2fps 前後まで落ちる。S-25 レビュー2巡目の P3: ライドフォトから小画面を開くと場面の時刻が 0 になる（returnTo に従わせる）、VR のまま入口へ戻ると xr.exit の数フレームが t=0。部屋の境目の取り決め（雨の突き当たりの壁 s1+0.5〜0.85 など、S-21）を decisions に。関門1の PC 60fps（天球の見どころ）を部屋の統合後に測って docs/gates.md に 2026-10-21 S-21 の申し送り: 縦持ちで視野角を広げる（設計書「縦持ちでは視野角を広げ」。75°のままでは 5:51 の扉が画面の端で切れる。90°で水平の半角 24.8°）。万華鏡が見え始める 5:45 に WebGL2 で 0.35 秒止まる（compileAsync の先読みで）'
+- id: S-30
+  title: 磨き・ライドフォト（撮影の描き出しで見どころの最中に止まらない）
+  wave: 3
+  lane: photo
+  milestone: M1
+  requirements: [PHO-1, REN-3]
+  depends_on: [S-21]
+  paths: [src/photo/**, src/app/**, e2e/photo.spec.ts, dev/photo.html, src/dev/photo/**]
+  tests: [e2e/photo.spec.ts]
+  status: red
+  notes: 'S-21 レビュー2巡目: 5:10.5（photo.capture@93、雨粒が止まる見どころの最中）の撮影の描き出しで 467ms 止まる（2560×1440 の描き出し）。VR の 72fps では問題になる。撮影を数フレームに分ける、解像度の段を下げる、描き出しを見どころから少しずらす、VR では撮影の描き出しを止まらない形にする、などを検討。撮影の warmUpCapture は S-24 で入っている 2026-10-21 親がテストを作成（e2e/photo.spec.ts: ?t=300 から通しで 5:10.5 の撮影の前後 7 秒のフレームの間隔、WebGPU と WebGL2（VR の経路）で 50ms 未満）。赤の証跡（本番のビルド）: WebGPU 89ms、WebGL2 95ms（開発サーバーの WebGL2 では 483ms）。app の撮影の呼び方も変えてよいよう paths に src/app を足した。実装 消費 0/3'

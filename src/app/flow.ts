@@ -46,7 +46,8 @@ export function reduceFlow(state: FlowState, action: FlowAction, ctx: FlowContex
       return state.screen === 'queue' && state.loaded ? { ...state, screen: 'home' } : state;
     case 'ride':
       if (state.screen !== 'home') return state;
-      return { ...state, screen: ctx.seenGuide ? 'riding' : 'guide', viewMode: action.mode };
+      // VR では乗車前の案内（画面の DOM）を飛ばす: ヘッドセットの中からは見えない（触れ方は VR の中で、自分で鳴る合図と縁の光が教える）
+      return { ...state, screen: ctx.seenGuide || action.mode === 'vr' ? 'riding' : 'guide', viewMode: action.mode };
     case 'guideDone':
       return state.screen === 'guide' ? { ...state, screen: 'riding' } : state;
     case 'pause':
@@ -70,7 +71,7 @@ export function reduceFlow(state: FlowState, action: FlowAction, ctx: FlowContex
       return { ...state, screen: state.returnTo ?? 'home', returnTo: null };
     case 'xrEnded': {
       // ヘッドセットを外した（セッションが終わった）。乗車中ならポーズにして画面で続けられるようにする。
-      // 乗車前の案内の途中なら入口へ戻す（画面のない案内に取り残さない）
+      // 乗車前の案内の途中なら入口へ戻す（VR では案内を飛ばすので、いまは通らない。残しておいても害はない）
       if (state.viewMode !== 'vr') return state;
       const screen = state.screen === 'riding' ? 'pause' : state.screen === 'guide' ? 'home' : state.screen;
       return { ...state, viewMode: 'screen', screen };
