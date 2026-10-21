@@ -12,6 +12,7 @@ import {
   expectRoomContract,
   loadRoom,
   reachableFraction,
+  shapeClearanceViolations,
 } from '../testing';
 import { createGreenhouseRoom } from './index';
 
@@ -24,6 +25,11 @@ describe('第1室 朝露の温室', () => {
 
   it('BLD-4〜7 Blender で造形して焼いた glb とライトマップを読む（blender/scripts/rooms/greenhouse.py）', async () => {
     await expectBlenderRoom(createGreenhouseRoom, 'greenhouse');
+  });
+
+  it('RIDE-8 clearanceExempt の物も本当の形で 0.5m 以上（区間の前後 3m まで。ADR-0013）', async () => {
+    const { room } = await loadRoom(createGreenhouseRoom);
+    expect(shapeClearanceViolations(room, ['greenhouse'])).toEqual([]);
   });
 
   it('RIDE-8 ゴンドラの表面から物まで 0.5m 以上', async () => {

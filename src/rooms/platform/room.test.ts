@@ -9,6 +9,7 @@ import {
   expectRoomContract,
   loadRoom,
   sectionTimes,
+  shapeClearanceViolations,
 } from '../testing';
 import { createPlatformRoom } from './index';
 
@@ -19,6 +20,11 @@ describe('乗り場と降車', () => {
 
   it('BLD-4〜7 Blender で造形して焼いた glb とライトマップを読む（blender/scripts/rooms/platform.py）', async () => {
     await expectBlenderRoom(createPlatformRoom, 'platform');
+  });
+
+  it('RIDE-8 clearanceExempt の物も本当の形で 0.5m 以上（区間の前後 3m まで。ADR-0013）', async () => {
+    const { room } = await loadRoom(createPlatformRoom);
+    expect(shapeClearanceViolations(room, ['platform', 'departure'])).toEqual([]);
   });
 
   it('RIDE-8 ゴンドラ（半径1.2m）の表面から物まで 0.5m 以上（水面は除く）', async () => {
