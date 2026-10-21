@@ -16,6 +16,7 @@ import {
   loadRoom,
   ride,
   sectionTimes,
+  shapeClearanceViolations,
   worldCenter,
 } from '../testing';
 import { createCelestialRoom } from './index';
@@ -29,6 +30,11 @@ describe('第4室 星の天球', () => {
 
   it('BLD-4〜7 Blender で造形して焼いた glb とライトマップを読む（blender/scripts/rooms/celestial.py）', async () => {
     await expectBlenderRoom(createCelestialRoom, 'celestial');
+  });
+
+  it('RIDE-8 clearanceExempt の物も本当の形で 0.5m 以上（区間の前後 3m まで。殻・膜・水面は除く。ADR-0013）', async () => {
+    const { room } = await loadRoom(createCelestialRoom);
+    expect(shapeClearanceViolations(room, ['celestial'])).toEqual([]);
   });
 
   it('RIDE-8 ゴンドラの表面から物まで 0.5m 以上（通り抜ける殻は除く）', async () => {

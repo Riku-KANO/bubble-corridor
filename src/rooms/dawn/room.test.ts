@@ -13,6 +13,7 @@ import {
   expectRoomContract,
   loadRoom,
   sectionTimes,
+  shapeClearanceViolations,
 } from '../testing';
 import { createDawnRoom } from './index';
 
@@ -25,6 +26,11 @@ describe('第5室 夜明けの岸', () => {
 
   it('BLD-4〜7 Blender で造形して焼いた glb とライトマップを読む（blender/scripts/rooms/dawn.py）', async () => {
     await expectBlenderRoom(createDawnRoom, 'dawn');
+  });
+
+  it('RIDE-8 clearanceExempt の物も本当の形で 0.5m 以上（区間の前後 3m まで。殻・膜・水面は除く。ADR-0013）', async () => {
+    const { room } = await loadRoom(createDawnRoom);
+    expect(shapeClearanceViolations(room, ['dawn'])).toEqual([]);
   });
 
   it('RIDE-8 ゴンドラの表面から物まで 0.5m 以上（水面は除く）', async () => {
