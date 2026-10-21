@@ -222,8 +222,8 @@ slices:
   depends_on: [S-25]
   paths: [src/xr/**, e2e/xr.spec.ts, dev/xr.html, src/dev/xr/**]
   tests: []
-  status: todo
-  notes: 'S-18・S-25 のレビューから: VR の白い霧（src/xr/logic.ts:220）は smoothstep のまま（動きの曲線は1つ。ADR-0011）、XRSystemExtras.setGazeDwell が契約と重複（S-24）。S-22 の申し送り: 天球の殻を抜けるたびの音の口がない（契約のキューか音の担当への口。xr ではなく audio・契約の判断かもしれない）'
+  status: integrated
+  notes: 'S-18・S-25 のレビューから: VR の白い霧（src/xr/logic.ts:220）は smoothstep のまま（動きの曲線は1つ。ADR-0011）、XRSystemExtras.setGazeDwell が契約と重複（S-24）。S-22 の申し送り: 天球の殻を抜けるたびの音の口がない（契約のキューか音の担当への口。xr ではなく audio・契約の判断かもしれない） 2026-10-21 親が直接: 白い霧の曲線を glassEase に（xr.test にテスト）、XRSystemExtras.setGazeDwell の重複を消した。VR では乗車前の案内（DOM）を飛ばす（app の flow。S-27 の項目から移した）。殻を抜けるたびの音の口は契約と audio の判断なので S-29 へ。統合'
 - id: S-29
   title: 統合・磨き（部屋のシェーダの先読み、小画面からの戻り先、部屋の境目の取り決め、関門1の計測）
   wave: 3
