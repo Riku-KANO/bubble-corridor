@@ -1,6 +1,6 @@
 // core 確認ページ（S-12）。ガラス6種を球・板・泡の形で並べ、曇りと指の文字を見せる。
 // 夜明け前の青と朝の色の背景の上で、ゆっくり回して縁の反射と虹色の流れを確かめる。
-// ?webgl で WebGL2、?tier=low|medium|high で品質、?solo=<種類>、?still&t=12（撮影用に止める）、?fog=0。
+// ?webgl で WebGL2、?tier=low|medium|high で品質、?solo=<種類>、?still&t=12（撮影用に止める）、?fog=0、?env=0（環境画像を外す。暗い部屋の真鍮の縁の下限を確かめる。light=celestial と合わせる）。
 import '@fontsource/zen-old-mincho/400.css';
 import '@fontsource/noto-sans-jp/400.css';
 import '../../styles/base.css';
@@ -149,7 +149,8 @@ function makeEnvironment(): THREE.CanvasTexture {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
-scene.environment = makeEnvironment();
+// 環境画像がない場面では、真鍮は擬似照明（と発光の下限）だけで光る。ゴンドラの暗い部屋と同じ状態を確かめるため外せる
+if (params.get('env') !== '0') scene.environment = makeEnvironment();
 scene.environmentIntensity = 1.25;
 
 const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
