@@ -211,8 +211,8 @@ slices:
   depends_on: [S-25]
   paths: [src/ui/**, src/styles/**, dev/ui.html, src/dev/ui/**]
   tests: []
-  status: todo
-  notes: 'S-13 レビュー2巡目の残し: 入れ子の opacity の掛け算（screens.css:53。深い文字ほど遅れて急に現れ、写真の画面で合成のレイヤーが約50）、快適モードの札の中央寄せ（screens.css:608）、ポーズの遷移の途中の撮り直し。S-25 の申し送り: VR で初回に乗ると案内（DOM）の6秒が頭の中では見えない（VR では案内を飛ばすか、3D の案内板にするかの判断。flow.ts の ride も関わる）、UiState.viewMode の使い道'
+  status: red
+  notes: 'S-13 レビュー2巡目の残し: 入れ子の opacity の掛け算（screens.css:53。深い文字ほど遅れて急に現れ、写真の画面で合成のレイヤーが約50）、快適モードの札の中央寄せ（screens.css:608）、ポーズの遷移の途中の撮り直し。S-25 の申し送り: VR で初回に乗ると案内（DOM）の6秒が頭の中では見えない（VR では案内を飛ばすか、3D の案内板にするかの判断。flow.ts の ride も関わる）、UiState.viewMode の使い道 2026-10-21 VR の初回の案内は親が app の flow で飛ばした（S-28 の統合で）。残り: 入れ子の opacity、快適モードの札の中央寄せ、ポーズの遷移の途中の撮り直し。テストは置かず、画像とレビューで判定（見た目の担当）。実装 消費 0/3'
 - id: S-28
   title: 磨き・VR（白い霧の曲線を glassEase に、XRSystemExtras の重複、殻を抜ける音の口）
   wave: 3
