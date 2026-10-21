@@ -86,7 +86,11 @@ export async function startApp(root: HTMLElement): Promise<void> {
   setDefaultGlassTier(quality.tier);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x14181f);
+  // 背景色と霧の物は 1 つずつ作って使い回し、空気が変わるときは値だけ書き換える。霧の物を作り直すと、three は霧のノードも作り直し、
+  // 見えている材質すべてのシェーダーを作り直す（40 個ほどで WebGPU 約 220ms、WebGL2・VR で約 1.7 秒。温室の暗さの 12 段が引っかかっていた）
+  const backgroundColor = new THREE.Color(0x14181f);
+  const sceneFog = new THREE.Fog(0xffffff, 1, 1000);
+  scene.background = backgroundColor;
   const camera = new THREE.PerspectiveCamera(settings.fov, innerWidth / innerHeight, 0.05, 2000);
   const gondola = createGondola();
   scene.add(gondola.root);
@@ -369,6 +373,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     hiddenThisRide = [];
     shots = [];
     preparedShots.clear();
+    debug?.clearCaptures();
     hintShown = false;
     chimer.reset();
     audio.stopLobby();
@@ -491,13 +496,19 @@ export async function startApp(root: HTMLElement): Promise<void> {
     const cue = captureToPrepare(cues, t, preparedShots, shotRoomReady);
     if (!cue) return;
     preparedShots.add(cue.id);
-    void prepareCapture(renderer, scene, camera, captureSize());
+    // 撮影の部屋の下は、いま隠れている物（見どころで現れる物）も準備する
+    const room = rooms.get(ROOM_OF_SECTION[cue.section]);
+    void prepareCapture(renderer, scene, camera, captureSize(), { rooms: room ? [room.root] : [] });
   }
+
+  /** 直近のフレームで描いた場面の乗車の秒（撮影が描いた場面の確認用。?debug の captures に足す） */
+  let frameT = 0;
+  const noteCapture = () => debug?.recordCapture(frameT);
 
   async function takeShot(shot: ShotId) {
     try {
       const size = captureSize();
-      const image = await capturePhoto(renderer, scene, camera, size);
+      const image = await capturePhoto(renderer, scene, camera, size, { onRender: noteCapture });
       shots.push({ shot, image });
       bus.emit('photoCaptured', { shot });
     } catch (err) {
@@ -589,6 +600,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     // 場面の時刻: ゴンドラの位置・部屋・画面効果を決める。乗車の外でも、降車の後（ライドフォト）は降車の時刻のまま
     // （0 にすると、降車の瞬間にゴンドラが乗り場の向きへ回る。VR では世界が回る）。待ち列・入口などは乗車の頭
     const t = sceneTimeFor(flow.screen, rideT);
+    frameT = t;
 
     ride.poseAt(t, settings.comfort, pose);
     gondola.root.position.set(pose.x, pose.y, pose.z);
@@ -640,8 +652,15 @@ export async function startApp(root: HTMLElement): Promise<void> {
     const atmosphere = rooms.get(roomId)?.atmosphere ?? null;
     if (atmosphere && atmosphere !== currentAtmosphere) {
       currentAtmosphere = atmosphere;
-      scene.background = new THREE.Color(atmosphere.background);
-      scene.fog = atmosphere.fog ? new THREE.Fog(atmosphere.fog.color, atmosphere.fog.near, atmosphere.fog.far) : null;
+      backgroundColor.set(atmosphere.background);
+      if (atmosphere.fog) {
+        sceneFog.color.set(atmosphere.fog.color);
+        sceneFog.near = atmosphere.fog.near;
+        sceneFog.far = atmosphere.fog.far;
+        scene.fog = sceneFog;
+      } else {
+        scene.fog = null;
+      }
       renderer.toneMappingExposure = atmosphere.exposure;
       scene.environment = atmosphere.environment ?? null;
       setGlassLighting(glassLightingFor(atmosphere));

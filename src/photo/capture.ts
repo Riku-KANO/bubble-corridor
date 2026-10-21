@@ -12,6 +12,7 @@
 //  - 撮影の描画は画面の描画とシェーダーを共有できない（描画先の条件が違う）。見えている物すべてのシェーダーを作ると
 //    約 50ms（WebGL2 の最初の描画ではさらにプログラムごとに数 ms）止まるので、撮影の少し前に prepareCapture で先に作る。
 //  - GPU 側の作業（下ごしらえ・描き出し・読み出し）は 1 つずつ順に行う（three の描画の文脈が重なると壊れる）。
+//  - 下ごしらえは物ごとに列へ入れる。撮影が来たら残りを打ち切り、撮影の待ちは物 1 つぶんで済ませる（撮影の時刻を下ごしらえで遅らせない）。
 import * as THREE from 'three/webgpu';
 
 export interface CaptureSize {
@@ -41,6 +42,8 @@ const STRIP_ROWS = 48;
 const WARMUP_SIZE: CaptureSize = { width: 64, height: 36 };
 /** 下ごしらえ（prepareCapture）の描画先の幅。縦は撮影の縦横比から決める */
 const PREPARE_WIDTH = 64;
+/** 下ごしらえを主スレッドで続けてよい時間（ms）。これを超えたら次のタスクへ回す */
+const PREPARE_SLICE_MS = 3;
 
 /**
  * 撮影の GPU 側の作業（下ごしらえの compile、描き出しと読み出し）を 1 つずつ順に行うための列。
@@ -54,6 +57,9 @@ function exclusively<T>(work: () => Promise<T>): Promise<T> {
   gpuQueue = run.catch(() => undefined);
   return run;
 }
+
+/** 動いている下ごしらえ（warmUpCapture と prepareCapture）。撮影が来たら cancelled を立て、残りは行わない */
+const prepareJobs = new Set<{ cancelled: boolean }>();
 
 /** いまのフレームの処理（描画と提出）が済んだ後の、次のタスクまで待つ */
 function afterFrame(): Promise<void> {
@@ -80,6 +86,11 @@ function createTarget(renderer: THREE.WebGPURenderer, width: number, height: num
   });
 }
 
+export interface CaptureOptions {
+  /** GPU に積む直前に呼ぶ。撮影が「いつの場面」を描いたかの確認用（e2e が ?debug で読む）。重い処理は置かない */
+  readonly onRender?: () => void;
+}
+
 /**
  * 画面とは別に高い解像度で描き出す。画面の演出は止めない（裏で別の画像として描く）。
  * size は config の PHOTO.captureDesktop / captureMobile。返す画像は WebP（書き出せない環境では JPEG）。
@@ -87,13 +98,31 @@ function createTarget(renderer: THREE.WebGPURenderer, width: number, height: num
  * トーンマッピングと色空間は画面と同じ（renderer の設定どおり）になる。RenderTarget へ普通に描くと
  * 線形・トーンマップなしで出てしまうので、setOutputRenderTarget で「画面の代わり」として描かせ、
  * three の出力パスに変換までやらせる（PostProcessing と同じ経路）。
+ *
+ * 呼ぶと、動いている下ごしらえの残りは打ち切られる（撮影の時刻を下ごしらえの長さで決めない。待つのは作業中の物 1 つぶん）。
  */
 export async function capturePhoto(
   renderer: THREE.WebGPURenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
   size: CaptureSize,
+  options: CaptureOptions = {},
 ): Promise<Blob> {
+  for (const job of prepareJobs) job.cancelled = true;
+  const blob = await capture(renderer, scene, camera, size, options, null);
+  if (!blob) throw new Error('撮影できませんでした');
+  return blob;
+}
+
+/** skipWhen が立っていたら（撮影が来て、下ごしらえの残りが打ち切られた）、描かずに null */
+async function capture(
+  renderer: THREE.WebGPURenderer,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  size: CaptureSize,
+  options: CaptureOptions,
+  skipWhen: { cancelled: boolean } | null,
+): Promise<Blob | null> {
   const width = Math.max(1, Math.round(size.width));
   const height = Math.max(1, Math.round(size.height));
 
@@ -103,15 +132,17 @@ export async function capturePhoto(
     // 描くのは、いまのフレームの描画が済んでから（次のタスク）。フレームの中で GPU に積むと、フレームの提出が撮影の描画の後ろになり、
     // その分だけそのフレームが遅れる（VR ではフレームの提出が遅れると、そのまま視界の止まり）。場面はフレームの間は変わらないので絵は同じ
     await afterFrame();
+    if (skipWhen?.cancelled) return null;
     const target = createTarget(renderer, width, height);
     try {
+      options.onRender?.();
       inCaptureState(renderer, camera, target, width / height, () => renderer.render(scene, camera));
       return (await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height)) as Uint8Array;
     } finally {
       target.dispose();
     }
   });
-  return encode(data, width, height, layoutOf(renderer, data, width, height));
+  return data ? encode(data, width, height, layoutOf(renderer, data, width, height)) : null;
 }
 
 /**
@@ -130,11 +161,85 @@ export async function warmUpCapture(
   camera: THREE.Camera,
   size: CaptureSize = WARMUP_SIZE,
 ): Promise<void> {
+  // 下ごしらえの一種。本物の撮影が来たら、まだ始めていない残りは打ち切る（撮影の時刻を下ごしらえで遅らせない）
+  const job = { cancelled: false };
+  prepareJobs.add(job);
   try {
-    await capturePhoto(renderer, scene, camera, size);
-    await capturePhoto(renderer, scene, camera, size);
+    for (let i = 0; i < 2 && !job.cancelled; i++) await capture(renderer, scene, camera, size, {}, job);
   } catch {
     // 下ごしらえなので、失敗は見せない
+  } finally {
+    prepareJobs.delete(job);
+  }
+}
+
+export interface PrepareOptions {
+  /**
+   * 撮影の部屋の root など。この下は、いま見えていない物（あとから現れる物）も準備する。
+   * 部屋は、見どころで現れる物（露の波紋、空のドームなど）を先に作って隠しておくので、見えている物だけでは撮影の最中に作ることになる
+   */
+  readonly rooms?: readonly THREE.Object3D[];
+}
+
+/** 描画の対象になる物（three の _projectObject が列に入れる種類） */
+interface Renderable {
+  readonly isMesh?: boolean;
+  readonly isLine?: boolean;
+  readonly isPoints?: boolean;
+  readonly isSprite?: boolean;
+}
+
+function isRenderable(o: THREE.Object3D): boolean {
+  const r = o as unknown as Renderable;
+  return r.isMesh === true || r.isLine === true || r.isPoints === true || r.isSprite === true;
+}
+
+/**
+ * 下ごしらえの対象を、物ごとに集める。順番は、撮影に効く順:
+ * 撮影の部屋（rooms）の下の、いま見えている物 → 同じ下の、隠れている物（見どころで現れる物）→ 場面のほかの見えている物。
+ * 撮影が来て打ち切られても、先に作った分が効く。場面に属さなくなった物は、実行のときに外す（部屋が解放された）。
+ */
+function collectRenderables(scene: THREE.Scene, rooms: readonly THREE.Object3D[]): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  const seen = new Set<THREE.Object3D>();
+  const add = (o: THREE.Object3D): void => {
+    if (!isRenderable(o) || seen.has(o)) return;
+    seen.add(o);
+    out.push(o);
+  };
+  for (const root of rooms) root.traverseVisible(add);
+  for (const root of rooms) root.traverse(add);
+  scene.traverseVisible(add);
+  return out;
+}
+
+function isInScene(scene: THREE.Scene, o: THREE.Object3D): boolean {
+  for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === scene) return true;
+  return false;
+}
+
+/**
+ * 物 1 つのシェーダーとパイプラインを作る（compileAsync の同期の部分だけ、撮影の状態で）。
+ * 隠れた物も作るので visible を立て、見えている範囲に関わらず作るので視錐台の判定を外し、終わったら必ず戻す。
+ * compileAsync が描く物の一覧を作る同期の部分は、戻ってきた時点で終わっているので、戻してよい（続きは一覧に沿って進む）。
+ */
+function compileOne(
+  renderer: THREE.WebGPURenderer,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  target: THREE.RenderTarget,
+  aspect: number,
+  obj: THREE.Object3D,
+): Promise<void> {
+  const visible = obj.visible;
+  const culled = obj.frustumCulled;
+  obj.visible = true;
+  obj.frustumCulled = false;
+  try {
+    return inCaptureState(renderer, camera, target, aspect, () => renderer.compileAsync(obj, camera, scene));
+  } finally {
+    obj.visible = visible;
+    obj.frustumCulled = culled;
   }
 }
 
@@ -143,48 +248,51 @@ export async function warmUpCapture(
  * 描くので、three は画面で作ったシェーダーを使い回せず、見えている物すべての分を撮影の最中に作り直す（約 50ms、
  * 雨の部屋で測定）。ここで先に、同じ描画先の条件でシェーダーとパイプラインを作っておく。
  *
- * three の compileAsync は物ごとに主スレッドを返しながら進めるので、画面は止まらない。
+ * 物ごとに compileAsync を呼び、1 つずつ GPU 作業の列に入れる（three の compileAsync は物の中でも主スレッドを返しながら進める）。
+ * 撮影が来たら残りを打ち切るので、撮影の待ちは作業中の物 1 つぶんで済む（足りない分は撮影が自分で作る）。
  * 小さな描画先で足りる（シェーダーは描画先の大きさに依らず、形式・多重標本・深度の有無で決まる）。
- * 終わるまで待ち、失敗しても体験は止めない（撮影が自分で作り直す）。
+ * 失敗しても体験は止めない（撮影が自分で作り直す）。
  */
 export async function prepareCapture(
   renderer: THREE.WebGPURenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
   size: CaptureSize,
+  options: PrepareOptions = {},
 ): Promise<void> {
   const width = PREPARE_WIDTH;
   const height = Math.max(1, Math.round((PREPARE_WIDTH * size.height) / size.width));
-  await exclusively(async () => {
-    const culled: THREE.Object3D[] = [];
-    let target: THREE.RenderTarget | null = null;
-    try {
-      await afterFrame(); // 描く物の一覧を作る同期の部分も、フレームの外で
-      target = createTarget(renderer, width, height);
-      // 撮影までの間にゴンドラは進み、カメラの向きも変わる。いま視錐台に入っている物だけを準備すると、撮影の最中に入ってくる物の
-      // シェーダーが間に合わない（VR では特に、カメラの位置が乗り物と別）。なので、見えている（visible）物すべてを視錐台に関わらず準備する。
-      scene.traverseVisible((o) => {
-        if (o.frustumCulled) {
-          o.frustumCulled = false;
-          culled.push(o);
-        }
+  const aspect = size.width / size.height;
+  const job = { cancelled: false };
+  prepareJobs.add(job);
+  let target: THREE.RenderTarget | null = null;
+  try {
+    await afterFrame(); // 物の一覧を作るのも、フレームの外で
+    if (job.cancelled) return;
+    const objects = collectRenderables(scene, options.rooms ?? []);
+    const t = createTarget(renderer, width, height);
+    target = t;
+    let sliceStart = performance.now();
+    for (const obj of objects) {
+      if (job.cancelled) break;
+      // 作り済みの物は await で主スレッドを返さないまま終わるので、続けて動かしすぎないよう時間で区切る
+      if (performance.now() - sliceStart >= PREPARE_SLICE_MS) {
+        await afterFrame();
+        sliceStart = performance.now();
+      }
+      await exclusively(async () => {
+        if (job.cancelled || !isInScene(scene, obj)) return;
+        await compileOne(renderer, scene, camera, t, aspect, obj);
       });
-      // compileAsync の同期の部分（描く物の一覧を作るところ）が終わってから戻すので、ここで元に戻してよい。続きは一覧に沿って進む
-      const compiling = inCaptureState(renderer, camera, target, size.width / size.height, () => renderer.compileAsync(scene, camera));
-      restoreCulling(culled);
-      await compiling;
-    } catch {
-      // 下ごしらえなので、失敗は見せない
-    } finally {
-      restoreCulling(culled);
-      target?.dispose();
     }
-  });
-}
-
-function restoreCulling(culled: THREE.Object3D[]): void {
-  for (const o of culled) o.frustumCulled = true;
-  culled.length = 0;
+  } catch {
+    // 下ごしらえなので、失敗は見せない
+  } finally {
+    prepareJobs.delete(job);
+    // 描画先は列の中で捨てる（compile の続きや撮影の描き出しと重ならないように）
+    const done = target as THREE.RenderTarget | null;
+    if (done) await exclusively(async () => done.dispose());
+  }
 }
 
 /**

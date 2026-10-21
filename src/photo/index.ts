@@ -3,6 +3,7 @@
 // ここは受け取り（ダウンロード・共有）を持ち、外から使う名前をまとめて出す。
 
 export { capturePhoto, prepareCapture, warmUpCapture } from './capture';
+export type { CaptureOptions, CaptureSize, PrepareOptions } from './capture';
 export { composePhoto } from './compose';
 export { createPhotoStore } from './store';
 export { CAPTURE_PREPARE_LEAD_SEC, captureToPrepare, cropFor, doorTint, frameTierFor, photoFileName, stampText } from './rules';
