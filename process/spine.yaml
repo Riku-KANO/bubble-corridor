@@ -156,8 +156,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/celestial/**, src/rooms/dawn/**, dev/rooms-c.html, src/dev/rooms-c/**, blender/scripts/rooms/celestial.py, blender/scenes/celestial.blend, public/assets/rooms/celestial*, blender/scripts/rooms/dawn.py, blender/scenes/dawn.blend, public/assets/rooms/dawn*]
   tests: [src/rooms/celestial/room.test.ts, src/rooms/dawn/room.test.ts]
-  status: red
-  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒 2026-10-20 2026-10-21 親がテストを作成（celestial・dawn、expectBlenderRoom 込み。ADR-0009: 外殻 62m 以内、暗転が明けたとき殻の外で、球の縁が正面から 30° 以内）。赤の証跡: 2 files 16 failed / 5 passed。実装 消費 0/3'
+  status: green
+  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒 2026-10-20 2026-10-21 親がテストを作成（celestial・dawn、expectBlenderRoom 込み。ADR-0009: 外殻 62m 以内、暗転が明けたとき殻の外で、球の縁が正面から 30° 以内）。赤の証跡: 2 files 16 failed / 5 passed。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3（Opus）で緑（celestial 12・dawn 9・担当のテスト9、check --quick ALL OK、render-paths 2/2）。天球 2.79MB・岸 2.15MB、60fps（WebGPU・WebGL2）、mobile low 58〜60fps。親が最新の main を取り込み（30件緑）。レビュー1巡目へ'
 - id: S-23
   title: VR（immersive-vr、座る/立つ、指先とコントローラーで触れる、外周の暗さ、曇りガラスのメニュー）と描画経路の検証
   wave: 1
