@@ -28,4 +28,10 @@ export default ts.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
+  {
+    // 案1と共有する src/core のテストは案1の書き方のまま取り込む（中身を書き換えない。ADR-0005・ADR-0011）。
+    // 案1の lint では許される書き方（偽のデバイスの中で this を受ける）だけを、テストに限って許す
+    files: ['src/core/**/*.test.ts'],
+    rules: { '@typescript-eslint/no-this-alias': 'off' },
+  },
 );

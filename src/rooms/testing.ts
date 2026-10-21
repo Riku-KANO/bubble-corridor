@@ -10,7 +10,7 @@ import type { ComfortMode, DoorChoice, SectionId } from '../contracts/ids';
 import type { RideData, RidePose } from '../contracts/ride';
 import type { AssetLoader, RoomContext, RoomFactory, RoomFrame, RoomModule } from '../contracts/room';
 import { GONDOLA_DIAMETER, MOTION, PERF } from '../config';
-import { presetFor, type QualityTier } from '../core/quality';
+import { presetFor, type QualityTier } from '../core/quality-tier';
 import { buildCueSheet, createRide, generateRideData } from '../ride';
 
 const ASSETS = new URL('../../public/assets/', import.meta.url);

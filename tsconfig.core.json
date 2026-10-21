@@ -1,0 +1,13 @@
+{
+  // 共通部品（src/core）は案1「ビードロの向こう」にもコピーする（ADR-0005・ADR-0011）。
+  // 案1の tsconfig は noUncheckedIndexedAccess を持つので、src/core だけは同じ厳しさでも型が通ることを確かめる
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    // 案1の tsconfig に寄せる: XR の型（webxr）と .ts 付きの import は案1にないので、core では使えないようにする
+    "types": ["vite/client", "node"],
+    "allowImportingTsExtensions": false,
+    "noEmit": true
+  },
+  "include": ["src/core"]
+}

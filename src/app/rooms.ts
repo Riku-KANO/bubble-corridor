@@ -12,9 +12,19 @@ interface Slot {
   attached: boolean;
 }
 
+/** 部屋の並びが同じか（確保なしで比べる） */
+function sameRooms(a: readonly RoomId[], b: readonly RoomId[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 export class RoomManager {
   private readonly slots = new Map<RoomId, Slot>();
   private visible: readonly RoomId[] = [];
+  /** 前回の sync の計画。同じ計画（参照が同じ）なら、読み込みも表示も変える必要がない */
+  private lastPlan: { readonly visible: readonly RoomId[]; readonly keep: readonly RoomId[] } | null = null;
   private touchCache: Touchable[] = [];
   private touchDirty = true;
 
@@ -48,8 +58,14 @@ export class RoomManager {
     return slot.loading;
   }
 
-  /** 計画に合わせて読み込み・解放・表示を揃える */
+  /**
+   * 計画に合わせて読み込み・解放・表示を揃える。毎フレーム呼ばれる。
+   * streamingPlan は凍結した計画を使い回すので、同じ計画なら（参照で比べて）何もしない。
+   * 読み込みが終わったときの表示の反映は、ensure の完了が自分で行う。計画の配列は書き換えない前提。
+   */
   sync(plan: { readonly visible: readonly RoomId[]; readonly keep: readonly RoomId[] }): void {
+    if (plan === this.lastPlan) return;
+    this.lastPlan = plan;
     for (const id of plan.keep) void this.ensure(id);
     for (const [id, slot] of this.slots) {
       if (plan.keep.includes(id)) continue;
@@ -58,8 +74,8 @@ export class RoomManager {
       this.slots.delete(id);
       this.touchDirty = true;
     }
-    if (plan.visible.join() !== this.visible.join()) {
-      this.visible = [...plan.visible];
+    if (!sameRooms(plan.visible, this.visible)) {
+      this.visible = plan.visible;
       this.touchDirty = true;
     }
     this.applyVisibility();

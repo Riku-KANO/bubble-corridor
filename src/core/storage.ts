@@ -29,7 +29,11 @@ export function readJson(key: string, store: KeyValueStore | null = defaultStore
 }
 
 /** JSON を書く。書けなかったら false（容量超過、プライベートウィンドウ） */
-export function writeJson(key: string, value: unknown, store: KeyValueStore | null = defaultStore()): boolean {
+export function writeJson(
+  key: string,
+  value: unknown,
+  store: KeyValueStore | null = defaultStore(),
+): boolean {
   if (!store) return false;
   try {
     store.setItem(key, JSON.stringify(value));
@@ -52,7 +56,7 @@ export function removeKey(key: string, store: KeyValueStore | null = defaultStor
 /** 自身のプロパティだけを読む（__proto__ などを辿らない） */
 export function own(obj: unknown, key: string): unknown {
   if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return undefined;
-  return Object.prototype.hasOwnProperty.call(obj, key) ? (obj as Record<string, unknown>)[key] : undefined;
+  return Object.hasOwn(obj, key) ? (obj as Record<string, unknown>)[key] : undefined;
 }
 
 /** 有限の数で、範囲内ならその値。そうでなければ既定値 */
@@ -73,6 +77,7 @@ export function oneOf<T extends string | number>(v: unknown, choices: readonly T
 export function subsetOf<T extends string>(v: unknown, choices: readonly T[]): T[] {
   if (!Array.isArray(v)) return [];
   const out: T[] = [];
-  for (const x of v) if ((choices as readonly unknown[]).includes(x) && !out.includes(x as T)) out.push(x as T);
+  for (const x of v)
+    if ((choices as readonly unknown[]).includes(x) && !out.includes(x as T)) out.push(x as T);
   return out;
 }

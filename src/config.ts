@@ -181,6 +181,25 @@ export const TRANSITION_SEC = {
   screenToVR: 1.0,
 } as const;
 
+/** 乗車の時刻から決める画面効果の形（src/app/timeline.ts）。設計書に値がないので仮（S-24） */
+export const FX_TIMELINE = {
+  /** 殻が閉じ始める乗車の秒（ゴンドラが浮かび上がった後）。閉じる音もこの時刻に鳴らす */
+  boardStartSec: 0.5,
+  /** 天球の暗転の入り（唯一の黒でも、入りは急な明るさの変化にしない） */
+  blackoutEnterSec: 0.25,
+  /** 暗転のあとの点灯。光の点滅を抑えるモードではもっとゆっくり */
+  blackoutRampSec: 2.5,
+  blackoutRampReducedSec: 6,
+  /** 万華鏡の折り返しが満ちるまでと、天球の頭に向けて引くまで */
+  kaleidoscopeFadeInSec: 6,
+  kaleidoscopeFadeOutSec: 8,
+  /** 万華鏡の模様の回転の速さ（ラジアン/秒）。穏やかモードでは止める */
+  kaleidoscopeSpinRadPerSec: 0.15,
+  /** 見どころの前後でブルームが強まる幅（秒、頂点から片側）と頂点の強さ（0〜1） */
+  bloomHalfSec: 6,
+  bloomPeak: 0.6,
+} as const;
+
 // ── ライドフォト ──────────────────────────────────────────────
 export const PHOTO = {
   /** 撮影の解像度 */
@@ -212,6 +231,8 @@ export const XR = {
   textScale: 2,
   /** 移動中に視界の外周を暗くする既定の強さ（0〜1） */
   vignetteDefault: 0.35,
+  /** VR の暗転の球を、目から最も遠いゴンドラの点（半径 + 目の高さ）よりどれだけ外に置くか（m、仮。S-24） */
+  darknessMargin: 0.3,
 } as const;
 
 // ── 保存 ──────────────────────────────────────────────────────
