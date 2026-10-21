@@ -74,6 +74,28 @@ describe('第2室 雨の回廊', () => {
     ]);
   });
 
+  it('扉を交互に選び直しても、選んだ扉（と膜の向こうの万華鏡の色）の入れ替わりは1秒に3回未満（光の明滅の上限。レビュー2巡目 P1）', async () => {
+    const h = await loadRoom(createRainRoom);
+    h.play(sectionTimes('rain').t0, DOORS + 1, 0.25);
+    const doors = h.room.touchables.filter((t) => t.kind === 'door');
+    const changes: number[] = [];
+    let last: string | null = null;
+    let seen = h.emitted.length;
+    for (let i = 0, t = DOORS + 1; t < DOORS + 5; i++, t += 0.15) {
+      h.frame(t, 0.15);
+      doors[i % 2]!.onTouch({ t, source: 'pointer', point: [0, 0, 0] });
+      for (; seen < h.emitted.length; seen++) {
+        const e = h.emitted[seen]!;
+        if (e.type !== 'doorChosen') continue;
+        const door = (e.payload as { door: string }).door;
+        if (door !== last) changes.push(t);
+        last = door;
+      }
+    }
+    expect(changes.length, '選び直しは受け付ける').toBeGreaterThanOrEqual(2);
+    for (const t of changes) expect(changes.filter((x) => x >= t && x < t + 1).length, `t=${t.toFixed(2)} からの1秒`).toBeLessThan(3);
+  });
+
   it('INT-6 隠れた小さな泡', async () => {
     await expectHiddenBubble(createRainRoom, 'rain');
   });
