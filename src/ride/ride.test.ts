@@ -276,10 +276,13 @@ describe('RIDE-7 部屋の先読み', () => {
     }
   });
 
-  it('夜明けの岸では、降車に使う乗り場を先に読み込み、朝日の誘導（11:47）から遠くに描く', () => {
+  it('夜明けの岸では、降車に使う乗り場を先に読み込み、岸の区間のあいだずっと遠くに描く（朝靄の遠くから見えて近づく。目の前に突然現れない。S-20 レビュー2巡目 P1-B）', () => {
+    const { t0 } = ride.sectionTime('dawn');
     expect(streamingPlan(mid('dawn'), ride).keep).toContain('platform');
     expect(streamingPlan(mid('departure'), ride).visible).toContain('platform');
-    expect(streamingPlan(MOMENT_BARS.dawnSunrise * SEC_PER_BAR - 3, ride).visible).toContain('platform');
+    for (const t of [t0 + 0.5, t0 + 20, mid('dawn'), MOMENT_BARS.dawnSunrise * SEC_PER_BAR - 3]) {
+      expect(streamingPlan(t, ride).visible, `t=${t}`).toContain('platform');
+    }
   });
 
   it('次の部屋は膜の15秒前から、前の部屋は膜の10秒後まで描く（膜越しに見え、振り返っても空にならない）', () => {

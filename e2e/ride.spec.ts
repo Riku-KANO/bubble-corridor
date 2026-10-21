@@ -18,18 +18,24 @@ for (const vp of [
       if (m.type() === 'error') errors.push(m.text());
     });
     await page.goto('/?debug&t=0&rate=60');
-    const seen = new Set<string>();
-    await expect
-      .poll(
-        async () => {
-          const s = await read(page);
-          if (s?.section) seen.add(s.section);
-          return s?.screen;
-        },
-        { timeout: 60_000, intervals: [200] },
-      )
-      .toBe('photo');
-    expect([...seen]).toEqual(expect.arrayContaining(['platform', 'greenhouse', 'rain', 'kaleidoscope', 'celestial', 'dawn', 'departure']));
+    // 通った区間はページの中で毎フレーム記録する（?rate=60 では降車の区間が 0.5 秒しかなく、外から間をあけて読むと負荷で取りこぼす）
+    await page.evaluate(() => {
+      const g = globalThis as unknown as { __utakata?: { section: string }; __seenSections?: string[] };
+      const seen = new Set<string>();
+      g.__seenSections = [];
+      const tick = () => {
+        const sec = g.__utakata?.section;
+        if (sec && !seen.has(sec)) {
+          seen.add(sec);
+          g.__seenSections!.push(sec);
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await expect.poll(async () => (await read(page))?.screen, { timeout: 60_000, intervals: [200] }).toBe('photo');
+    const seen = await page.evaluate(() => (globalThis as unknown as { __seenSections?: string[] }).__seenSections ?? []);
+    expect(seen).toEqual(expect.arrayContaining(['platform', 'greenhouse', 'rain', 'kaleidoscope', 'celestial', 'dawn', 'departure']));
     await expect.poll(async () => (await read(page))?.photos, { timeout: 15_000 }).toBe(3);
     expect(errors, errors.join('\n')).toEqual([]);
     await ctx.close();
