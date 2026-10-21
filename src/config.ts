@@ -181,6 +181,33 @@ export const TRANSITION_SEC = {
   screenToVR: 1.0,
 } as const;
 
+/**
+ * 部屋の空気から作るガラスの擬似照明のつまみ（src/app/glass-lighting.ts）。設計書に値がないので仮（S-25）。
+ * 部屋が atmosphere.glassLighting で指定した項目はこれより優先する
+ */
+export const GLASS_LIGHTING = {
+  /** 空の明るさ（HSL の l）: 下限、背景の明るさに足す割合、上限。空は背景の色味を保って少し淡く */
+  skyLBase: 0.55,
+  skyLFromBg: 0.35,
+  skyLMax: 0.92,
+  skySaturation: 0.85,
+  /** 地面: 背景の色と琥珀を線形の RGB で混ぜる割合（暗い部屋・明るい部屋）。明るさは空の線形の輝度の割合に合わせる（1 未満） */
+  groundAmber: '#ffb066',
+  groundAmberMixDark: 0.7,
+  groundAmberMixBright: 0.4,
+  groundToSkyLuminance: 0.6,
+  /** 部屋の明るさの見積もり（背景の HSL の l がこの範囲で夜 → 昼） */
+  darkL: 0.08,
+  brightL: 0.7,
+  /** ハイライトの強さ（夜・昼）と色（暗い部屋の暖色の白・明るい部屋の朝日の金） */
+  keyMin: 0.3,
+  keyMax: 1.1,
+  keyColorDark: '#fff7ea',
+  keyColorBright: '#ffe6bd',
+  /** 環境画像（scene.environment）があるときの擬似反射の倍率 */
+  envReflectionWithEnv: 0.4,
+} as const;
+
 /** 乗車の時刻から決める画面効果の形（src/app/timeline.ts）。設計書に値がないので仮（S-24） */
 export const FX_TIMELINE = {
   /** 殻が閉じ始める乗車の秒（ゴンドラが浮かび上がった後）。閉じる音もこの時刻に鳴らす */

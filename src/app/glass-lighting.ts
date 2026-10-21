@@ -9,40 +9,41 @@
 import * as THREE from 'three/webgpu';
 import type { GlassLighting } from '../core/materials/glass';
 import type { Atmosphere } from '../contracts/room';
+import { GLASS_LIGHTING as G } from '../config';
 
-// ── 空気から作るときのつまみ（設計書に値がないので仮。統合のときに config へ移す） ──
+// ── 空気から作るときのつまみ（設計書に値がないので仮。値は config の GLASS_LIGHTING） ──
 
 /** 空の明るさ（HSL の l）: 暗い部屋でも縁に空の色が見える下限と、背景の明るさに足す割合。上限は白飛びさせない */
-const SKY_L_BASE = 0.55;
-const SKY_L_FROM_BG = 0.35;
-const SKY_L_MAX = 0.92;
+const SKY_L_BASE = G.skyLBase;
+const SKY_L_FROM_BG = G.skyLFromBg;
+const SKY_L_MAX = G.skyLMax;
 /** 空は背景の色味を保ちつつ少し淡くする */
-const SKY_SATURATION = 0.85;
+const SKY_SATURATION = G.skySaturation;
 /**
  * 地面: 背景の色と琥珀を、線形の RGB で混ぜる（色相を回さない。灰青の背景から緑がかった灰を作らない。混ぜる途中は灰を通る）。
  * 暗い部屋ほど琥珀へ寄せる（下から来る暖かい灯りに見せる）。混ぜた後で、明るさを空の線形の輝度に対する割合へ合わせる
  */
-const GROUND_AMBER = '#ffb066';
-const GROUND_AMBER_MIX_DARK = 0.7;
-const GROUND_AMBER_MIX_BRIGHT = 0.4;
+const GROUND_AMBER = G.groundAmber;
+const GROUND_AMBER_MIX_DARK = G.groundAmberMixDark;
+const GROUND_AMBER_MIX_BRIGHT = G.groundAmberMixBright;
 /** 地面の線形の輝度 ÷ 空の線形の輝度。1 未満なので、地面は必ず空より暗い */
-const GROUND_TO_SKY_LUMINANCE = 0.6;
+const GROUND_TO_SKY_LUMINANCE = G.groundToSkyLuminance;
 /** 部屋の明るさの見積もり（0: 夜、1: 昼）: 背景の明るさ（HSL の l）がこの範囲で変わる。ハイライトの強さと色、地面の暖かさに使う */
-const DARK_L = 0.08;
-const BRIGHT_L = 0.7;
+const DARK_L = G.darkL;
+const BRIGHT_L = G.brightL;
 /** ハイライトの強さ: 暗い部屋（夜）では弱く、明るい部屋では強く */
-const KEY_MIN = 0.3;
-const KEY_MAX = 1.1;
+const KEY_MIN = G.keyMin;
+const KEY_MAX = G.keyMax;
 /**
  * ハイライトの色: 背景の色相は使わない（緑の温室の朝日が緑にならない）。暖色の白で、明るい部屋ほど朝日の金色に寄せる
  * （暗い部屋は灯り・星明かりの淡い暖色）。部屋が知っていれば glassLighting.keyColor で上書きする
  */
-const KEY_COLOR_DARK = '#fff7ea';
-const KEY_COLOR_BRIGHT = '#ffe6bd';
+const KEY_COLOR_DARK = G.keyColorDark;
+const KEY_COLOR_BRIGHT = G.keyColorBright;
 /** 光の来る向き。glass.ts の既定（夜明けの低い光）と同じ。部屋が知っていれば glassLighting.keyDir で上書きする */
 const KEY_DIR = Object.freeze({ x: -0.35, y: 0.5, z: 0.79 });
 /** scene.environment（環境画像）があるとき、擬似反射に掛ける倍率。環境画像の反射が主になるよう弱める。なければ 1 */
-const ENV_REFLECTION_WITH_ENV = 0.4;
+const ENV_REFLECTION_WITH_ENV = G.envReflectionWithEnv;
 
 const amber = new THREE.Color(GROUND_AMBER);
 const keyDark = new THREE.Color(KEY_COLOR_DARK);
