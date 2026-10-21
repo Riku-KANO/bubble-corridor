@@ -2,7 +2,7 @@
 // 各画面を仮の状態で切り替えて見る。後ろの景色は canvas で描いた仮の絵、写真も canvas で作った仮の画像。
 //   ?screen=home   最初の画面（queue / home / guide / riding / pause / photo / shelf / settings / howto / credits）
 //   ?lang=en       言語   ?xr=1  VR の項目を出す   ?mobile=1  スマートフォンの項目を出す
-//   ?scale=1.25    文字の大きさ   ?rides=2  これまでの便の数   ?hidden=3  見つけた泡の数   ?develop=1  写真がまだ届いていない
+//   ?scale=1.25    文字の大きさ   ?comfort=gentle  快適モードを「穏やか」にする   ?rides=2  これまでの便の数   ?hidden=3  見つけた泡の数   ?develop=1  写真がまだ届いていない
 //   ?fail=1        保存と共有を失敗させる
 //   ?gyro=deny     「傾けて見回す」の許可を断られた場合にする（既定は許可される）
 //   ?bar=0         切り替えのバーを出さない（撮影用）
@@ -34,7 +34,7 @@ const backdrop = document.createElement('canvas');
 backdrop.className = 'stage';
 root.append(backdrop);
 
-let settings: Settings = { ...defaultSettings(lang), textScale: ([1, 1.25, 1.5] as const).find((x) => x === num('scale', 1)) ?? 1 };
+let settings: Settings = { ...defaultSettings(lang), comfort: q.get('comfort') === 'gentle' ? 'gentle' : 'standard', textScale: ([1, 1.25, 1.5] as const).find((x) => x === num('scale', 1)) ?? 1 };
 const found = HIDDEN_BUBBLE_SECTIONS.slice(0, Math.max(0, Math.min(5, num('hidden', 2)))) as SectionId[];
 let state: UiState = {
   screen: startScreen,
