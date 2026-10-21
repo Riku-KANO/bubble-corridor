@@ -3,6 +3,9 @@
 // VR の 72fps（1フレーム約 14ms）では、止まりはそのまま視界の止まりになる。撮影の前後のフレームの間隔を測る。
 import { expect, test } from '@playwright/test';
 
+// 同じ時刻の撮影を同時に走らせると、2560×1440 の描き出しで GPU を取り合い、撮影の直後のフレームが遅れて誤って落ちる（S-30 レビュー2巡目）
+test.describe.configure({ mode: 'serial' });
+
 for (const [name, q] of [
   ['WebGPU（あれば）', ''],
   ['WebGL2（VR と同じ経路）', '&webgl'],

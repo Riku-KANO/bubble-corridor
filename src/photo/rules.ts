@@ -63,7 +63,7 @@ export function photoFileName(meta: Pick<PhotoMeta, 'rideNo' | 'date'>, shot: Sh
  * （雨の部屋で約 1 秒、遅い端末で数倍）を取れる長さ。部屋は撮影の 100 秒以上前から見えているので、この間は同じ部屋。
  * 設計書に値がない（仮）。
  */
-export const CAPTURE_PREPARE_LEAD_SEC = 10;
+export const CAPTURE_PREPARE_LEAD_SEC = PHOTO.prepareLeadSec;
 
 /** 撮影のキューの最小の形（Cue の一部） */
 export interface ShotCue {

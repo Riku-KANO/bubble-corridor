@@ -493,6 +493,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
   /** 撮影の少し前に、撮影の描画に要るシェーダーを先に作る（撮影の最中に画面が止まらないように。capture.ts） */
   function prepareShots(t: number) {
+    // VR の間は、scheduler.yield がない端末では下ごしらえをしない。three の compileAsync は window の rAF で主スレッドを返すので、
+    // immersive の間に window の rAF が止まる端末では作業が終わらず、撮影の列が詰まって写真が撮れなくなる（ADR-0014）
+    if (xr.active && !('scheduler' in globalThis && 'yield' in (globalThis as unknown as { scheduler: object }).scheduler)) return;
     const cue = captureToPrepare(cues, t, preparedShots, shotRoomReady);
     if (!cue) return;
     preparedShots.add(cue.id);

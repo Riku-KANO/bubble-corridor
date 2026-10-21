@@ -282,7 +282,11 @@ export async function prepareCapture(
       }
       await exclusively(async () => {
         if (job.cancelled || !isInScene(scene, obj)) return;
-        await compileOne(renderer, scene, camera, t, aspect, obj);
+        try {
+          await compileOne(renderer, scene, camera, t, aspect, obj);
+        } catch {
+          // 物1つの失敗で残りの下ごしらえを止めない（撮影のときにその物だけ作られる）
+        }
       });
     }
   } catch {
