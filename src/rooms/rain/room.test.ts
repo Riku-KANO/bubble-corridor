@@ -13,6 +13,7 @@ import {
   loadRoom,
   sectionTimes,
   shapeClearanceViolations,
+  timeDeterminismDiffs,
 } from '../testing';
 import { createRainRoom } from './index';
 
@@ -113,6 +114,11 @@ describe('第2室 雨の回廊', () => {
     expect(c.s).toBeLessThan(0.4);
     expect(c.l).toBeGreaterThan(0.2);
     expect(c.l).toBeLessThan(0.6);
+  });
+
+  it('柱「時刻から決める」: 通しで乗った絵と、その時刻から始めた絵が同じ', async () => {
+    const { t0 } = sectionTimes('rain');
+    for (const at of [230, 300, 311, 313, 352, 358]) expect(await timeDeterminismDiffs(createRainRoom, t0 - 5, at), `t=${at}`).toEqual([]);
   });
 
   it('REN-3 描画の予算（描く物 120 以下、三角形 120万以下）', async () => {

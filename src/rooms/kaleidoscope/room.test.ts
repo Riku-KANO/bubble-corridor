@@ -15,6 +15,7 @@ import {
   loadRoom,
   sectionTimes,
   shapeClearanceViolations,
+  timeDeterminismDiffs,
 } from '../testing';
 import { createKaleidoscopeRoom } from './index';
 
@@ -101,6 +102,11 @@ describe('第3室 万華鏡の間', () => {
   it('TRN-1 天球への膜', async () => {
     const { room } = await loadRoom(createKaleidoscopeRoom);
     expectExitMembrane(room, 'kaleidoscope');
+  });
+
+  it('柱「時刻から決める」: 通しで乗った絵と、その時刻から始めた絵が同じ', async () => {
+    const { t0 } = sectionTimes('kaleidoscope');
+    for (const at of [370, 400, 430, 441, 445, 470]) expect(await timeDeterminismDiffs(createKaleidoscopeRoom, t0 - 5, at), `t=${at}`).toEqual([]);
   });
 
   it('REN-3 描画の予算（描く物 120 以下、三角形 120万以下）', async () => {
