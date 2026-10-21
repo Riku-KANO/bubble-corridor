@@ -15,12 +15,14 @@ import { streamingPlan, type StreamingPlan } from '../ride';
 export type RoomPlan = StreamingPlan;
 
 /**
- * 待ち列・入口・案内などの計画。待ち列・入口（lobby）と乗り場（platform）を見せ、最初の部屋（greenhouse）も読み込んでおく
- * （乗った直後に温室が空にならない）。起動時に読み込む部屋の一覧もこれから取る。
+ * 待ち列・入口・案内などの計画。待ち列・入口（lobby）と乗り場（platform）を見せ、読み込むのもこの2つだけ。
+ * 起動時に読み込む部屋の一覧と、待ち列の灯りの進みもこれから取る。
+ * 温室（約5MB）は待ち列の間に読まない: 初回の読み込みを 10MB 以下に収める（関門4）。乗車の頭（streamingPlan の最初）から読み始めても、
+ * 温室の膜の15秒前に描き始めるまで45秒ある。
  */
 export const HOME_PLAN: RoomPlan = Object.freeze({
   visible: Object.freeze<RoomId[]>(['lobby', 'platform']),
-  keep: Object.freeze<RoomId[]>(['lobby', 'platform', 'greenhouse']),
+  keep: Object.freeze<RoomId[]>(['lobby', 'platform']),
 });
 
 /**
@@ -57,6 +59,17 @@ export function sceneTimeFor(screen: ScreenId, rideT: number): number {
     default:
       return 0;
   }
+}
+
+/** 小画面（開いた元の画面の景色の上に重なる画面） */
+const SUB_SCREENS: readonly ScreenId[] = ['shelf', 'settings', 'howto', 'credits'];
+
+/**
+ * 場面（ゴンドラの位置・部屋の計画・空気の部屋）を決める画面。小画面（棚・設定・乗り方・クレジット）は開いた元（returnTo）の画面の景色のまま、
+ * ほかはその画面そのもの。小画面で景色を入口に切り替えると、ライドフォト（降車の乗り場）から設定を開いたときに背景が入口の部屋へ跳ぶ。
+ */
+export function sceneScreenFor(screen: ScreenId, returnTo: ScreenId | null): ScreenId {
+  return SUB_SCREENS.includes(screen) && returnTo !== null ? returnTo : screen;
 }
 
 /**

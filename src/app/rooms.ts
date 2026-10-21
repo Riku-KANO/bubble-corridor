@@ -20,6 +20,20 @@ function sameRooms(a: readonly RoomId[], b: readonly RoomId[]): boolean {
   return true;
 }
 
+/** 部屋の管理の外への口（任意） */
+export interface RoomHooks {
+  /**
+   * 読み込みが終わった部屋に呼ぶ。描き始める前に、シェーダーを先に組むために使う（S-29）。
+   * alive は、部屋がまだ管理の中にあるか（計画から外れて解放されたら偽。先読みを打ち切る）
+   */
+  readonly onPreload?: (module: RoomModule, alive: () => boolean) => void;
+  /**
+   * いま、まだ描かない部屋（次の部屋）の読み込みを始めてよいか（偽の間は待つ）。部屋の読み込みは主スレッドを 50〜120ms 占めるので、
+   * 区間が変わる膜の前後には始めない（S-29）。いま描く部屋は待たずに読む。省略は常に true
+   */
+  readonly mayStartPreload?: () => boolean;
+}
+
 export class RoomManager {
   private readonly slots = new Map<RoomId, Slot>();
   private visible: readonly RoomId[] = [];
@@ -27,6 +41,8 @@ export class RoomManager {
   private lastPlan: { readonly visible: readonly RoomId[]; readonly keep: readonly RoomId[] } | null = null;
   /** 今の扉の選択（決まっていなければ null）。後から読み込まれる部屋（万華鏡など）にも渡す */
   private door: DoorChoice | null = null;
+  /** 読み込みを始めるのを待っている部屋（まだ描かない部屋。膜の前後を避ける）。同じ計画のまま毎フレーム sync が見直す */
+  private readonly deferred = new Set<RoomId>();
   private touchCache: Touchable[] = [];
   private touchDirty = true;
 
@@ -34,6 +50,7 @@ export class RoomManager {
     private readonly factories: Readonly<Record<RoomId, RoomFactory>>,
     private readonly ctx: RoomContext,
     private readonly scene: THREE.Scene,
+    private readonly hooks: RoomHooks = {},
   ) {}
 
   /** 読み込みを始める（済んでいれば何もしない）。読み込み終わりで resolve */
@@ -55,6 +72,8 @@ export class RoomManager {
           slot.ready = true;
           if (this.door !== null) module.setDoor?.(this.door);
           this.touchDirty = true;
+          // 描き始める前（描き始めても視野の外の物は描かれない）に、シェーダーを組んでおく
+          this.hooks.onPreload?.(module, () => this.slots.get(id) === slot);
           this.applyVisibility();
         },
         (err) => {
@@ -72,9 +91,17 @@ export class RoomManager {
    * 読み込みが終わったときの表示の反映は、ensure の完了が自分で行う。計画の配列は書き換えない前提。
    */
   sync(plan: { readonly visible: readonly RoomId[]; readonly keep: readonly RoomId[] }): void {
-    if (plan === this.lastPlan) return;
+    if (plan === this.lastPlan) {
+      this.startDeferred();
+      return;
+    }
     this.lastPlan = plan;
-    for (const id of plan.keep) void this.ensure(id);
+    this.deferred.clear();
+    for (const id of plan.keep) {
+      // いま描く部屋は待たずに読む。まだ描かない部屋は、読み込みを始めてよいときまで待つ
+      if (!this.slots.has(id) && !plan.visible.includes(id) && this.hooks.mayStartPreload && !this.hooks.mayStartPreload()) this.deferred.add(id);
+      else void this.ensure(id);
+    }
     for (const [id, slot] of this.slots) {
       if (plan.keep.includes(id)) continue;
       if (slot.attached) this.scene.remove(slot.module.root);
@@ -87,6 +114,14 @@ export class RoomManager {
       this.touchDirty = true;
     }
     this.applyVisibility();
+  }
+
+  /** 待たせた読み込みを、始めてよくなったら始める（同じ計画のまま毎フレーム呼ばれる） */
+  private startDeferred(): void {
+    if (this.deferred.size === 0 || (this.hooks.mayStartPreload && !this.hooks.mayStartPreload())) return;
+    const plan = this.lastPlan;
+    for (const id of this.deferred) if (plan?.keep.includes(id)) void this.ensure(id);
+    this.deferred.clear();
   }
 
   private applyVisibility(): void {

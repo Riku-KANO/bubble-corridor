@@ -3,7 +3,7 @@
 import * as THREE from 'three/webgpu';
 import type { Cue, RideEvents, Vec3Tuple } from '../contracts/events';
 import type { DoorChoice, Lang, SectionId, ShotId } from '../contracts/ids';
-import { DEFAULT_DOOR, ROOM_OF_SECTION } from '../contracts/ids';
+import { DEFAULT_DOOR, ROOM_OF_SECTION, SECTION_IDS } from '../contracts/ids';
 import type { ListenerPose } from '../contracts/audio';
 import type { RideClock } from '../contracts/clock';
 import type { RidePose } from '../contracts/ride';
@@ -26,17 +26,25 @@ import { loadProgress as readProgress, loadSettings, mountUi, saveProgress, save
 import { createXRSystem } from '../xr';
 import { createAssetLoader } from './assets';
 import { createDebugOverlay, type DebugSample } from './debug';
+import { FOG_OFF_FAR, FOG_OFF_NEAR, applyFog } from './atmosphere';
 import { deviceHints } from './device';
+import { createEnvironmentSlot } from './environment';
 import { INITIAL_FLOW, reduceFlow, type FlowAction, type FlowState } from './flow';
 import { glassLightingFor } from './glass-lighting';
 import { createIdleChimer } from './idle-chime';
 import { parseParams } from './params';
+import { createPrewarmer } from './prewarm';
+import { inMembraneQuiet } from './prewarm-schedule';
 import { createRiseSounder } from './rise-sound';
-import { HOME_PLAN, atmosphereRoomFor, homePlanFor, planFor, sceneTimeFor, type RoomPlan } from './room-plan';
+import { HOME_PLAN, atmosphereRoomFor, homePlanFor, planFor, sceneScreenFor, sceneTimeFor, type RoomPlan } from './room-plan';
 import { RoomManager } from './rooms';
 import { loadRideData } from './ride-data';
 import { BOARD_START_SEC, fxAt, type FxTimeline, type FxTimelineOptions } from './timeline';
+import { verticalFovFor } from './view';
 import { createXRDarkness } from './xr-darkness';
+
+/** VR に入ってから先読みをやり直すまで待つフレーム数（両眼のカメラが出来るまで） */
+const XR_SETTLE_FRAMES = 3;
 
 /** 書き換えて使い回す入れ物（毎フレームの確保を避ける）の型 */
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -89,8 +97,12 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // 背景色と霧の物は 1 つずつ作って使い回し、空気が変わるときは値だけ書き換える。霧の物を作り直すと、three は霧のノードも作り直し、
   // 見えている材質すべてのシェーダーを作り直す（40 個ほどで WebGPU 約 220ms、WebGL2・VR で約 1.7 秒。温室の暗さの 12 段が引っかかっていた）
   const backgroundColor = new THREE.Color(0x14181f);
-  const sceneFog = new THREE.Fog(0xffffff, 1, 1000);
+  // 霧のない部屋では色はそのまま、距離だけを遠くへ（scene.fog は null にしない。atmosphere.ts）
+  const sceneFog = new THREE.Fog(0xffffff, FOG_OFF_NEAR, FOG_OFF_FAR);
   scene.background = backgroundColor;
+  scene.fog = sceneFog;
+  // 環境画像のノードも 1 つ（部屋が変わるときは中の画像だけ替える。environment.ts）
+  const environment = createEnvironmentSlot(scene, renderer);
   const camera = new THREE.PerspectiveCamera(settings.fov, innerWidth / innerHeight, 0.05, 2000);
   const gondola = createGondola();
   scene.add(gondola.root);
@@ -148,7 +160,25 @@ export async function startApp(root: HTMLElement): Promise<void> {
     suggestedDoor: progress.lastDoor === null ? null : progress.lastDoor === 'amber' ? 'lapis' : 'amber',
     hiddenAlreadyFound: false,
   };
-  const rooms = new RoomManager(ROOM_FACTORIES, roomCtx, scene);
+  // 読み込んだ部屋は、描き始める前（次の部屋は膜の15秒前）に、画面の描画と同じ条件でシェーダーを組んでおく（prewarm.ts）。
+  // 組まないと、初めて描くフレームで見えている材質すべての組み立てが走り、WebGL2（VR と同じ経路）で 0.5〜2 秒止まる。
+  // 膜の前後は、先読みの新しい一歩を始めない（膜の効果・部屋の入れ替えと重ねない）。乗車の外は静かなので、いつでもよい
+  const membraneStarts = SECTION_IDS.map((id) => ride.sectionTime(id).t0);
+  const prewarmQuiet = () => !(flow.screen === 'riding' || flow.screen === 'pause') || !inMembraneQuiet(frameT, membraneStarts);
+  const prewarmer = createPrewarmer({ renderer, scene, camera, fxActive: () => fxWanted(), xrActive: () => xr.active });
+  const prepareEnvironmentOf = (m: RoomModule): void => environment.prepare(m.atmosphere.environment);
+  const rooms = new RoomManager(ROOM_FACTORIES, roomCtx, scene, {
+    // 次の部屋の読み込みも、膜の前後には始めない（部屋の読み込みは主スレッドを 50〜120ms 占める。区間が変わる瞬間に重ねない）
+    mayStartPreload: prewarmQuiet,
+    onPreload(module, alive) {
+      prepareEnvironmentOf(module); // 反射用の画像を、描画の外で先に作る
+      // VR の間は、scheduler.yield がない端末では先読みをしない。three の compileAsync は window の rAF で主スレッドを返すので、
+      // immersive の間に window の rAF が止まる端末では作業が終わらない（ADR-0014。撮影の下ごしらえと同じ）
+      if (xr.active && !hasSchedulerYield()) return;
+      prewarmedFor = prewarmContext();
+      void prewarmer.prepare(module.root, alive, prewarmQuiet);
+    },
+  });
 
   // ── 入力 ──
   const inputDeps = { element: canvas, events: bus, now: () => clock.time };
@@ -159,7 +189,25 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const chimer = createIdleChimer((t) => audio.chime({ id: t.id, kind: t.kind, section: t.section, position: worldPos(t.object) }));
   const xr = createXRSystem(renderer, { scene, camera, events: bus, now: () => clock.time });
   // 画面効果を使うか: 品質が許し、VR でないとき。VR は renderer.render で直接描く（速さを優先、カメラを演出で動かさない）
-  const applyFxEnabled = () => fx.setEnabled(!xr.active && quality.postFx && !params.nofx);
+  function fxWanted(): boolean {
+    return !xr.active && quality.postFx && !params.nofx;
+  }
+  // 先読みは描く文脈（画面効果の有無、VR か）ごとに別に組む。文脈が変わったら、動いている部屋をもう一度組む
+  let prewarmedFor = '';
+  const prewarmContext = () => `${fxWanted()}|${xr.active}`;
+  const applyFxEnabled = () => {
+    fx.setEnabled(fxWanted());
+    if (prewarmedFor !== '' && prewarmContext() !== prewarmedFor) reprewarm();
+  };
+  /** VR に入った直後、両眼のカメラが出来るまで（最初の数フレーム）待つ残りのフレーム数。出来る前に組むと、描くときの鍵（カメラの数）と合わない */
+  let xrSettleFrames = 0;
+  function reprewarm() {
+    prewarmedFor = prewarmContext();
+    // VR の間は、scheduler.yield がない端末では先読みをしない（onPreload と同じ。ADR-0014）
+    if (xr.active && !hasSchedulerYield()) return;
+    if (xr.active) xrSettleFrames = XR_SETTLE_FRAMES;
+    else void prewarmer.invalidate();
+  }
   applyFxEnabled();
   // VR は後処理を使わないので、天球の暗転（入りも点灯も）は頭に付けた黒い球で出す。VR でないときは描かない（明るさ 1）
   const darkness = createXRDarkness();
@@ -304,10 +352,25 @@ export async function startApp(root: HTMLElement): Promise<void> {
     ui.render(uiState());
   }
 
+  /**
+   * 画面の縦の視野角。縦持ちでは広げる（設計書「縦持ちでは視野角を広げ」。5:51 の扉や 2:40 の花が端で切れない。view.ts）。
+   * 見回しの感度も同じ視野角に合わせる。VR では使わない（ヘッドセットの視野をそのまま使う）。撮影は 16:9 の決まった大きさなので設定のまま（takeShot）
+   */
+  let lookFov = Number.NaN;
+  function applyScreenFov(force = false) {
+    const fov = verticalFovFor(camera.aspect, settings.fov);
+    if (camera.fov !== fov) {
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+    }
+    if (force || fov !== lookFov) {
+      lookFov = fov;
+      look.setOptions({ mode: settings.lookMode, gyro: settings.gyro, fovDeg: fov });
+    }
+  }
+
   function applySettings() {
-    camera.fov = settings.fov;
-    camera.updateProjectionMatrix();
-    look.setOptions({ mode: settings.lookMode, gyro: settings.gyro, fovDeg: settings.fov });
+    applyScreenFov(true);
     touch.setGazeDwell(settings.gazeDwellSec);
     xr.setGazeDwell(settings.gazeDwellSec);
     audio.setVolumes(settings.volumes);
@@ -495,13 +558,28 @@ export async function startApp(root: HTMLElement): Promise<void> {
   function prepareShots(t: number) {
     // VR の間は、scheduler.yield がない端末では下ごしらえをしない。three の compileAsync は window の rAF で主スレッドを返すので、
     // immersive の間に window の rAF が止まる端末では作業が終わらず、撮影の列が詰まって写真が撮れなくなる（ADR-0014）
-    if (xr.active && !('scheduler' in globalThis && 'yield' in (globalThis as unknown as { scheduler: object }).scheduler)) return;
+    if (xr.active && !hasSchedulerYield()) return;
     const cue = captureToPrepare(cues, t, preparedShots, shotRoomReady);
     if (!cue) return;
     preparedShots.add(cue.id);
     // 撮影の部屋の下は、いま隠れている物（見どころで現れる物）も準備する
     const room = rooms.get(ROOM_OF_SECTION[cue.section]);
     void prepareCapture(renderer, scene, camera, captureSize(), { rooms: room ? [room.root] : [] });
+  }
+
+  /**
+   * 撮影は 16:9 の決まった大きさで、設定の視野角のまま撮る（縦持ちで広げた視野角を使わない。カメラは画面と同じ物を使い回す）。
+   * 撮影が描く直前に呼ばれ、描いた同じ同期の流れの後（最初の await でほかの処理が走る前）に、画面の視野角へ戻す
+   */
+  function useSettingFovForCapture() {
+    const screenFov = camera.fov;
+    if (screenFov === settings.fov) return;
+    camera.fov = settings.fov;
+    camera.updateProjectionMatrix();
+    queueMicrotask(() => {
+      camera.fov = screenFov;
+      camera.updateProjectionMatrix();
+    });
   }
 
   /** 直近のフレームで描いた場面の乗車の秒（撮影が描いた場面の確認用。?debug の captures に足す） */
@@ -511,13 +589,21 @@ export async function startApp(root: HTMLElement): Promise<void> {
   async function takeShot(shot: ShotId) {
     try {
       const size = captureSize();
-      const image = await capturePhoto(renderer, scene, camera, size, { onRender: noteCapture });
+      const image = await capturePhoto(renderer, scene, camera, size, {
+        onRender: () => {
+          noteCapture();
+          useSettingFovForCapture();
+        },
+      });
       shots.push({ shot, image });
       bus.emit('photoCaptured', { shot });
     } catch (err) {
       console.error('[photo] 撮影に失敗', err);
     }
   }
+
+  // ゴンドラも先に組む（降車で殻が割れるときに現れる継ぎ目など、隠れた物を含む。部屋と違って解放されないので、いつでも続ける）
+  void prewarmer.prepare(gondola.root, () => true, prewarmQuiet);
 
   // ── 読み込み（待ち列の灯り） ──
   // 乗車の外の部屋の計画（画面ごと。乗車の中は時刻から）。?screen=home&t= で入口に止まる確認用は、乗る時刻の部屋も持っておく
@@ -553,6 +639,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   if (params.t !== null || params.screen) {
     // 入口で止まる間に、乗る時刻の部屋も読み込んでおく（乗った直後に空の景色を見せない。homePlan がその部屋も持つ）
     await Promise.all(homePlan.keep.map((id) => rooms.ensure(id)));
+    // 途中から乗るときも、その時刻の部屋（今の部屋と次の部屋）を読んでから始める（何もない景色から始めない）。HOME_PLAN は待ち列の部屋だけ
+    if (params.t !== null && !stopAtHome) await Promise.all(planFor('riding', params.t, ride).keep.map((id) => rooms.ensure(id)));
     dispatch({ type: 'loaded' });
     dispatch({ type: 'enterHome' });
     if (params.t !== null) {
@@ -586,7 +674,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     renderer.setPixelRatio(Math.min(devicePixelRatio, quality.maxPixelRatio) * dynRes.scale);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    applyScreenFov();
     fx.setSize(w, h, renderer.getPixelRatio());
   }
   addEventListener('resize', onResize);
@@ -602,7 +690,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
     lastT = rideT;
     // 場面の時刻: ゴンドラの位置・部屋・画面効果を決める。乗車の外でも、降車の後（ライドフォト）は降車の時刻のまま
     // （0 にすると、降車の瞬間にゴンドラが乗り場の向きへ回る。VR では世界が回る）。待ち列・入口などは乗車の頭
-    const t = sceneTimeFor(flow.screen, rideT);
+    // 小画面（棚・設定・乗り方・クレジット）は、開いた元の画面の景色のまま（ライドフォトから開いたとき、背景が入口の部屋へ跳ばない）
+    const sceneScreen = sceneScreenFor(flow.screen, flow.returnTo);
+    const t = sceneTimeFor(sceneScreen, rideT);
     frameT = t;
 
     ride.poseAt(t, settings.comfort, pose);
@@ -637,7 +727,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     }
 
     // 部屋の先読みと表示（乗車の外でも画面に応じて渡す。同じ計画は参照で見分けて何もしない）
-    rooms.sync(planOf(flow.screen, t));
+    rooms.sync(planOf(sceneScreen, t));
     if (rooms.consumeTouchChange()) {
       touch.setTouchables(rooms.touchables());
       xr.setTouchables(rooms.touchables());
@@ -647,25 +737,21 @@ export async function startApp(root: HTMLElement): Promise<void> {
     roomFrame.comfort = settings.comfort;
     roomFrame.reducedFlash = settings.reducedFlash;
     rooms.update(roomFrame);
+    // 部屋が時刻で空気を差し替えたとき（乗り場の朝の空気など）の環境画像も、その空気に切り替わる前に PMREM を作っておく
+    // （作り済みなら何もしない。描画の外のこの位置で作るので、膜を通るフレームで作らない）
+    rooms.forEachReady(prepareEnvironmentOf);
     if (riding && !xr.active) touch.update(t, dt, camera, gondolaPos);
 
     // 部屋の空気（膜を通る瞬間に切り替える。部屋が時刻で差し替えたときも反映する）。ゴンドラのいる部屋の空気 = 今の区間の部屋。
     // 乗車の外は入口の部屋、ライドフォトは降車の乗り場。ガラスの擬似照明（縁の反射の色・ハイライト）も、空気が変わったときだけ部屋に合わせる
-    const roomId = atmosphereRoomFor(flow.screen, pose.section);
+    const roomId = atmosphereRoomFor(sceneScreen, pose.section);
     const atmosphere = rooms.get(roomId)?.atmosphere ?? null;
     if (atmosphere && atmosphere !== currentAtmosphere) {
       currentAtmosphere = atmosphere;
       backgroundColor.set(atmosphere.background);
-      if (atmosphere.fog) {
-        sceneFog.color.set(atmosphere.fog.color);
-        sceneFog.near = atmosphere.fog.near;
-        sceneFog.far = atmosphere.fog.far;
-        scene.fog = sceneFog;
-      } else {
-        scene.fog = null;
-      }
+      applyFog(sceneFog, atmosphere);
       renderer.toneMappingExposure = atmosphere.exposure;
-      scene.environment = atmosphere.environment ?? null;
+      environment.apply(atmosphere.environment ?? null);
       setGlassLighting(glassLightingFor(atmosphere));
     }
 
@@ -695,6 +781,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     if (xr.active) {
       xrFrames++;
       renderer.render(scene, camera);
+      if (xrSettleFrames > 0 && --xrSettleFrames === 0) void prewarmer.invalidate();
     }
     else fx.render(scene, camera);
 
@@ -740,6 +827,11 @@ export async function startApp(root: HTMLElement): Promise<void> {
   });
 
   refreshUi();
+}
+
+/** scheduler.yield があるか（VR の間に、three の compileAsync が主スレッドを返せるか。ADR-0014） */
+function hasSchedulerYield(): boolean {
+  return 'scheduler' in globalThis && 'yield' in (globalThis as unknown as { scheduler: object }).scheduler;
 }
 
 async function isImmersiveVrSupported(): Promise<boolean> {
