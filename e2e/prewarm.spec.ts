@@ -7,8 +7,10 @@ import { expect, test } from '@playwright/test';
 
 for (const [room, membrane] of [
   ['温室', 60],
+  ['雨の回廊', 210],
   ['万華鏡', 360],
   ['星の天球（霧のない部屋への境目）', 480],
+  ['夜明けの岸（降車の乗り場も遠くに描き始める）', 660],
   ['降車の乗り場（岸から。霧と環境画像の切り替え）', 750],
 ] as const) {
   test(`WebGL2（VR と同じ経路）: ${room}が見え始めるとき（膜 ${membrane} 秒の 15 秒前）に、フレームの間隔が 100ms を超えない`, async ({ page }) => {
