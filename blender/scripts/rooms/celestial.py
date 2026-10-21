@@ -2,8 +2,12 @@
 
     pnpm blender blender/scripts/rooms/celestial.py [-- --samples 1024 --size 1024 --no-bake]
 
+このスクリプトが原本。blender/scenes/celestial.blend と public/assets/rooms/celestial.glb・celestial.lightmap.png は
+ここから作り直す書き出し（.blend を手で直したら、その直しをこのスクリプトへ戻す）。
+夜明けの岸（dawn.py）は、振り返ったときの天球の代役を作るために globe_frame・arc_bmesh・ring_matrices を使う。
+
 一枚絵（絵コンテの代わり）:
-  8:02、2秒の暗転が明けると、ゴンドラの左前方、星の海の向こうに巨大なガラスの球（外殻 61.5m）の縁が
+  8:02、2秒の暗転が明けると、ゴンドラの右前方、星の海の向こうに巨大なガラスの球（外殻 61.5m）の縁が
   大きな弧を描いて現れる。縁は薄膜の虹色にかすかに光り、内側には同心の殻が4枚、入れ子の泡のように重なって見える。
   真鍮の細い子午線と黄道の輪が球を抱き、球の下には藍の釉の台座（受け皿と柱）が星明かりを受けて沈んでいる。
   星は一つずつ灯り、やがて球の内にも外にも満ちる。レールは球の周りを回りこみながら近づき、8:39 に外殻を抜け、
@@ -260,17 +264,33 @@ def clear_scene():
 
 
 # ── 部屋 ─────────────────────────────────────────────────────────────────
-def build(rail: Rail, rng: random.Random) -> dict:
-    coll = collection(ROOM)
-    bake_coll = collection(f'{ROOM}_bake')  # 焼き込みのためだけの光（書き出さない）
+#: 外殻を抱く真鍮の輪（子午線と黄道）: 外殻からの浮き、管の太さ、弧の数（10° ずつ）と弧の分割
+MERIDIAN_LIFT = 0.3
+MERIDIAN_MINOR = 0.11
+MERIDIAN_ARCS = 36
+MERIDIAN_SEGMENTS = 6
 
+
+def _best_normal(cands: list[np.ndarray], center: np.ndarray, keep_from: list[np.ndarray]) -> np.ndarray:
+    """輪の面が keep_from の点から最も離れる向き（球の上の点と輪の距離 ≈ 半径 × 面からの角度）"""
+    best, score = cands[0], -1.0
+    for n in cands:
+        n = n / np.linalg.norm(n)
+        sc = min(abs(float(np.dot((p - center) / np.linalg.norm(p - center), n))) for p in keep_from)
+        if sc > score:
+            best, score = n, sc
+    return best
+
+
+def globe_frame(rail) -> dict:
+    """球の中心（9:50 のゴンドラの位置）、外殻を抜ける入口と出口、子午線と黄道の輪の向き（Blender の座標）。
+
+    rail は s_at(t)・point(s)（Blender の座標）・sections を持つ物。夜明けの岸の代役も同じ値を使う。
+    """
     s0, s1 = rail.sections[ROOM]
     s_center = rail.s_at(CONSTELLATION_T)
     C = rail.point(s_center)
-    f_c, r_c = rail.frame(s_center)
-    print(f'{ROOM}: 中心 {C.round(3).tolist()}（s={s_center:.2f}）、区間 s={s0:.2f}〜{s1:.2f}')
 
-    # 外殻を抜ける点（入口と出口）
     def crossing(r: float, lo: float, hi: float) -> tuple[float, np.ndarray]:
         ss = np.linspace(lo, hi, 4000)
         d = np.array([np.linalg.norm(rail.point(s) - C) for s in ss])
@@ -279,6 +299,25 @@ def build(rail: Rail, rng: random.Random) -> dict:
 
     s_in, p_in = crossing(SHELL_RADII[-1], s0, s_center)
     s_out, p_out = crossing(SHELL_RADII[-1], s_center, s1 + 5)
+    # 子午線（縦）と黄道（23.4° 傾けた横）。外殻の入口と出口から離れる向きを選ぶ
+    cands = [np.array([math.cos(a), math.sin(a), 0.0]) for a in np.radians(np.arange(0, 180, 2.0))]
+    n_mer = _best_normal(cands, C, [p_in, p_out])
+    tilt = math.radians(23.4)
+    cands = [np.array([math.sin(tilt) * math.cos(a), math.sin(tilt) * math.sin(a), math.cos(tilt)]) for a in np.radians(np.arange(0, 360, 3.0))]
+    n_ecl = _best_normal(cands, C, [p_in, p_out])
+    return {'C': C, 's_center': s_center, 's_in': s_in, 'p_in': p_in, 's_out': s_out, 'p_out': p_out, 'n_mer': n_mer, 'n_ecl': n_ecl, 'r_mer': SHELL_RADII[-1] + MERIDIAN_LIFT}
+
+
+def build(rail: Rail, rng: random.Random) -> dict:
+    coll = collection(ROOM)
+    bake_coll = collection(f'{ROOM}_bake')  # 焼き込みのためだけの光（書き出さない）
+
+    s0, s1 = rail.sections[ROOM]
+    g = globe_frame(rail)
+    s_center, C = g['s_center'], g['C']
+    f_c, r_c = rail.frame(s_center)
+    print(f'{ROOM}: 中心 {C.round(3).tolist()}（s={s_center:.2f}）、区間 s={s0:.2f}〜{s1:.2f}')
+    s_in, p_in, s_out, p_out = g['s_in'], g['p_in'], g['s_out'], g['p_out']
     print(f'{ROOM}: 外殻の入口 s={s_in:.2f}、出口 s={s_out:.2f}（区間の終わりまで {s1 - s_out:.2f}m）')
     path = rail.samples(s0 - 2, s1 + 2, 0.5)  # 区間のレール（物との距離を測る）
 
@@ -341,25 +380,10 @@ def build(rail: Rail, rng: random.Random) -> dict:
         objs['brass'].extend(made)
         return worst
 
-    def best_normal(cands: list[np.ndarray], center: np.ndarray, radius: float, keep_from: list[np.ndarray]) -> np.ndarray:
-        """輪の面が keep_from の点から最も離れる向き（球の上の点と輪の距離 ≈ 半径 × 面からの角度）"""
-        best, score = cands[0], -1.0
-        for n in cands:
-            n = n / np.linalg.norm(n)
-            sc = min(abs(float(np.dot((p - center) / np.linalg.norm(p - center), n))) for p in keep_from)
-            if sc > score:
-                best, score = n, sc
-        return best
-
-    # 子午線（縦）と黄道（23.4° 傾けた横）。外殻の入口と出口から離れる向きを選ぶ
-    r_mer = SHELL_RADII[-1] + 0.3
-    cands = [np.array([math.cos(a), math.sin(a), 0.0]) for a in np.radians(np.arange(0, 180, 2.0))]
-    n_mer = best_normal(cands, C, r_mer, [p_in, p_out])
-    tilt = math.radians(23.4)
-    cands = [np.array([math.sin(tilt) * math.cos(a), math.sin(tilt) * math.sin(a), math.cos(tilt)]) for a in np.radians(np.arange(0, 360, 3.0))]
-    n_ecl = best_normal(cands, C, r_mer, [p_in, p_out])
-    w1 = brass_ring('meridian', C, n_mer, r_mer, 0.11, 36, 6)
-    w2 = brass_ring('meridian', C, n_ecl, r_mer, 0.11, 36, 6)
+    # 子午線と黄道（向きは globe_frame。夜明けの岸の代役と同じ）
+    r_mer, n_mer, n_ecl = g['r_mer'], g['n_mer'], g['n_ecl']
+    w1 = brass_ring('meridian', C, n_mer, r_mer, MERIDIAN_MINOR, MERIDIAN_ARCS, MERIDIAN_SEGMENTS)
+    w2 = brass_ring('meridian', C, n_ecl, r_mer, MERIDIAN_MINOR, MERIDIAN_ARCS, MERIDIAN_SEGMENTS)
 
     # 中心の「天の芯」: レールに直交する輪と、傾けた輪
     n_heart_a = np.array(f_c, dtype=np.float64)

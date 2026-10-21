@@ -78,6 +78,8 @@ export interface Water {
   readonly boat: THREE.UniformNode<'vec3', THREE.Vector3>;
   readonly boatDir: THREE.UniformNode<'vec2', THREE.Vector2>;
   readonly highlight: THREE.UniformNode<'float', number>;
+  /** 穴を空けるか（1 で空ける、0 で水を張る）。天球の中を抜けた後は水を張る */
+  readonly holeOpen: THREE.UniformNode<'float', number>;
   dispose(): void;
 }
 
@@ -87,6 +89,7 @@ export function createWater(opts: WaterOptions): Water {
   const boat = uniform(new THREE.Vector3(0, 0, 0)); // x, z, 速さ
   const boatDir = uniform(new THREE.Vector2(-1, 0));
   const highlight = uniform(0);
+  const holeOpen = uniform(1);
   const p = positionWorld.xz;
 
   // 凪いだうねり（3 つの向きの細い波。時刻で流れる）
@@ -136,7 +139,7 @@ export function createWater(opts: WaterOptions): Water {
     const r = reflector({ resolutionScale: 0.5 });
     reflNode = r;
     // 揺れた法線で映り込みをずらす（遠いほど小さく）
-    r.uvNode = r.uvNode!.add(n.xz.mul(float(2.4).div(dist.max(3))));
+    r.uvNode = r.uvNode!.add(n.xz.mul(float(0.8).div(dist.max(3))));
     reflectorTarget = r.target;
     reflectorTarget.rotation.x = -Math.PI / 2;
     refl = r.rgb;
@@ -171,7 +174,7 @@ export function createWater(opts: WaterOptions): Water {
   // 穴（天球の中とホールの床）。シェーダで丸く抜く
   let mask: THREE.Node<'bool'> | null = null;
   for (const h of opts.holes) {
-    const out = p.sub(vec2(h.x, h.z)).length().greaterThan(h.r);
+    const out = p.sub(vec2(h.x, h.z)).length().greaterThan(holeOpen.mul(h.r));
     mask = mask ? mask.and(out) : out;
   }
   if (mask) material.maskNode = mask;
@@ -184,6 +187,7 @@ export function createWater(opts: WaterOptions): Water {
     boat,
     boatDir,
     highlight,
+    holeOpen,
     dispose() {
       material.dispose();
       reflNode?.dispose();

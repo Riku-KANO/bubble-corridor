@@ -83,12 +83,8 @@ export function cityStrokes(): CityStroke[] {
   strokes.push(building(-31, circle(-31, groundV(-31) + 6.2 + 1.5, 1.5, 6)));
   strokes.push(building(-22, dome(-22, 3.8, 6)));
   const cg = groundV(-15.6);
-  strokes.push(building(-15.6, [
-    { u: -16.6, v: cg },
-    { u: -16.6, v: cg + 9.5 },
-    { u: -14.6, v: cg + 9.5 },
-    { u: -14.6, v: cg },
-  ]));
+  // 煙突も角を作らない（頂は丸い）
+  strokes.push(building(-15.6, [{ u: -16.6, v: cg }, ...arc(-15.6, cg + 8.6, 1.0, 1.0, 180, 0, 4), { u: -14.6, v: cg }]));
   strokes.push(building(-14, circle(-14.0, cg + 12.4, 1.1, 6)));
   strokes.push(building(-13, circle(-12.3, cg + 15.5, 1.4, 6)));
   strokes.push(building(-9, dome(-8.6, 3.2, 5)));
@@ -100,7 +96,10 @@ export function cityStrokes(): CityStroke[] {
     { u: 9.8, v: dg + 3 },
     { u: 10.1, v: dg + 6.5 },
     { u: 11.2, v: dg + 10 },
-    { u: 12.5, v: dg + 13.5 },
+    // 雫の先も丸く
+    { u: 12.0, v: dg + 12.6 },
+    { u: 12.5, v: dg + 13.2 },
+    { u: 13.0, v: dg + 12.6 },
     { u: 13.8, v: dg + 10 },
     { u: 14.9, v: dg + 6.5 },
     { u: 15.2, v: dg + 3 },

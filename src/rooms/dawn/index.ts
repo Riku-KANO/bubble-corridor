@@ -6,13 +6,13 @@
 // 時刻から決める: 空・水・砂・灯・部屋の空気はすべて dawnAt(t) から。11:50 に朝日の縁が水平線に現れ、
 // 砂浜が一斉に金色に光る。触れた波紋だけは触れた時刻を覚えて、そこからの経過で描く。
 import * as THREE from 'three/webgpu';
-import { cameraPosition, exp, float, hash, max, mix, normalView, positionViewDirection, positionWorld, pow, smoothstep, texture, uniform, uv, vec3 } from 'three/tsl';
-import { LURE_LEAD_SEC, MOMENT_BARS, SEC_PER_BAR } from '../../config';
+import { cameraPosition, exp, float, hash, materialColor, max, mix, normalView, positionViewDirection, positionWorld, pow, smoothstep, texture, uniform, uv, vec3 } from 'three/tsl';
+import { LURE_LEAD_SEC, MOMENT_BARS, SEC_PER_BAR, STREAMING } from '../../config';
 import type { Cue, Vec3Tuple } from '../../contracts/events';
 import type { RidePose } from '../../contracts/ride';
 import type { Atmosphere, RoomContext, RoomFrame, RoomModule, Touchable } from '../../contracts/room';
-import { createBrass, createGlass, setGlassLighting, sharedGlass, type GlassHandle } from '../../core/materials/glass';
-import { applyLightmaps, createLureStream, loadRoomScene, mergeInstanceGroups, normalizeMesh, type LureStream, type MutableGlassLighting } from '../celestial/kit';
+import { createBrass, createGlass, sharedGlass, type GlassHandle } from '../../core/materials/glass';
+import { applyLightmaps, createLureStream, loadRoomScene, mergeInstanceGroups, normalizeMesh, type LureStream } from '../celestial/kit';
 import { createDawnState, createSkyUniforms, dawnAt, skyColorNode, sunDirection, sunHorizontal, viewDirectionNode } from './sky';
 import { createRipples, createWater, rippleLightNode, type Water } from './water';
 
@@ -58,11 +58,19 @@ export function createDawnRoom(): RoomModule {
   const uSkyAll = uniform(1);
   /** 標柱の灯の明るさ（0〜1） */
   const uLamp = uniform(1);
+  /** 天球の代役の真鍮の明るさ */
+  const uGlobeGlow = uniform(0.3);
   /** 遠景の丘の色 */
   const uHill = uniform(new THREE.Color(0x2c284a));
   const uSkyAhead = uniform(1);
   let atmosphere: Atmosphere = { background: 0x5a5a8a, exposure: 1 };
-  let atmosphereKey = '';
+  /** 部屋の空気を作った時刻の刻みと、光の点滅を抑えるモードか（変わったときだけ作り直す） */
+  let atmosphereStep = NaN;
+  let atmosphereReduced = false;
+  /** 振り返ったときの天球の代役（外殻と子午線・黄道）。星の天球の部屋が先読みの窓から外れた後に見せる */
+  const standIn: THREE.Object3D[] = [];
+  let waterTouch: Touchable | null = null;
+  let t0 = SUNRISE_T - 50;
   let water: Water | null = null;
   let proxy: THREE.Mesh | null = null;
   let lure: LureStream | null = null;
@@ -77,15 +85,6 @@ export function createDawnRoom(): RoomModule {
   const from = new THREE.Vector3();
   const to = new THREE.Vector3();
 
-  const lighting: MutableGlassLighting = {
-    sky: new THREE.Color(),
-    ground: new THREE.Color(),
-    keyColor: new THREE.Color(),
-    keyIntensity: 0.5,
-    envReflection: 0.4,
-  };
-  const keyDir = new THREE.Vector3();
-
   return {
     id: 'dawn',
     root,
@@ -97,10 +96,13 @@ export function createDawnRoom(): RoomModule {
     async load(ctx: RoomContext) {
       emit = ctx.events.emit.bind(ctx.events);
       const tier = ctx.quality.tier;
+      t0 = ctx.ride.sectionTime(ROOM).t0;
       const scene = await loadRoomScene(ctx, `rooms/${ROOM}.glb`);
       root.add(scene);
-      dawnAt(ctx.ride.sectionTime(ROOM).t0, SUNRISE_T, false, state);
+      dawnAt(t0, SUNRISE_T, false, state);
       applyState();
+      atmosphere = atmosphereAt(t0, false);
+      atmosphereStep = t0;
 
       const byRole = new Map<string, THREE.Object3D[]>();
       scene.traverse((o) => {
@@ -170,11 +172,18 @@ export function createDawnRoom(): RoomModule {
       const nv = normalView.dot(positionViewDirection).abs().clamp(0, 1);
       // 動く光源がないので、縁だけが空と朝日を受けて細く光る
       // 標柱の上の灯が、柱の上のほうを暖かく照らす（夜明けとともに消える）
-      const lampOnBrass = vec3(1.0, 0.72, 0.42).mul(uLamp.mul(0.5)).mul(smoothstep(0.4, 2.3, positionWorld.y));
+      const lampOnBrass = vec3(1.0, 0.72, 0.42)
+        .mul(uLamp.mul(0.5))
+        .mul(smoothstep(0.4, 2.3, positionWorld.y).mul(float(1).sub(smoothstep(2.4, 2.9, positionWorld.y))));
       brass.emissiveNode = sand.skyTint.mul(0.9).add(sand.sun.mul(0.7)).mul(float(0.25).add(float(1).sub(nv).pow(2).mul(1.1))).mul(vec3(0.85, 0.66, 0.4)).add(lampOnBrass.mul(float(0.3).add(float(1).sub(nv).mul(0.7))));
       materials.push(brass);
       for (const o of byRole.get('post') ?? []) (o as THREE.Mesh).material = brass;
-      mergeInstanceGroups(scene, () => brass);
+      // 天球の代役の輪は、星の天球の真鍮と同じ見え方（星明かりの縁だけ）から始め、朝日とともに少し明るく
+      // （入れ替わる瞬間に輪の明るさが跳ばない）
+      const globeBrass = createBrass({ color: 0xc9a46a, roughness: 0.3 }) as THREE.MeshStandardNodeMaterial;
+      globeBrass.emissiveNode = materialColor.rgb.mul(float(0.16).add(float(1).sub(nv).pow(2).mul(0.7))).mul(uGlobeGlow);
+      materials.push(globeBrass);
+      const rings = mergeInstanceGroups(scene, (group) => (group === 'globe_ring' ? globeBrass : brass));
       const lamp = createGlass('milky', { color: 0xffe2b8, opacity: 0.7, emissive: 0xffb866, emissiveIntensity: 1.4 }, { tier });
       handles.push(lamp);
       lampGlass = lamp.material as THREE.MeshStandardNodeMaterial;
@@ -189,6 +198,29 @@ export function createDawnRoom(): RoomModule {
         mesh.material = glass.material;
         mesh.renderOrder = 8;
         mesh.userData.clearanceExempt = true;
+      }
+
+      // ── 振り返ったときの天球の代役: 星の天球の外殻と同じ形・同じガラス。low は片面（外からしか見ないので表だけ） ──
+      for (const o of byRole.get('globe') ?? []) {
+        const mesh = o as THREE.Mesh;
+        normalizeMesh(mesh, geometries);
+        if (tier === 'low') {
+          const g = new THREE.SphereGeometry(1, 64, 32);
+          geometries.push(g);
+          mesh.geometry = g;
+        }
+        const glass = createGlass('iridescent', { color: 0xe2eaff, opacity: 0.02, iridescence: 0.035, rim: 0.7, doubleSided: true }, { tier });
+        if (tier === 'low') glass.material.side = THREE.FrontSide;
+        handles.push(glass);
+        mesh.material = glass.material;
+        mesh.renderOrder = 3;
+        mesh.userData.clearanceExempt = true;
+        mesh.visible = false;
+        standIn.push(mesh);
+      }
+      for (const im of rings) if (im.userData.instanceGroup === 'globe_ring') {
+        im.visible = false;
+        standIn.push(im);
       }
 
       // ── 海のガラスの小石（型と置き場所は Blender） ──
@@ -294,7 +326,7 @@ export function createDawnRoom(): RoomModule {
       proxy.userData = { role: 'water_touch', clearanceExempt: true };
       root.add(proxy);
       const proxyRef = proxy;
-      touchables.push({
+      waterTouch = {
         id: `${ROOM}/water`,
         kind: 'water',
         section: ROOM,
@@ -313,7 +345,8 @@ export function createDawnRoom(): RoomModule {
           const pz = Number.isFinite(z) && (x !== 0 || z !== 0) ? z : proxyRef.position.z;
           ripples.add(px, pz, e.t);
         },
-      });
+      };
+      touchables.push(waterTouch);
 
       // ── 見どころ（朝日）と誘導の光の粒 ──
       const fpose: RidePose = { x: 0, y: 0, z: 0, yaw: 0, speed: 0, s: 0, section: 'platform', sectionProgress: 0 };
@@ -331,7 +364,6 @@ export function createDawnRoom(): RoomModule {
       applyState();
       uTime.value = t;
       sky.time.value = t;
-      const t0 = SUNRISE_T - 50; // = 区間の頭（11:00）
       // 天球の中（膜の手前 14 秒）からは、出口の方角だけ夜明けがにじむ。膜を抜けたら全天
       uSkyAhead.value = smooth(t0 - 14, t0 - 1, t);
       uSkyAll.value = smooth(t0 - 0.4, t0 + 0.8, t);
@@ -347,6 +379,14 @@ export function createDawnRoom(): RoomModule {
         (water.boatDir.value as THREE.Vector2).set(-Math.sin(p.yaw), -Math.cos(p.yaw));
       }
       if (proxy) proxy.position.set(p.x, 0, p.z);
+      // 天球の中（膜の手前）では水面に触れない（膜の向こうの水に光線が当たらないように）
+      if (waterTouch) waterTouch.enabled = t >= t0 - 0.5;
+      // 膜を抜けたら天球の中にも水を張る（膜の画面効果が隠す）。中の殻と星はそのとき天球の部屋が消す
+      if (water) water.holeOpen.value = t < t0 + 0.3 ? 1 : 0;
+      // 天球の部屋が先読みの窓から外れたら、同じ形の代役が引き継ぐ（振り返ると夜の天球が海に半ば沈んでいる）
+      const showStandIn = t > t0 + STREAMING.behindSec;
+      for (const o of standIn) o.visible = showStandIn;
+      uGlobeGlow.value = 0.3 + 0.45 * smooth(SUNRISE_T - 10, SUNRISE_T + 10, t);
       hiddenAnim?.(t);
       if (lure && focus) {
         from.set(p.x - Math.sin(p.yaw) * 2.5, p.y + 0.1, p.z - Math.cos(p.yaw) * 2.5);
@@ -354,24 +394,13 @@ export function createDawnRoom(): RoomModule {
         lure.update(t, from, to, frame.reducedFlash);
       }
 
-      // 部屋の空気（夜明け前の藍と桃 → 金と桃色の朝）。細かく刻んで、変わったときだけ新しい物に差し替える
+      // 部屋の空気（夜明け前の藍と桃 → 金と桃色の朝）とガラスの擬似照明（朝日の向きと色）。
+      // 0.25 秒ごとに刻んで、刻みが変わったときだけ新しい物に差し替える（統合担当は参照が変わったときだけ当てる）
       const step = Math.round(t / ATMOSPHERE_STEP) * ATMOSPHERE_STEP;
-      dawnAt(step, SUNRISE_T, frame.reducedFlash, atmoState);
-      const key = `${atmoState.background.getHexString()}|${atmoState.exposure.toFixed(2)}`;
-      if (key !== atmosphereKey) {
-        atmosphereKey = key;
-        atmosphere = { background: atmoState.background.getHex(), exposure: atmoState.exposure };
-      }
-
-      // この区間にいる間は、ガラスの擬似反射を夜明けの空と朝日に合わせる
-      if (frame.pose.section === ROOM) {
-        lighting.sky.copy(state.zenith).lerp(state.horizonSun, 0.35);
-        lighting.ground.copy(state.water).lerp(state.horizonAway, 0.5);
-        lighting.keyColor.copy(state.sunColor);
-        lighting.keyIntensity = 0.35 + 0.9 * state.sunOnSand;
-        sunDirection(Math.max(2, state.sunElevationDeg), keyDir);
-        lighting.keyDir = keyDir; // 太陽が昇るので毎回渡す（使い回しのベクトル）
-        setGlassLighting(lighting);
+      if (step !== atmosphereStep || frame.reducedFlash !== atmosphereReduced) {
+        atmosphereStep = step;
+        atmosphereReduced = frame.reducedFlash;
+        atmosphere = atmosphereAt(step, frame.reducedFlash);
       }
     },
 
@@ -400,6 +429,26 @@ export function createDawnRoom(): RoomModule {
       touchables.length = 0;
     },
   };
+
+  /**
+   * 時刻 step の部屋の空気。ガラスの擬似照明は、空は天頂と太陽側の地平、地面は水面、光の向きは朝日
+   * （水平線のにじみの少し上から、太陽とともに上がる）、色は朝日の色。共有の値には触れず、統合担当が膜で当てる
+   */
+  function atmosphereAt(step: number, reduced: boolean): Atmosphere {
+    const a = dawnAt(step, SUNRISE_T, reduced, atmoState);
+    const d = sunDirection(Math.max(a.sunElevationDeg, -3) + 4, new THREE.Vector3());
+    return Object.freeze({
+      background: a.background.getHex(),
+      exposure: a.exposure,
+      glassLighting: Object.freeze({
+        sky: a.zenith.clone().lerp(a.horizonSun, 0.35),
+        ground: a.water.clone().lerp(a.horizonAway, 0.5),
+        keyColor: a.sunColor.clone(),
+        keyDir: Object.freeze({ x: d.x, y: d.y, z: d.z }),
+        keyIntensity: 0.35 + 0.9 * a.sunOnSand,
+      }),
+    });
+  }
 
   /** 時刻の光を uniform に移す */
   function applyState(): void {

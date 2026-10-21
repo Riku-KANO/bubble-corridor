@@ -2,6 +2,9 @@
 
     pnpm blender blender/scripts/rooms/dawn.py [-- --samples 256 --size 2048 --no-bake]
 
+このスクリプトが原本。blender/scenes/dawn.blend と public/assets/rooms/dawn.glb・dawn.lightmap.png・dawn.sunmap.png は
+ここから作り直す書き出し（.blend を手で直したら、その直しをこのスクリプトへ戻す）。
+
 一枚絵（絵コンテの代わり）:
   11:00、天球の殻（出口の膜）を抜けると視界が一気に開ける。ゴンドラは鏡のように凪いだ水面すれすれを進み、
   左にはガラスの砂浜がゆるい弧を描いて前方の遠くまで続き、その先の岬に最初の乗り場（泡の発着場）が小さく見える。
@@ -20,6 +23,9 @@
   - dawn.pebble_a/b/c   海のガラスの小石の型（role=pebble_template。焼かない）
   - dawn.pebbles        小石を置く場所（extras の points: [x, y, z, 大きさ, 向き, 種類] × 数。three の座標）
   - dawn.hidden_bubble  隠れた小さな泡（touch_kind=hidden-bubble）
+  - dawn.globe          振り返ったときの天球の代役（外殻の球。role=globe、glass、clearance_exempt）と、
+    dawn.globe_ring.N   それを抱く真鍮の子午線と黄道（instance_group）。星の天球の部屋が先読みの窓から外れた後（11:10〜）に、
+                        同じ形・同じ向き（celestial.py の globe_frame）で入れ替わる。中の殻と星は膜を抜ける瞬間に消してある
 
 座標: 形は three の座標（Y が上）で考えて、Blender へ置くときに three_to_blender で直す。
 """
@@ -50,6 +56,8 @@ from common.coords import horizontal_frames, three_to_blender  # noqa: E402
 from common.export import export_glb, room_load_report  # noqa: E402
 from common.naming import check_names  # noqa: E402
 from common.visibility import cull_hidden  # noqa: E402
+from rooms.celestial import MERIDIAN_ARCS, MERIDIAN_MINOR, MERIDIAN_SEGMENTS, SHELL_RADII, globe_frame, ring_matrices  # noqa: E402
+from rooms.celestial import arc_bmesh as globe_arc_bmesh  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(SCRIPTS, '..', '..'))
 RAIL_JSON = os.path.join(ROOT, 'public', 'assets', 'rail.json')
@@ -249,7 +257,7 @@ def build(rail: Rail, rng: random.Random, globe_center: np.ndarray) -> dict:
     s0, s1 = rail.sections[ROOM]
     path3 = rail.samples(s0 - 2, s1 + 2, 0.5, three=True)  # three の座標
     path = rail.samples(s0 - 2, s1 + 2, 0.5)  # Blender の座標
-    objs: dict[str, list] = {'beach': [], 'brass': [], 'glass': [], 'water': [], 'membrane': [], 'hills': [], 'template': [], 'marker': [], 'hidden': []}
+    objs: dict[str, list] = {'beach': [], 'brass': [], 'glass': [], 'water': [], 'membrane': [], 'hills': [], 'template': [], 'marker': [], 'hidden': [], 'globe': []}
 
     sand_mat = material(f'{ROOM}.sand', (0.86, 0.86, 0.88), roughness=0.7)
     brass_mat = material(f'{ROOM}.brass', (0.78, 0.60, 0.34), metallic=1.0, roughness=0.3)
@@ -435,7 +443,32 @@ def build(rail: Rail, rng: random.Random, globe_center: np.ndarray) -> dict:
     ob.location = Vector(B(37.3, 0.42, -4.3))  # 朝日（右前）を見ると、その手前の標柱の根もとに
     objs['hidden'].append(ob)
 
-    # 7. 物とレールの距離（テストと同じ、物の軸に沿った箱で）
+    # 7. 振り返ったときの天球の代役: 外殻の球と、真鍮の子午線と黄道（星の天球と同じ形と向き）
+    g = globe_frame(rail)
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=96, v_segments=48, radius=SHELL_RADII[-1])
+    globe = mesh_object(f'{ROOM}.globe', bm, coll, glass_mat, {'role': 'globe', 'glass': 'iridescent', 'clearance_exempt': True, 'radius': SHELL_RADII[-1]})
+    globe.location = Vector(g['C'].tolist())
+    objs['globe'].append(globe)
+    arc_me = bpy.data.meshes.new(f'{ROOM}.arc_globe')
+    bm = globe_arc_bmesh(g['r_mer'], MERIDIAN_MINOR, math.tau / MERIDIAN_ARCS, MERIDIAN_SEGMENTS)
+    for f in bm.faces:
+        f.smooth = True
+    bm.to_mesh(arc_me)
+    bm.free()
+    arc_me.materials.append(brass_mat)
+    k = 0
+    for n in (g['n_mer'], g['n_ecl']):
+        for m in ring_matrices(g['C'], n, MERIDIAN_ARCS):
+            ob = bpy.data.objects.new(f'{ROOM}.globe_ring.{k:03d}', arc_me)
+            ob.matrix_world = m
+            ob['role'] = 'brass'
+            ob['instance_group'] = 'globe_ring'
+            coll.objects.link(ob)
+            objs['brass'].append(ob)
+            k += 1
+
+    # 8. 物とレールの距離（テストと同じ、物の軸に沿った箱で）
     bpy.context.view_layer.update()
     for o in objs['beach'] + objs['brass'] + objs['glass'] + objs['hidden']:
         d = box_distance(*world_box(o), path)
@@ -516,7 +549,7 @@ def main() -> None:
     water = make_water(coll, info['water_mat'])
     objs['water'].append(water)
 
-    export = objs['beach'] + objs['water'] + objs['brass'] + objs['glass'] + objs['membrane'] + objs['hills'] + objs['template'] + objs['marker'] + objs['hidden']
+    export = objs['beach'] + objs['water'] + objs['brass'] + objs['glass'] + objs['membrane'] + objs['hills'] + objs['template'] + objs['marker'] + objs['hidden'] + objs['globe']
     bad = check_names(export, rooms=[ROOM])
     if bad:
         raise SystemExit(f'名前の規則に合わない物: {bad}')
@@ -524,7 +557,7 @@ def main() -> None:
 
     if not args.no_bake:
         # 焼くのは砂浜だけ。焼くあいだは、ガラス・水・遠景・型を描かない（光を遮らない）。小石はガラスなので影を焼かない
-        hide = objs['water'] + objs['glass'] + objs['membrane'] + objs['hills'] + objs['template'] + objs['hidden'] + [o for o in objs['brass'] if o.get('instance_group')]
+        hide = objs['water'] + objs['glass'] + objs['membrane'] + objs['hills'] + objs['template'] + objs['hidden'] + objs['globe'] + [o for o in objs['brass'] if o.get('instance_group')]
         for o in hide:
             o.hide_render = True
         # (a) 朝日: 低い太陽だけ（空は黒）

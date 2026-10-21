@@ -2,10 +2,9 @@
 // - Blender の glb を読み、extras（userData）を部屋の決まりに写す（clearance_exempt → clearanceExempt）
 // - 焼き込んだ物にライトマップを付ける（blender/README.md「焼き込みとライトマップ」の手順どおり）
 // - 同じ形の物（真鍮の輪の弧）を InstancedMesh にまとめる
-// - 種を固定した乱数、ガラスの照明の受け渡し、見どころへの光の粒（誘導）
+// - 種を固定した乱数、見どころへの光の粒（誘導）、大きな殻や膜の形を半径 1 にそろえる
 import * as THREE from 'three/webgpu';
 import { float, instancedBufferAttribute, mix, sin, smoothstep, uniform, uv, vec3, vec4 } from 'three/tsl';
-import type { GlassLighting } from '../../core/materials/glass';
 import type { RoomContext } from '../../contracts/room';
 
 /** 種を固定した乱数（mulberry32）。0 以上 1 未満 */
@@ -155,17 +154,6 @@ export function spriteQuad(): THREE.BufferGeometry {
   return g;
 }
 
-/** 書き換えてよいガラスの照明（setGlassLighting に渡す。毎フレーム確保しない） */
-export interface MutableGlassLighting {
-  sky: THREE.Color;
-  ground: THREE.Color;
-  keyColor: THREE.Color;
-  keyIntensity: number;
-  envReflection: number;
-  keyDir?: THREE.Vector3;
-}
-export type { GlassLighting };
-
 /**
  * 見どころへの光の粒（誘導の出来事で、見どころの方向へ流して視線を誘う）。
  * 時刻から決める: [t0, t1] のあいだ、from（ゴンドラの少し前）から to（見どころ）へ粒が流れる。
@@ -240,11 +228,14 @@ export function createLureStream(t0: number, t1: number, color: THREE.ColorRepre
  * 大きな殻や膜でもむらが細かくなりすぎない）。元の形はアセットの読み込み口が持つので書き換えない
  */
 export function normalizeMesh(mesh: THREE.Mesh, owned: THREE.BufferGeometry[]): void {
-  const src = mesh.geometry;
-  if (!src.boundingSphere) src.computeBoundingSphere();
-  const bs = src.boundingSphere!;
-  if (bs.radius <= 1.0001) return;
-  const g = src.clone();
+  // GLTFLoader の境界球は箱の対角の半分（球なら半径の √3 倍）なので、写しで測り直して本当の半径にそろえる
+  const g = mesh.geometry.clone();
+  g.computeBoundingSphere();
+  const bs = g.boundingSphere!.clone();
+  if (bs.radius <= 1.0001) {
+    g.dispose();
+    return;
+  }
   g.translate(-bs.center.x, -bs.center.y, -bs.center.z);
   g.scale(1 / bs.radius, 1 / bs.radius, 1 / bs.radius);
   g.computeBoundingSphere();
