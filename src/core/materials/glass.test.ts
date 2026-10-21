@@ -5,7 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { createBrass, createGlass, type GlassKind } from './glass';
 
 const KINDS: GlassKind[] = ['clear', 'frosted', 'tinted', 'iridescent', 'milky', 'mirror'];
-type Mat = THREE.Material & { isNodeMaterial?: boolean; roughness?: number; metalness?: number; transmission?: number; opacity: number };
+type Mat = THREE.Material & {
+  isNodeMaterial?: boolean;
+  roughness?: number;
+  metalness?: number;
+  transmission?: number;
+  opacity: number;
+};
 
 describe('CORE-3 ガラスの材質', () => {
   it('6種すべてが NodeMaterial（WebGPU・WebGL2・VR で同じ部品）', () => {
@@ -16,10 +22,11 @@ describe('CORE-3 ガラスの材質', () => {
   });
 
   it('透過（transmission）を使わない（重く、重なると破綻する）', () => {
-    for (const k of KINDS) for (const tier of ['low', 'medium', 'high'] as const) {
-      const m = createGlass(k, {}, { tier }).material as Mat;
-      expect(m.transmission ?? 0, `${k}/${tier}`).toBe(0);
-    }
+    for (const k of KINDS)
+      for (const tier of ['low', 'medium', 'high'] as const) {
+        const m = createGlass(k, {}, { tier }).material as Mat;
+        expect(m.transmission ?? 0, `${k}/${tier}`).toBe(0);
+      }
   });
 
   it('鏡以外は半透明で、奥のガラスを隠さないよう深度を書かない', () => {
@@ -41,7 +48,9 @@ describe('CORE-3 ガラスの材質', () => {
   });
 
   it('引数の色・不透明度・両面が反映される', () => {
-    const m = createGlass('tinted', { color: 0x00ff00, opacity: 0.6, doubleSided: true }).material as Mat & { color: THREE.Color };
+    const m = createGlass('tinted', { color: 0x00ff00, opacity: 0.6, doubleSided: true }).material as Mat & {
+      color: THREE.Color;
+    };
     expect(m.opacity).toBeCloseTo(0.6, 6);
     expect(m.side).toBe(THREE.DoubleSide);
     expect(m.color.getHex()).toBe(0x00ff00);
