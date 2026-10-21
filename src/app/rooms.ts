@@ -1,7 +1,7 @@
 // 部屋の読み込みと解放。今の部屋にいる間に次の部屋を読み込み、2つ前の部屋は解放する（設計書「読み込み」）。
 import type * as THREE from 'three/webgpu';
 import type { Cue } from '../contracts/events';
-import type { RoomId } from '../contracts/ids';
+import type { DoorChoice, RoomId } from '../contracts/ids';
 import type { RoomContext, RoomFactory, RoomFrame, RoomModule, Touchable } from '../contracts/room';
 
 interface Slot {
@@ -25,6 +25,8 @@ export class RoomManager {
   private visible: readonly RoomId[] = [];
   /** 前回の sync の計画。同じ計画（参照が同じ）なら、読み込みも表示も変える必要がない */
   private lastPlan: { readonly visible: readonly RoomId[]; readonly keep: readonly RoomId[] } | null = null;
+  /** 今の扉の選択（決まっていなければ null）。後から読み込まれる部屋（万華鏡など）にも渡す */
+  private door: DoorChoice | null = null;
   private touchCache: Touchable[] = [];
   private touchDirty = true;
 
@@ -51,6 +53,7 @@ export class RoomManager {
             return;
           }
           slot.ready = true;
+          if (this.door !== null) module.setDoor?.(this.door);
           this.touchDirty = true;
           this.applyVisibility();
         },
@@ -97,6 +100,15 @@ export class RoomManager {
         slot.attached = false;
       }
     }
+  }
+
+  /**
+   * 扉の選択を覚え、読み込み済みの部屋にすぐ渡す。読み込みが終わる部屋にも、そのとき最新の扉を渡す
+   * （乗車の頭や doorChosen の時点で読み込まれていない万華鏡が、既定の色のままにならない）
+   */
+  setDoor(door: DoorChoice): void {
+    this.door = door;
+    for (const slot of this.slots.values()) if (slot.ready) slot.module.setDoor?.(door);
   }
 
   get(id: RoomId): RoomModule | null {

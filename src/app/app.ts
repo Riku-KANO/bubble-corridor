@@ -376,7 +376,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     shellCloseSounded = t0 > BOARD_START_SEC;
     lastT = t0;
     dispatcher.reset(t0);
-    rooms.forEachReady((m) => m.setDoor?.(door ?? DEFAULT_DOOR));
+    rooms.setDoor(door ?? DEFAULT_DOOR);
     clock.start(t0);
     // 乗車の頭は即座に正面へ（前の乗車の向きを引きずらない）
     look.recenter(undefined, 0);
@@ -421,7 +421,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     if (doorDecided) return;
     door = e.door;
     audio.setDoor(e.door);
-    rooms.forEachReady((m) => m.setDoor?.(e.door));
+    rooms.setDoor(e.door);
   });
   bus.on('hiddenFound', (e) => {
     if (hiddenThisRide.includes(e.section)) return;
