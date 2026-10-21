@@ -19,7 +19,7 @@ import { createAudioEngine } from '../audio';
 import { createScreenFx, REDUCED_FLASH_SCALE } from '../fx';
 import { createGondola } from '../gondola';
 import { createLookControl, createTouchInput } from '../input';
-import { capturePhoto, createPhotoStore, composePhoto, downloadPhoto, photoFileName, sharePhoto, stampText, warmUpCapture } from '../photo';
+import { capturePhoto, captureToPrepare, createPhotoStore, composePhoto, downloadPhoto, photoFileName, prepareCapture, sharePhoto, stampText, warmUpCapture } from '../photo';
 import { buildCueSheet, createCueDispatcher, createRide, createWallClock, generateRideData } from '../ride';
 import { ROOM_FACTORIES } from '../rooms';
 import { loadProgress as readProgress, loadSettings, mountUi, saveProgress, saveSettings } from '../ui';
@@ -114,6 +114,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   let constellations = 0;
   let hiddenThisRide: SectionId[] = [];
   let shots: { shot: ShotId; image: Blob }[] = [];
+  /** 下ごしらえを始めた撮影のキュー（乗車ごとに空にする） */
+  const preparedShots = new Set<string>();
   let latestPhoto: PhotoRecord | null = null;
   let shelf: PhotoRecord[] = [];
   let hintShown = false;
@@ -366,6 +368,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     constellations = 0;
     hiddenThisRide = [];
     shots = [];
+    preparedShots.clear();
     hintShown = false;
     chimer.reset();
     audio.stopLobby();
@@ -478,9 +481,22 @@ export async function startApp(root: HTMLElement): Promise<void> {
     }
   }
 
+  /** 撮影の大きさ（画面ごとに決まる） */
+  const captureSize = () => (isMobile ? PHOTO.captureMobile : PHOTO.captureDesktop);
+  /** 撮影のキューの部屋が読み込み済みで見えているか（毎フレームの確保を避けるため、関数は 1 つだけ作る） */
+  const shotRoomReady = (c: Cue) => rooms.isReady(ROOM_OF_SECTION[c.section]);
+
+  /** 撮影の少し前に、撮影の描画に要るシェーダーを先に作る（撮影の最中に画面が止まらないように。capture.ts） */
+  function prepareShots(t: number) {
+    const cue = captureToPrepare(cues, t, preparedShots, shotRoomReady);
+    if (!cue) return;
+    preparedShots.add(cue.id);
+    void prepareCapture(renderer, scene, camera, captureSize());
+  }
+
   async function takeShot(shot: ShotId) {
     try {
-      const size = isMobile ? PHOTO.captureMobile : PHOTO.captureDesktop;
+      const size = captureSize();
       const image = await capturePhoto(renderer, scene, camera, size);
       shots.push({ shot, image });
       bus.emit('photoCaptured', { shot });
@@ -663,6 +679,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
     // 触れられないまま近づいた物が一度だけ自分で鳴る（画面でも VR でも）。描画の後に調べる: 表示し始めたばかりの部屋の物は、
     // 描画で初めて位置（matrixWorld）が決まる（その前は原点にいる）ので、描画の前に読むと原点の近くにいる乗り場で誤って鳴る
     if (riding) chimer.update(gondolaPos, rooms.touchables());
+    // 撮影の下ごしらえ: 部屋を見せ終えた（描いた）後に始める。始めた時点で見えている物のシェーダーを先に作る
+    if (riding) prepareShots(t);
 
     // 動的な解像度（VR の描画は描画器の大きさに依らないので調整しない）
     if (!xr.active) {

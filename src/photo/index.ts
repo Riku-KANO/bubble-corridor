@@ -2,11 +2,11 @@
 // 撮影は capture.ts、合成は compose.ts、IndexedDB は store.ts、決まりは rules.ts。
 // ここは受け取り（ダウンロード・共有）を持ち、外から使う名前をまとめて出す。
 
-export { capturePhoto, warmUpCapture } from './capture';
+export { capturePhoto, prepareCapture, warmUpCapture } from './capture';
 export { composePhoto } from './compose';
 export { createPhotoStore } from './store';
-export { cropFor, doorTint, frameTierFor, photoFileName, stampText } from './rules';
-export type { PhotoCrop } from './rules';
+export { CAPTURE_PREPARE_LEAD_SEC, captureToPrepare, cropFor, doorTint, frameTierFor, photoFileName, stampText } from './rules';
+export type { PhotoCrop, ShotCue } from './rules';
 
 /** 解放を遅らせる時間。すぐに解放すると、保存が始まる前に URL が無効になる環境（Safari など）がある */
 const REVOKE_DELAY_MS = 10_000;
