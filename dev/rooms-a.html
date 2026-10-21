@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0e13" />
+    <link rel="icon" href="data:," />
+    <title>rooms-a 確認ページ — 待ち列・乗り場・温室・ゴンドラ</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0e13; overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      .hud { position: fixed; left: 10px; top: 8px; color: #dfe6f2; font: 12px/1.45 system-ui, sans-serif; text-shadow: 0 1px 2px #000; white-space: pre; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <!-- 部屋A（rooms-a）の見た目を確かめるページ。本番のビルドには含まれない。
+         ?t=<乗車の秒>（ゴンドラの座席から見る。時計は止まる。&run で進む、&rate=10 で早送り）
+         ?view=queue|home|boarding（待ち列・入口・乗り場の視点）、?yaw=<度>&pitch=<度>（見回し）、?fov=75
+         ?shell=0..1（殻の閉じ具合。省くと乗車中の値）、?webgl、?tier=low|medium|high、?clean（文字を隠す）
+         ?load=0..1（待ち列の灯り）、?punch（改札）、?orbit（上から見下ろす） -->
+    <div class="hud" id="hud"></div>
+    <script type="module" src="/src/dev/rooms-a/main.ts"></script>
+  </body>
+</html>
