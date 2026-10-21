@@ -146,7 +146,7 @@ slices:
   paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**, blender/scripts/rooms/rain.py, blender/scenes/rain.blend, public/assets/rooms/rain*, blender/scripts/rooms/kaleidoscope.py, blender/scenes/kaleidoscope.blend, public/assets/rooms/kaleidoscope*]
   tests: [src/rooms/rain/room.test.ts, src/rooms/kaleidoscope/room.test.ts]
   status: red
-  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（rain 10・kaleidoscope 10・担当のテスト10、check --quick ALL OK）。雨 3.2MB・万華鏡 4.6MB、60fps（WebGPU・WebGL2）。連続した壁と鏡の板は clearance_exempt にして、本当の三角形で 1.7m 以上を Blender と TS で確かめる、という判断をレビューで厳しく見る。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 触れたガラス片の回転を毎フレーム積み上げる（時刻から決まらない）、色のこだまが 3.3Hz で光る（明滅の上限を超える）。P2 exempt の距離の検査が自分の区間だけ（実測 1.838m で足りている）、黒い街と床の映り込み、隠した物のシェーダの組み立て、部屋から setGlassLighting、扉の解釈（ADR-0013 で仮、発案者に確認中）。exempt の判断は実測で RIDE-8 を弱めていない。親が testing.ts に shapeClearanceViolations と rules.test を足し（main）、P1-1 と本当の形の距離をテストにした（赤 2件）。実装 消費 2/3'
+  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（rain 10・kaleidoscope 10・担当のテスト10、check --quick ALL OK）。雨 3.2MB・万華鏡 4.6MB、60fps（WebGPU・WebGL2）。連続した壁と鏡の板は clearance_exempt にして、本当の三角形で 1.7m 以上を Blender と TS で確かめる、という判断をレビューで厳しく見る。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 触れたガラス片の回転を毎フレーム積み上げる（時刻から決まらない）、色のこだまが 3.3Hz で光る（明滅の上限を超える）。P2 exempt の距離の検査が自分の区間だけ（実測 1.838m で足りている）、黒い街と床の映り込み、隠した物のシェーダの組み立て、部屋から setGlassLighting、扉の解釈（ADR-0013 で仮、発案者に確認中）。exempt の判断は実測で RIDE-8 を弱めていない。親が testing.ts に shapeClearanceViolations と rules.test を足し（main）、P1-1 と本当の形の距離をテストにした（赤 2件）。実装 消費 2/3 2026-10-21 レビュー2巡目 request_changes（新しい P1 1件）: 扉を交互に選び直すと万華鏡の色が1秒に約6回入れ替わる（光の明滅の上限）。1巡目の P1・P2 はすべて解消（レビューが時刻から決まること・距離 1.816m〜・境目・0.1 秒の応答を測って確認）。親がテストにした（赤: 1秒に7回）。撮影の描き出しの 467ms は S-30 へ。実装 消費 3/3（最後）'
 - id: S-22
   title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）を Blender で造形・焼き込み
   wave: 2
@@ -235,3 +235,14 @@ slices:
   tests: []
   status: todo
   notes: 'S-21・S-22 の申し送り: 次の部屋のシェーダを前の部屋にいる間に compileAsync で先読み（読み込み直後、部屋の最初の update の前。visible=false の物はコンパイルされない）。いまは膜を抜けるフレームで 2fps 前後まで落ちる。S-25 レビュー2巡目の P3: ライドフォトから小画面を開くと場面の時刻が 0 になる（returnTo に従わせる）、VR のまま入口へ戻ると xr.exit の数フレームが t=0。部屋の境目の取り決め（雨の突き当たりの壁 s1+0.5〜0.85 など、S-21）を decisions に。関門1の PC 60fps（天球の見どころ）を部屋の統合後に測って docs/gates.md に'
+- id: S-30
+  title: 磨き・ライドフォト（撮影の描き出しで見どころの最中に止まらない）
+  wave: 3
+  lane: photo
+  milestone: M1
+  requirements: [PHO-1, REN-3]
+  depends_on: [S-21]
+  paths: [src/photo/**, dev/photo.html, src/dev/photo/**]
+  tests: []
+  status: todo
+  notes: 'S-21 レビュー2巡目: 5:10.5（photo.capture@93、雨粒が止まる見どころの最中）の撮影の描き出しで 467ms 止まる（2560×1440 の描き出し）。VR の 72fps では問題になる。撮影を数フレームに分ける、解像度の段を下げる、描き出しを見どころから少しずらす、VR では撮影の描き出しを止まらない形にする、などを検討。撮影の warmUpCapture は S-24 で入っている'
