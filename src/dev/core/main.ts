@@ -19,7 +19,7 @@ import {
   type GlassKind,
   type GlassParams,
 } from '../../core/materials/glass';
-import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityTier } from '../../core/quality';
+import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityTier } from '../../core/quality-tier';
 
 const KINDS: readonly GlassKind[] = ['clear', 'frosted', 'tinted', 'iridescent', 'milky', 'mirror'];
 const KIND_LABEL: Record<GlassKind, string> = {
