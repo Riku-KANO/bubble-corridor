@@ -189,5 +189,5 @@ slices:
   depends_on: [S-11, S-12, S-13, S-18, S-24]
   paths: [src/app/**, src/main.ts, e2e/ride.spec.ts, e2e/smoke.spec.ts, scripts/dev/**]
   tests: [e2e/ride.spec.ts, src/app/room-plan.test.ts, src/app/glass-lighting.test.ts]
-  status: red
-  notes: '2026-10-21 2026-10-21 親がテストを作成: room-plan.test（HOME_PLAN と planFor）、glass-lighting.test（空気から作る擬似照明と部屋の指定。契約 Atmosphere.glassLighting を追加）、e2e/ride.spec（PC 幅・スマートフォン幅で ?rate=60 の13分の通し、写真3枚、音の時計の速さと滑らかさ）。赤の証跡: 単体2ファイルが読み込み失敗。e2e 3件はいまの main で緑（関門2の守り）。ほかに依頼: gondola.rise の音、殻の閉じ開きの曲線を glassEase に。関門の記録（docs/gates.md）は部屋が入ってから親が書く。実装 消費 0/3'
+  status: green
+  notes: '2026-10-21 2026-10-21 親がテストを作成: room-plan.test（HOME_PLAN と planFor）、glass-lighting.test（空気から作る擬似照明と部屋の指定。契約 Atmosphere.glassLighting を追加）、e2e/ride.spec（PC 幅・スマートフォン幅で ?rate=60 の13分の通し、写真3枚、音の時計の速さと滑らかさ）。赤の証跡: 単体2ファイルが読み込み失敗。e2e 3件はいまの main で緑（関門2の守り）。ほかに依頼: gondola.rise の音、殻の閉じ開きの曲線を glassEase に。関門の記録（docs/gates.md）は部屋が入ってから親が書く。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3 で緑（app 49件、check --quick ALL OK、e2e 10件。負荷平均約8のときに render-paths の fps と音の時計の飛びが1回ずつ落ち、単独の再実行では緑）。担当が足したテスト: rise-sound.test、room-plan-home.test。レビュー1巡目へ'
