@@ -5,7 +5,7 @@
 // 仕組み: 曇り（ノイズの霞＋細かい水滴）は大きさが決まるたびに一度だけ作って取っておく。
 // 毎フレームは、その曇りを密度に応じた広がりで重ね、指でなぞった文字の形を「拭き取り」として抜くだけ。
 // 時間はすべて now（秒）から計算し、フレームの積み上げで状態を作らない（tick を呼ばなければ進まない）。
-// 2D の描画が使えない環境（jsdom）では何も描かず、時間と約束（Promise）だけ進める。
+// 2D の描画が使えない環境（jsdom。document のない node も）では何も描かず、時間と約束（Promise）だけ進める。
 import { easeInOutSine, smoothstep } from '../easing';
 
 export interface WriteOptions {
@@ -101,12 +101,26 @@ function mulberry32(seed: number): () => number {
     a = (a + 0x6d2b79f5) >>> 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return (((t ^ (t >>> 14)) >>> 0) / 4294967296);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
+/**
+ * document のない環境（node。案1の vitest は jsdom を持たず、共通部品のテストは node で走る）で使う、中身のない canvas の代わり。
+ * 大きさ（width・height）と style だけを持ち、getContext は null を返すので、何も描かず時間と約束だけ進む。
+ */
+function stubCanvas(): HTMLCanvasElement {
+  return {
+    width: 0,
+    height: 0,
+    style: {},
+    isConnected: false,
+    getContext: () => null,
+  } as unknown as HTMLCanvasElement;
+}
+
 const makeCanvas = (w: number, h: number): HTMLCanvasElement => {
-  const c = document.createElement('canvas');
+  const c = typeof document === 'undefined' ? stubCanvas() : document.createElement('canvas');
   c.width = Math.max(1, Math.round(w));
   c.height = Math.max(1, Math.round(h));
   return c;
@@ -146,7 +160,14 @@ function makeDropSprite(): HTMLCanvasElement | null {
   g.arc(cx, cy, r, 0, Math.PI * 2);
   g.fill();
   // 下側の影（光を集めた反対側が少し暗い）
-  const shade = g.createRadialGradient(cx + r * 0.25, cy + r * 0.35, r * 0.35, cx + r * 0.25, cy + r * 0.35, r * 1.05);
+  const shade = g.createRadialGradient(
+    cx + r * 0.25,
+    cy + r * 0.35,
+    r * 0.35,
+    cx + r * 0.25,
+    cy + r * 0.35,
+    r * 1.05,
+  );
   shade.addColorStop(0, 'rgba(40,70,110,0)');
   shade.addColorStop(1, 'rgba(40,70,110,0.28)');
   g.save();
@@ -395,7 +416,11 @@ export function createCondensation(opts: CondensationOptions): Condensation {
   const layoutText = (t: TextState) => {
     const g = textLayer && context2d(textLayer);
     if (!g || !textLayer) return;
-    const host = canvas.isConnected ? canvas : typeof document !== 'undefined' ? document.documentElement : null;
+    const host = canvas.isConnected
+      ? canvas
+      : typeof document !== 'undefined'
+        ? document.documentElement
+        : null;
     const lh = t.opts.lineHeight ?? 1.5;
     const align = t.opts.align ?? 'center';
     const wantFont = t.opts.font ? resolveCssVars(t.opts.font, host) : null;
@@ -404,7 +429,11 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     let size = Math.min((wantFont && sizeOf(wantFont)) || Infinity, (cssH * 0.66) / (n * lh), cssW * 0.12);
     // font に大きさ（NNpx）がなければ、書体の指定とみなして大きさを足す
     const specFor = (s: number) =>
-      wantFont === null ? `400 ${s}px ${DEFAULT_FAMILY}` : sizeOf(wantFont) === null ? `400 ${s}px ${wantFont}` : wantFont.replace(/(\d+(?:\.\d+)?)px/, `${s}px`);
+      wantFont === null
+        ? `400 ${s}px ${DEFAULT_FAMILY}`
+        : sizeOf(wantFont) === null
+          ? `400 ${s}px ${wantFont}`
+          : wantFont.replace(/(\d+(?:\.\d+)?)px/, `${s}px`);
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, textLayer.width, textLayer.height);
     g.scale(dpr, dpr);
@@ -434,7 +463,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     let acc = 0;
     const spans: [number, number][] = [];
     const lines = t.lines.map((text, i) => {
-      const width = widths[i];
+      const width = widths[i] ?? 0; // widths は lines と同じ長さ（noUncheckedIndexedAccess のための ?? 0）
       const x = align === 'center' ? (cssW - width) / 2 : cssW * 0.07;
       const y = top + (i + 0.5) * size * lh;
       const w = Math.max(1, text.length) / total;
@@ -471,7 +500,9 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     g.scale(dpr, dpr);
     const soft = lay.sizePx * 0.9; // 先端のぼかしの幅
     lay.lines.forEach((l, i) => {
-      const [a, b] = lay.spans[i];
+      const span = lay.spans[i];
+      if (!span) return;
+      const [a, b] = span;
       const lp = clamp01((t.progress - a) / (b - a));
       if (lp <= 0) return;
       const x0 = l.x - lay.sizePx * 0.4;
@@ -513,7 +544,7 @@ export function createCondensation(opts: CondensationOptions): Condensation {
     if (density < 0.999 && radialSprite) {
       const maxR = Math.hypot(W, H) / 2;
       // 内側の 62% が完全に覆うので、密度 1 に近づいたとき四隅まで届く大きさ（maxR / 0.62 より大きく）
-      const r = Math.max(1, maxR * 1.65 * Math.pow(density, 0.85));
+      const r = Math.max(1, maxR * 1.65 * density ** 0.85);
       fg.globalCompositeOperation = 'destination-in';
       fg.globalAlpha = smoothstep(0, 0.2, density);
       fg.drawImage(radialSprite, W / 2 - r, H / 2 - r, r * 2, r * 2);
@@ -536,7 +567,9 @@ export function createCondensation(opts: CondensationOptions): Condensation {
         wg.clearRect(0, 0, W, H);
         // 曇りに溶けていくときは、輪郭もにじませる（ctx.filter が使える環境だけ）
         const melt = 1 - text.amount;
-        if (melt > 0.01 && 'filter' in wg) (wg as CanvasRenderingContext2D & { filter: string }).filter = `blur(${(melt * text.layout.sizePx * 0.35 * dpr).toFixed(1)}px)`;
+        if (melt > 0.01 && 'filter' in wg)
+          (wg as CanvasRenderingContext2D & { filter: string }).filter =
+            `blur(${(melt * text.layout.sizePx * 0.35 * dpr).toFixed(1)}px)`;
         wg.drawImage(textLayer, 0, 0);
         if ('filter' in wg) (wg as CanvasRenderingContext2D & { filter: string }).filter = 'none';
         wg.globalCompositeOperation = 'destination-in';

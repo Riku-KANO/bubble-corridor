@@ -1,5 +1,5 @@
 // 起動時の端末の手がかり（品質の自動判定の入力）。DOM に触らない純粋な関数にして、テストできるようにする。
-import type { DeviceHints } from '../core/quality';
+import type { DeviceHints } from '../core/quality-tier';
 
 /** 起動時に読む環境（app が navigator・matchMedia・screen から集めて渡す） */
 export interface DeviceEnv {

@@ -29,7 +29,9 @@ describe('AUD-2 音階への揃え', () => {
 
   it('共通部分が2音未満なら調の5音をそのまま使う（どう触れても演奏になる）', () => {
     // C major ペンタ × B dim（B D F）→ D だけ → 5音
-    expect(touchCandidates({ tonic: 0, mode: 'major' }, { root: 11, quality: 'dim' })).toEqual([0, 2, 4, 7, 9]);
+    expect(touchCandidates({ tonic: 0, mode: 'major' }, { root: 11, quality: 'dim' })).toEqual([
+      0, 2, 4, 7, 9,
+    ]);
   });
 
   it('nearestPitch は範囲内で最も近い音、同じ距離なら高い方', () => {
@@ -81,13 +83,19 @@ describe('AUD-6 空間ごとの残響', () => {
       sampleRate,
       createBuffer(channels: number, length: number, sr: number) {
         const data = Array.from({ length: channels }, () => new Float32Array(length));
-        return { numberOfChannels: channels, length, sampleRate: sr, duration: length / sr, getChannelData: (i: number) => data[i] };
+        return {
+          numberOfChannels: channels,
+          length,
+          sampleRate: sr,
+          duration: length / sr,
+          getChannelData: (i: number) => data[i],
+        };
       },
     } as unknown as BaseAudioContext;
   }
   const energy = (a: Float32Array, from: number, to: number) => {
     let e = 0;
-    for (let i = from; i < to; i++) e += a[i] * a[i];
+    for (let i = from; i < to; i++) e += a[i]! * a[i]!;
     return e;
   };
 
@@ -109,7 +117,7 @@ describe('AUD-6 空間ごとの残響', () => {
     const n = l.length;
     expect(energy(l, 0, n / 4)).toBeGreaterThan(energy(l, (3 * n) / 4, n) * 20);
     let diff = 0;
-    for (let i = 0; i < n; i++) diff += Math.abs(l[i] - r[i]);
+    for (let i = 0; i < n; i++) diff += Math.abs(l[i]! - r[i]!);
     expect(diff).toBeGreaterThan(0);
   });
 

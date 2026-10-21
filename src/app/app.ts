@@ -14,7 +14,7 @@ import { CAMERA, HIDDEN_BUBBLE_SECTIONS, PHOTO, RIDE_DURATION, TRANSITION_SEC, U
 import { createBus } from '../core/events';
 import { lerp, smoothstep } from '../core/easing';
 import { setDefaultGlassTier, setGlassFlashScale } from '../core/materials/glass';
-import { DynamicResolution, detectTier, presetFor, type QualityPreset } from '../core/quality';
+import { DynamicResolution, detectTier, presetFor, type TierPreset } from '../core/quality-tier';
 import { createAudioEngine } from '../audio';
 import { createScreenFx, REDUCED_FLASH_SCALE } from '../fx';
 import { createGondola } from '../gondola';
@@ -71,12 +71,12 @@ export async function startApp(root: HTMLElement): Promise<void> {
   });
   // 品質は設定で変わる（即時に反映する）。?quality があればそれを優先する
   const wantedQuality = (): QualitySetting => params.quality ?? settings.quality;
-  const presetOf = (setting: QualitySetting): QualityPreset => presetFor(setting === 'auto' ? detectTier(hints) : setting, hints);
+  const presetOf = (setting: QualitySetting): TierPreset => presetFor(setting === 'auto' ? detectTier(hints) : setting, hints);
   let appliedQuality = wantedQuality();
-  let quality: QualityPreset = presetOf(appliedQuality);
+  let quality: TierPreset = presetOf(appliedQuality);
   // 画面（2D のウィンドウ）の動的な解像度は、画面の目標の fps で動かす。一体型のヘッドセットの preset は VR の 72fps だが、
   // 2D のブラウザが 60Hz だと届かずに倍率が最小まで下がり続ける（VR の間は動的な解像度を止める）
-  const screenDynRes = (q: QualityPreset): DynamicResolution =>
+  const screenDynRes = (q: TierPreset): DynamicResolution =>
     new DynamicResolution(hints.isXR ? { ...q, targetFps: presetFor(q.tier, { ...hints, isXR: false }).targetFps } : q);
   let dynRes = screenDynRes(quality);
   // ガラスの既定の品質は、最初の材質（ゴンドラの殻）を作る前に決める

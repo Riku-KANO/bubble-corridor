@@ -30,7 +30,17 @@ export interface Key {
   readonly mode: Mode;
 }
 
-export type ChordQuality = 'maj' | 'min' | 'sus2' | 'sus4' | 'maj7' | 'min7' | 'dom7' | 'add9' | 'min9' | 'dim';
+export type ChordQuality =
+  | 'maj'
+  | 'min'
+  | 'sus2'
+  | 'sus4'
+  | 'maj7'
+  | 'min7'
+  | 'dom7'
+  | 'add9'
+  | 'min9'
+  | 'dim';
 
 export interface Chord {
   readonly root: PitchClass;
@@ -84,5 +94,5 @@ export function nearestPitch(candidates: readonly PitchClass[], around: number, 
 }
 
 export function midiToHz(midi: number): number {
-  return 440 * Math.pow(2, (midi - 69) / 12);
+  return 440 * 2 ** ((midi - 69) / 12);
 }

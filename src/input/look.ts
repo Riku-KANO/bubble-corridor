@@ -8,7 +8,7 @@
 // 範囲を超えた分は、ドラッグなら base に、傾きなら傾きの基準に吸わせる（戻したとき、すぐ動くように）。
 import { CAMERA } from '../config';
 import type { InputDeps, LookControl, LookOptions, LookState } from '../contracts/input';
-import { damp, easeGlass, lerp, wrapAngle } from '../core/easing';
+import { damp, easeInOutSine, lerp, wrapAngle } from '../core/easing';
 
 const DEG = Math.PI / 180;
 const YAW_MAX = CAMERA.yawRangeDeg * DEG;
@@ -36,14 +36,16 @@ const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /**
- * easeGlass の最大の傾き（1 秒かけたときの、最も速い瞬間の「進む割合/秒」）。
- * 戻しの最大の角速度を CAMERA.recenterMaxDegPerSec 以下にするために、長さの下限を出すのに使う。
+ * 正面へ戻すときの曲線は、両端でなめらかに止まる左右対称の easeInOutSine。
+ * 共通のガラスの曲線（easeGlass = glassEase）は最も速い瞬間の傾きが約 3.2 と急で、最大の角速度の上限
+ * （CAMERA.recenterMaxDegPerSec）を守ろうとすると戻しの長さが約 1.8 倍に伸びてしまう（60 度で約 3 秒）。
+ * 画面の遷移と違い、見回しの向きを戻す動きは速さの上限が先に効くので、傾きの小さいこの曲線を使う。
+ * そのうえで、1 秒かけたときの最も速い瞬間の「進む割合/秒」を測り、戻しの最大の角速度を上限以下にする長さの下限を出す。
  */
 const EASE_MAX_SLOPE = (() => {
   const n = 512;
   let m = 0;
-  // 最後の区間は、x=1 で値が 1 に揃う段差（曲線の端の都合）なので測らない
-  for (let i = 0; i < n - 1; i++) m = Math.max(m, (easeGlass((i + 1) / n) - easeGlass(i / n)) * n);
+  for (let i = 0; i < n; i++) m = Math.max(m, (easeInOutSine((i + 1) / n) - easeInOutSine(i / n)) * n);
   return m * 1.01; // 差分で測るので少し余裕を見る
 })();
 
@@ -420,7 +422,7 @@ export function createLookControl(deps: InputDeps, opts: LookOptions): LookContr
       if (recenter) {
         recenter.elapsed += dt;
         const done = recenter.elapsed >= recenter.duration;
-        const s = done ? 1 : easeGlass(recenter.elapsed / recenter.duration);
+        const s = done ? 1 : easeInOutSine(recenter.elapsed / recenter.duration);
         const yaw = lerp(recenter.fromYaw, recenter.toYaw, s);
         const pitch = lerp(recenter.fromPitch, recenter.toPitch, s);
         // 曲線そのものが滑らかなので damp は通さない。傾きは差し引いて base に持つ
