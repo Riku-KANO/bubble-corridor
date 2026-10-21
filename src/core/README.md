@@ -83,7 +83,10 @@
 
 - **core の外を import しない**（`three` などの外部パッケージは可）。`scripts/check-core.ts` が検査する。
 - 案1と案2それぞれの固有の名前（案2の区間・部屋・キュー、案1の場面など）を持ち込まない。必要なら引数で受け取る。
-- 変更したら VERSION と CHANGELOG.md を更新する。相手のリポジトリへは `pnpm core:sync` でコピーする（相手の版の方が新しいときは止まる。先に相手から取り込む）。
+- 変更したら VERSION と CHANGELOG.md を更新する。案1へは、案2の checkout で `pnpm core:sync <案1> [--apply]` を走らせてコピーする（案1に core:sync はない。
+  `--apply` は案1のセッションの判断。`blender/scripts/common` も一緒にコピーされ、削除は伝わらない。相手の版の方が新しい、または同じ版で中身が違うときは止まる。先に案1から取り込む）。
+- **案1の検査でも通す**: 案1は `noUncheckedIndexedAccess` を有効にし、vitest は jsdom を持たず node で走る（書式は biome の lineWidth 110）。
+  core のコードは `tsconfig.core.json`（`pnpm typecheck` に入っている）で同じ厳しさの型検査を通し、core のテストは jsdom などの環境の指定を使わない（DOM のない環境でも例外を出さない）。
 - 案1から取り込んだファイル（audio/、glass/、perf/、transition/、renderer.ts、bench.ts、params.ts、scene.ts、quality.ts）は、こちらで書き換えない。直したいときは案1で直して取り込む。
 
 ## ガラスの使い方: `materials/glass.ts`（案2）（飾りは共有し、前の部屋で先にコンパイルする）

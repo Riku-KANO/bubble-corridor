@@ -149,7 +149,14 @@ class Rig {
    * 減衰する倍音 1 本: 発音 → 急な立ち上がり → 指数的に減衰し、減衰し切る頃（tau の5倍）に自分で止まる。
    * 小さすぎて聞こえない倍音は作らず null を返す。
    */
-  partial(type: OscillatorType, freq: number, when: number, amp: number, tau: number, attack = 0.003): OscillatorNode | null {
+  partial(
+    type: OscillatorType,
+    freq: number,
+    when: number,
+    amp: number,
+    tau: number,
+    attack = 0.003,
+  ): OscillatorNode | null {
     if (amp < MIN_AMP) return null;
     const o = this.ctx.createOscillator();
     o.type = type;
@@ -170,8 +177,9 @@ class Rig {
   /** 止まる時刻が決まっていない音源（LFO、持続する雑音など）を stopAt に止めて、Voice を返す。endsAt は最も遅い音源が止まる時刻 */
   finish(stopAt: number, minEndsAt = 0): Voice {
     for (let i = 0; i < this.sources.length; i++) {
-      if (this.stops[i] === Infinity) {
-        this.sources[i].stop(stopAt);
+      const src = this.sources[i];
+      if (src && this.stops[i] === Infinity) {
+        src.stop(stopAt);
         this.stops[i] = stopAt;
         if (stopAt > this.latestStop) this.latestStop = stopAt;
       }
@@ -191,9 +199,10 @@ class Rig {
         gate.gain.setTargetAtTime(0, t, 0.02);
         for (let i = 0; i < sources.length; i++) {
           // 0.02 秒の時定数で消え切るまで待って止める（まだ始まっていない音源は、始まらない）
-          if (stops[i] > t + 0.15) {
+          const src = sources[i];
+          if (src && (stops[i] ?? 0) > t + 0.15) {
             try {
-              sources[i].stop(t + 0.15);
+              src.stop(t + 0.15);
               stops[i] = t + 0.15;
             } catch {
               // すでに止まっている音源
@@ -203,7 +212,7 @@ class Rig {
       },
       liveSources(at) {
         let n = 0;
-        for (let i = 0; i < stops.length; i++) if (starts[i] <= at && at < stops[i]) n++;
+        for (let i = 0; i < stops.length; i++) if ((starts[i] ?? Infinity) <= at && at < (stops[i] ?? 0)) n++;
         return n;
       },
     };
@@ -211,7 +220,7 @@ class Rig {
 }
 
 /** 音が高いほど短く消える（実際のガラスや金属の減衰に合わせる） */
-const pitchDecay = (midi: number, exponent = 1): number => Math.pow(60 / Math.max(24, midi), exponent);
+const pitchDecay = (midi: number, exponent = 1): number => (60 / Math.max(24, midi)) ** exponent;
 
 /** 音色ごとの最大音量。velocity 1 のときの目安（確認ページで RMS を測って揃える） */
 const GLASS_LEVEL: Readonly<Record<GlassTimbre, number>> = {
@@ -270,9 +279,10 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
       const ratios = [1, 2.756, 5.404, 8.933];
       const amps = [1, 0.5 * (0.5 + 0.5 * v), 0.24 * (0.4 + 0.6 * v), 0.1 * v];
       const taus = [1, 0.55, 0.3, 0.16];
+      // 添字は定数の配列 ratios・amps・taus の長さの範囲内（! は noUncheckedIndexedAccess のため）
       for (let i = 0; i < ratios.length; i++) {
-        if (f * ratios[i] > maxHz) continue;
-        rig.partial('sine', f * ratios[i], t0, level * amps[i], tau * taus[i]);
+        if (f * ratios[i]! > maxHz) continue;
+        rig.partial('sine', f * ratios[i]!, t0, level * amps[i]!, tau * taus[i]!);
       }
       return rig.finish(t0);
     }
@@ -282,10 +292,11 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
       const ratios = [1, 2.4, 4.3, 6.7];
       const amps = [1, 0.6, 0.34, 0.18];
       const taus = [1, 0.6, 0.34, 0.2];
+      // 添字は定数の配列 ratios・amps・taus の長さの範囲内（! は noUncheckedIndexedAccess のため）
       for (let i = 0; i < ratios.length; i++) {
-        const fr = f * ratios[i];
+        const fr = f * ratios[i]!;
         if (fr > maxHz) continue;
-        const o = rig.partial('sine', fr, t0, level * amps[i], tau * taus[i]);
+        const o = rig.partial('sine', fr, t0, level * amps[i]!, tau * taus[i]!);
         if (!o) continue;
         o.frequency.setValueAtTime(fr * 1.012, t0);
         o.frequency.exponentialRampToValueAtTime(fr, t0 + 0.02);
@@ -328,9 +339,10 @@ export function playGlass(ctx: BaseAudioContext, dest: AudioNode, timbre: GlassT
       const ratios = [1, 1.004, 2.71, 5.18];
       const amps = [1, 0.8, 0.26, 0.08];
       const taus = [1, 1, 0.55, 0.25];
+      // 添字は定数の配列 ratios・amps・taus の長さの範囲内（! は noUncheckedIndexedAccess のため）
       for (let i = 0; i < ratios.length; i++) {
-        if (f * ratios[i] > maxHz) continue;
-        rig.partial('sine', f * ratios[i], t0, level * amps[i] * 0.7, tau * taus[i], attack);
+        if (f * ratios[i]! > maxHz) continue;
+        rig.partial('sine', f * ratios[i]!, t0, level * amps[i]! * 0.7, tau * taus[i]!, attack);
       }
       return rig.finish(t0);
     }
@@ -374,7 +386,14 @@ export function playPad(
   ctx: BaseAudioContext,
   dest: AudioNode,
   timbre: PadTimbre,
-  p: { readonly midis: readonly number[]; readonly when: number; readonly duration: number; readonly velocity: number; readonly attack?: number; readonly release?: number },
+  p: {
+    readonly midis: readonly number[];
+    readonly when: number;
+    readonly duration: number;
+    readonly velocity: number;
+    readonly attack?: number;
+    readonly release?: number;
+  },
 ): Voice {
   const cfg = PAD[timbre];
   const t0 = p.when;
@@ -400,7 +419,14 @@ export function playPad(
     vib.gain.linearRampToValueAtTime(timbre === 'strings' ? 5 : 8, t0 + attack + 0.8);
     lfo.connect(vib);
   }
-  const voiceOsc = (type: OscillatorType, freq: number, cents: number, amp: number, to: AudioNode, vibrato = false) => {
+  const voiceOsc = (
+    type: OscillatorType,
+    freq: number,
+    cents: number,
+    amp: number,
+    to: AudioNode,
+    vibrato = false,
+  ) => {
     const o = rig.osc(type, freq, t0);
     o.detune.value = cents;
     if (vibrato && vib) vib.connect(o.detune);
@@ -469,10 +495,12 @@ export function playPad(
         if (f * 3 < 9000) voiceOsc('sine', f * 3, -2, 0.08, rig.out);
       }
       // 息のような雑音を、和音の高さの帯域だけ通す
-      const noise = rig.hiss(t0, p.midis[0] * 0.21);
+      const lowMidi = p.midis[0] ?? 60;
+      const highMidi = p.midis[p.midis.length - 1] ?? lowMidi;
+      const noise = rig.hiss(t0, lowMidi * 0.21);
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = Math.min(7000, midiToHz(p.midis[p.midis.length - 1]) * 3);
+      bp.frequency.value = Math.min(7000, midiToHz(highMidi) * 3);
       bp.Q.value = 1.6;
       const g = ctx.createGain();
       g.gain.value = 0.1;

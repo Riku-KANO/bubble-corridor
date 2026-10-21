@@ -5,7 +5,13 @@
  * 格子は origin を 0 として、1拍 = 60/bpm 秒を subdivisionBeats ごとに刻む。
  * 格子点までが minLead 秒未満なら、その次の格子点にする（予約が間に合わないのを避ける）。
  */
-export function nextGridTime(now: number, origin: number, bpm: number, subdivisionBeats: number, minLead = 0): number {
+export function nextGridTime(
+  now: number,
+  origin: number,
+  bpm: number,
+  subdivisionBeats: number,
+  minLead = 0,
+): number {
   const step = (60 / bpm) * subdivisionBeats;
   // 浮動小数点の誤差（格子点ちょうどの入力が 1 ulp 手前になる）で 1 格子ぶん遅らせないよう、格子の 1e-9 倍だけ許す
   const k = Math.ceil((now + minLead - origin) / step - 1e-9);

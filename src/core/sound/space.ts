@@ -22,7 +22,10 @@ export const REVERB_SECONDS: Readonly<Record<ReverbSize, number>> = {
   huge: 6.0,
 };
 
-export function createSpatialPanner(ctx: BaseAudioContext, position?: readonly [number, number, number]): PannerNode {
+export function createSpatialPanner(
+  ctx: BaseAudioContext,
+  position?: readonly [number, number, number],
+): PannerNode {
   const p = ctx.createPanner();
   p.panningModel = 'HRTF';
   p.distanceModel = 'inverse';
@@ -33,7 +36,11 @@ export function createSpatialPanner(ctx: BaseAudioContext, position?: readonly [
       p.positionZ.value = position[2];
     } else {
       // AudioParam を持たない古い実装（旧 Safari）
-      (p as unknown as { setPosition?: (x: number, y: number, z: number) => void }).setPosition?.(position[0], position[1], position[2]);
+      (p as unknown as { setPosition?: (x: number, y: number, z: number) => void }).setPosition?.(
+        position[0],
+        position[1],
+        position[2],
+      );
     }
   }
   return p;
@@ -120,7 +127,7 @@ export function createReverbImpulse(ctx: BaseAudioContext, size: ReverbSize, see
     const rnd = rng(seed * 7919 + SIZE_INDEX[size] * 104729 + ch * 1299709);
     let lp = 0;
     // 60dB 下がるのが rt60 秒後: 1サンプルごとに掛ける定数（Math.pow を毎サンプル呼ばない）
-    const decay = Math.pow(10, -3 / (rt60 * sr));
+    const decay = 10 ** (-3 / (rt60 * sr));
     let env = 1;
     const brightEnd = Math.max(1, Math.floor(sr * rt60 * 0.7));
     const fadeIn = Math.max(1, Math.floor(sr * 0.004));
@@ -134,7 +141,8 @@ export function createReverbImpulse(ctx: BaseAudioContext, size: ReverbSize, see
     // 初期反射: 数本の鋭い反射を足して、部屋の壁の位置を感じさせる
     for (let k = 0; k < 6; k++) {
       const at = Math.floor(sr * (0.006 + rnd() * spread * (1 + k)));
-      if (at < length) data[at] += (rnd() < 0.5 ? -1 : 1) * (0.9 - k * 0.1) * (0.5 + 0.5 * rnd());
+      if (at < length)
+        data[at] = (data[at] ?? 0) + (rnd() < 0.5 ? -1 : 1) * (0.9 - k * 0.1) * (0.5 + 0.5 * rnd());
     }
   }
   return buffer;

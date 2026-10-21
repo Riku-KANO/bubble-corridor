@@ -71,7 +71,10 @@ export function detectTier(hints: DeviceHints): QualityTier {
 }
 
 /** 品質ごとの基本。端末（スマートフォン・VR）と画面の大きさで少し調整する */
-const BASE: Record<QualityTier, { pixelRatio: number; scale: number; minScale: number; particles: number; env: number }> = {
+const BASE: Record<
+  QualityTier,
+  { pixelRatio: number; scale: number; minScale: number; particles: number; env: number }
+> = {
   high: { pixelRatio: 2, scale: 1, minScale: 0.6, particles: 1, env: 512 },
   medium: { pixelRatio: 1.5, scale: 1, minScale: 0.6, particles: 0.7, env: 256 },
   low: { pixelRatio: 1, scale: 0.9, minScale: 0.5, particles: 0.4, env: 128 },
@@ -178,7 +181,8 @@ export class DynamicResolution {
     // 試しに上げた直後: 短い窓で判定して、重ければすぐ戻す
     if (this.probeLeft > 0) {
       this.probeFrames[PROBE_FRAMES - this.probeLeft] = ms;
-      if (--this.probeLeft === 0 && this.ratioOf(median(this.probeFrames, PROBE_FRAMES)) > SLOW_RATIO) this.failProbe();
+      if (--this.probeLeft === 0 && this.ratioOf(median(this.probeFrames, PROBE_FRAMES)) > SLOW_RATIO)
+        this.failProbe();
       return this.current;
     }
 
@@ -249,7 +253,10 @@ export class DynamicResolution {
 
     if (ratio > SLOW_RATIO) {
       this.light = 0;
-      this.current = Math.max(this.preset.minRenderScale, this.current - (ratio > BIG_RATIO ? STEP_BIG : STEP_DOWN));
+      this.current = Math.max(
+        this.preset.minRenderScale,
+        this.current - (ratio > BIG_RATIO ? STEP_BIG : STEP_DOWN),
+      );
     } else if (ratio <= SETTLED_RATIO && this.current < this.preset.renderScale) {
       const next = Math.min(this.preset.renderScale, this.current + STEP_UP);
       if (this.ceiling !== null && next > this.ceiling + 1e-9) {
@@ -269,14 +276,15 @@ export class DynamicResolution {
 
 /** フレーム時間の中央値（挿入ソート。窓は数十フレームなので十分速く、割り当てもしない。buf の並びは壊れる） */
 function median(buf: Float32Array, n: number): number {
+  // 添字は 0..n-1 の範囲内なので undefined にはならない（noUncheckedIndexedAccess のための ?? 0）
   for (let i = 1; i < n; i++) {
-    const v = buf[i];
+    const v = buf[i] ?? 0;
     let j = i - 1;
-    while (j >= 0 && buf[j] > v) {
-      buf[j + 1] = buf[j];
+    while (j >= 0 && (buf[j] ?? 0) > v) {
+      buf[j + 1] = buf[j] ?? 0;
       j--;
     }
     buf[j + 1] = v;
   }
-  return n % 2 === 1 ? buf[(n - 1) / 2] : (buf[n / 2 - 1] + buf[n / 2]) / 2;
+  return n % 2 === 1 ? (buf[(n - 1) / 2] ?? 0) : ((buf[n / 2 - 1] ?? 0) + (buf[n / 2] ?? 0)) / 2;
 }

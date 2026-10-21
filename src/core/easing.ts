@@ -21,7 +21,7 @@ export function easeInOutSine(t: number): number {
 
 export function easeOutCubic(t: number): number {
   const x = clamp01(t);
-  return 1 - Math.pow(1 - x, 3);
+  return 1 - (1 - x) ** 3;
 }
 
 export function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -47,5 +47,5 @@ export function wrapAngle(a: number): number {
  */
 export function damp(current: number, target: number, halfLife: number, dt: number): number {
   if (halfLife <= 0) return target;
-  return target + (current - target) * Math.pow(2, -dt / halfLife);
+  return target + (current - target) * 2 ** (-dt / halfLife);
 }

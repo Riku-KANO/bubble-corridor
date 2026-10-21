@@ -18,7 +18,7 @@
 //
 // 作るコスト: 材質1つの組み立ては数 ms かかる（200 個で約 1 秒止まる）。飾りのガラスは `sharedGlass` で共有し、
 // 前の部屋にいる間に `renderer.compileAsync` で先にコンパイルしておく（src/core/README.md）。
-import * as THREE from 'three/webgpu';
+
 import {
   cameraViewMatrix,
   cos,
@@ -52,6 +52,7 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
+import * as THREE from 'three/webgpu';
 import type { QualityTier } from '../quality-tier';
 
 /** ガラスの種類（設計書のアートディレクションの「主なガラス」） */
@@ -152,12 +153,96 @@ interface Spec {
 }
 
 const SPECS: Record<GlassKind, Spec> = {
-  clear: { color: 0xd8ecff, opacity: 0.05, roughness: 0.04, metalness: 0, rim: 0.9, power: 3.2, thickness: 0.9, film: 0.12, glow: 0, grain: 0, edgeFade: 0, face: 0.01, thin: true },
-  frosted: { color: 0xdfeaf6, opacity: 0.2, roughness: 0.6, metalness: 0, rim: 0.5, power: 1.6, thickness: 0.5, film: 0, glow: 0.3, grain: 1, edgeFade: 0, face: 0.01, thin: false },
-  tinted: { color: 0x86d1b4, opacity: 0.42, roughness: 0.06, metalness: 0, rim: 0.7, power: 3.2, thickness: 1, film: 0.05, glow: 0, grain: 0, edgeFade: 0, face: 0.01, thin: false },
-  iridescent: { color: 0xeaf4ff, opacity: 0.04, roughness: 0.03, metalness: 0, rim: 0.8, power: 2.6, thickness: 0.6, film: 1, glow: 0, grain: 0, edgeFade: 0, face: 0.01, thin: true },
-  milky: { color: 0xf5eee2, opacity: 0.62, roughness: 0.28, metalness: 0, rim: 0.4, power: 2.4, thickness: 0.1, film: 0.1, glow: 0.3, grain: 0, edgeFade: 1, face: 0.01, thin: false },
-  mirror: { color: 0xeef3ff, opacity: 1, roughness: 0.04, metalness: 1, rim: 0.2, power: 3, thickness: 0, film: 0, glow: 0, grain: 0, edgeFade: 0, face: 0.01, thin: false },
+  clear: {
+    color: 0xd8ecff,
+    opacity: 0.05,
+    roughness: 0.04,
+    metalness: 0,
+    rim: 0.9,
+    power: 3.2,
+    thickness: 0.9,
+    film: 0.12,
+    glow: 0,
+    grain: 0,
+    edgeFade: 0,
+    face: 0.01,
+    thin: true,
+  },
+  frosted: {
+    color: 0xdfeaf6,
+    opacity: 0.2,
+    roughness: 0.6,
+    metalness: 0,
+    rim: 0.5,
+    power: 1.6,
+    thickness: 0.5,
+    film: 0,
+    glow: 0.3,
+    grain: 1,
+    edgeFade: 0,
+    face: 0.01,
+    thin: false,
+  },
+  tinted: {
+    color: 0x86d1b4,
+    opacity: 0.42,
+    roughness: 0.06,
+    metalness: 0,
+    rim: 0.7,
+    power: 3.2,
+    thickness: 1,
+    film: 0.05,
+    glow: 0,
+    grain: 0,
+    edgeFade: 0,
+    face: 0.01,
+    thin: false,
+  },
+  iridescent: {
+    color: 0xeaf4ff,
+    opacity: 0.04,
+    roughness: 0.03,
+    metalness: 0,
+    rim: 0.8,
+    power: 2.6,
+    thickness: 0.6,
+    film: 1,
+    glow: 0,
+    grain: 0,
+    edgeFade: 0,
+    face: 0.01,
+    thin: true,
+  },
+  milky: {
+    color: 0xf5eee2,
+    opacity: 0.62,
+    roughness: 0.28,
+    metalness: 0,
+    rim: 0.4,
+    power: 2.4,
+    thickness: 0.1,
+    film: 0.1,
+    glow: 0.3,
+    grain: 0,
+    edgeFade: 1,
+    face: 0.01,
+    thin: false,
+  },
+  mirror: {
+    color: 0xeef3ff,
+    opacity: 1,
+    roughness: 0.04,
+    metalness: 1,
+    rim: 0.2,
+    power: 3,
+    thickness: 0,
+    film: 0,
+    glow: 0,
+    grain: 0,
+    edgeFade: 0,
+    face: 0.01,
+    thin: false,
+  },
 };
 
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
@@ -182,7 +267,8 @@ const uEnvReflection = uniform(DEFAULT_LIGHTING.envReflection);
 /** 描くシーンに環境画像があるか（0/1）。描く直前にシーンから読む */
 const uHasEnv = uniform(0).onObjectUpdate(({ scene }, self) => {
   const sc = scene as THREE.Scene | undefined;
-  self.value = sc && (sc.environment || (sc as THREE.Scene & { environmentNode?: unknown }).environmentNode) ? 1 : 0;
+  self.value =
+    sc && (sc.environment || (sc as THREE.Scene & { environmentNode?: unknown }).environmentNode) ? 1 : 0;
 });
 /** 波紋の中心の閃光の強さの倍率（0〜1）。光の点滅を抑えるモード用 */
 const uFlash = uniform(1);
@@ -201,7 +287,8 @@ export function setGlassLighting(l: Partial<GlassLighting>): void {
     if (d.lengthSq() > 1e-9) (uKeyDir.value as THREE.Vector3).copy(d.normalize());
   }
   if (l.keyColor !== undefined) (uKeyColor.value as THREE.Color).set(l.keyColor);
-  if (l.keyIntensity !== undefined) uKeyIntensity.value = Math.max(0, Number.isFinite(l.keyIntensity) ? l.keyIntensity : 1);
+  if (l.keyIntensity !== undefined)
+    uKeyIntensity.value = Math.max(0, Number.isFinite(l.keyIntensity) ? l.keyIntensity : 1);
   if (l.envReflection !== undefined) uEnvReflection.value = clamp01(l.envReflection);
 }
 
@@ -265,7 +352,10 @@ class GlassNodeMaterial extends THREE.MeshStandardNodeMaterial {
    * 霧の中身（Fog・FogExp2・独自の fogNode）には依らない。fogNode は 1 回だけ評価する
    * （同じノードを2回使うと、three はその計算を一時変数にまとめて使い回すので、2回目に output を変えても値が変わらない）。
    */
-  override setupFog(builder: Parameters<THREE.MeshStandardNodeMaterial['setupFog']>[0], outputNode: Parameters<THREE.MeshStandardNodeMaterial['setupFog']>[1]) {
+  override setupFog(
+    builder: Parameters<THREE.MeshStandardNodeMaterial['setupFog']>[0],
+    outputNode: Parameters<THREE.MeshStandardNodeMaterial['setupFog']>[1],
+  ) {
     const fogNode = (builder as unknown as { fogNode?: THREE.Node<'vec4'> | null }).fogNode;
     if (!fogNode) return outputNode;
     const out = outputNode as THREE.Node<'vec4'>;
@@ -362,7 +452,11 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
    * 内側では視界のどこでも nv ≈ 1（縁がない）ので、縁の虹色・光のハイライトを nv ではなく画面上の半径で測る。
    * face を上げた物（膜の板）は内側扱いにしない。
    */
-  const insideW: THREE.Node<'float'> = params.doubleSided ? float(1).sub(smoothstep(radius.mul(0.9), radius.mul(1.1), camDist)).mul(1 - face) : float(0);
+  const insideW: THREE.Node<'float'> = params.doubleSided
+    ? float(1)
+        .sub(smoothstep(radius.mul(0.9), radius.mul(1.1), camDist))
+        .mul(1 - face)
+    : float(0);
 
   // ── 反射（視線の反射方向だけで描く。照明は setGlassLighting の共有 uniform） ──
   const refl = reflectVector;
@@ -375,7 +469,13 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
     .mul(fres)
     .mul(rimStrength * 1.25)
     // 殻の内側では、反射方向が「視線の真後ろ」になり、広いハイライトが視界の下などに大きな白い塊として出る。ほぼ消す
-    .add(uKeyColor.mul(keyBroad.add(keySharp)).mul(uKeyIntensity).mul(0.35 + rimStrength).mul(mix(float(1), float(0.1), insideW)))
+    .add(
+      uKeyColor
+        .mul(keyBroad.add(keySharp))
+        .mul(uKeyIntensity)
+        .mul(0.35 + rimStrength)
+        .mul(mix(float(1), float(0.1), insideW)),
+    )
     .mul(fakeScale);
 
   // ── 薄膜干渉の虹色 ──
@@ -393,10 +493,15 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
     } else if (tier === 'medium') {
       swirl = mx_noise_float(positionLocal.mul(2.1).add(drift));
     } else {
-      swirl = mx_noise_float(positionLocal.mul(2.1).add(drift)).mul(0.65).add(mx_noise_float(positionLocal.mul(4.7).add(drift.mul(1.8))).mul(0.35));
+      swirl = mx_noise_float(positionLocal.mul(2.1).add(drift))
+        .mul(0.65)
+        .add(mx_noise_float(positionLocal.mul(4.7).add(drift.mul(1.8))).mul(0.35));
     }
     // 時刻で全体の色が回る項は、外から見るときだけ（殻の内側では視界の全体がほぼ一様なので、全体の色が時間で移ってしまう）
-    const phase = thick.mul(0.5).add(swirl.mul(0.34)).add(uTime.mul(0.02).mul(float(1).sub(insideW)));
+    const phase = thick
+      .mul(0.5)
+      .add(swirl.mul(0.34))
+      .add(uTime.mul(0.02).mul(float(1).sub(insideW)));
     const wave = vec3(0, 0.33, 0.67).add(phase);
     const rainbow = vec3(0.5).add(vec3(0.5).mul(cos(wave.mul(6.28318))));
     // 色がきつすぎないよう白へ寄せる
@@ -413,7 +518,13 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
   // ── 内側のぼんやりした光（曇り・乳白が光を散らす） ──
   // 上は空の冷たい色、下は地面の暖かい色を受けて、丸みが出る（空と地面の色は擬似照明と同じ）
   const hemi = mix(uGround.mul(0.5).add(0.5), uSky.mul(0.5).add(0.5), normalWorld.y.mul(0.5).add(0.5));
-  const glow = spec.glow > 0 ? materialColor.rgb.mul(hemi).mul(spec.glow).mul(float(0.5).add(nv.mul(0.5))) : vec3(0);
+  const glow =
+    spec.glow > 0
+      ? materialColor.rgb
+          .mul(hemi)
+          .mul(spec.glow)
+          .mul(float(0.5).add(nv.mul(0.5)))
+      : vec3(0);
 
   // ── 縁の光（触れられる物に近づいたとき） ──
   const highlight = vec3(0.92, 0.97, 1.0).mul(uHighlight).mul(fres.mul(1.1).add(0.035));
@@ -428,18 +539,28 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
   //  ・カメラが球殻の内側にいる、または中心がカメラの横・後ろのときは、視線の正面から外へ
   const centerZSafe = centerZ.max(1e-3);
   const fragZSafe = positionView.z.negate().max(1e-4);
-  const projected = length(positionView.xy.div(fragZSafe).sub(centerView.xy.div(centerZSafe))).div(radius.div(centerZSafe));
+  const projected = length(positionView.xy.div(fragZSafe).sub(centerView.xy.div(centerZSafe))).div(
+    radius.div(centerZSafe),
+  );
   const gaze = gazeR.mul(1.5);
   const dSurface = mix(gaze, projected, cameraOutside);
   const dWorld = length(positionWorld.sub(uPulseOrigin.xyz)).div(radius.mul(1.1));
   const d = mix(dSurface, dWorld, uPulseOrigin.w);
   // 広がり方は最初が速く、だんだんゆっくり（水面の波紋）。縁を越えて抜けきる
-  const front = float(1).sub(float(1).sub(p).mul(float(1).sub(p))).mul(1.7);
+  const front = float(1)
+    .sub(float(1).sub(p).mul(float(1).sub(p)))
+    .mul(1.7);
   const q = d.sub(front).div(0.11); // 負になりうる。pow の底に負を渡すと未定義なので、2乗は掛け算で
   const ring = exp(q.mul(q).negate());
-  const trail = float(1).sub(smoothstep(front.sub(0.55), front, d)).mul(0.07);
+  const trail = float(1)
+    .sub(smoothstep(front.sub(0.55), front, d))
+    .mul(0.07);
   const fade = float(1).sub(p).pow(1.4);
-  const pulseTint = mix(vec3(1.0, 0.95, 0.86), mix(vec3(0.72), vec3(0.5).add(vec3(0.5).mul(cos(vec3(0, 0.33, 0.67).add(d.mul(0.7)).mul(6.28318)))), 0.7), filmStrength);
+  const pulseTint = mix(
+    vec3(1.0, 0.95, 0.86),
+    mix(vec3(0.72), vec3(0.5).add(vec3(0.5).mul(cos(vec3(0, 0.33, 0.67).add(d.mul(0.7)).mul(6.28318)))), 0.7),
+    filmStrength,
+  );
   // 視界いっぱいに広がる面（カメラが殻の内側、中心が横・後ろ）では穏やかに。触れた点があるとき・外から見るときは全力
   const calm = mix(float(0.4), float(1), max(cameraOutside, uPulseOrigin.w));
   const rippleRaw = pulseTint.mul(ring.add(trail)).mul(fade).mul(1.3).mul(calm).mul(uFlash);
@@ -452,14 +573,24 @@ export function createGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
   // 薄い殻（透明・虹色）の色は縁だけ。正面は face まで落とす（暗い背景では 3% の足し算でも視界全体の霞に見えるため）。
   // 色ガラス・曇り・乳白は面そのものに色がある物なので、正面でも色を残す
   const bodyFace = spec.thin ? float(face).add(smoothstep(0.05, 0.65, edge).mul(1 - face)) : float(1);
-  const body = isMirror ? vec3(0) : tint.mul(alpha).mul(bodyFace).mul(spec.glow > 0 ? mix(float(0.7), float(1), normalWorld.y.mul(0.5).add(0.5)) : float(1));
+  const body = isMirror
+    ? vec3(0)
+    : tint
+        .mul(alpha)
+        .mul(bodyFace)
+        .mul(spec.glow > 0 ? mix(float(0.7), float(1), normalWorld.y.mul(0.5).add(0.5)) : float(1));
   const user = materialEmissive; // params.emissive × emissiveIntensity（星や灯りの内側の光）
 
   material.opacityNode = alpha.clamp(0, 1);
   material.emissiveNode = body.add(reflection).add(film).add(glow).add(highlight).add(ripple).add(user);
   if (isMirror) {
     // 鏡は不透明で金属。環境画像がなくても真っ黒にならないよう、空と地面のグラデーションを薄く足す（環境画像があれば弱める）
-    material.emissiveNode = reflection.mul(0.9).add(rimTint.mul(0.1).mul(fakeScale)).add(highlight).add(ripple).add(user);
+    material.emissiveNode = reflection
+      .mul(0.9)
+      .add(rimTint.mul(0.1).mul(fakeScale))
+      .add(highlight)
+      .add(ripple)
+      .add(user);
     material.opacityNode = null;
   }
 
@@ -494,7 +625,8 @@ const sharedPool = new Map<string, Shared>();
 
 /** 引数の同じガラスを共有するための鍵（色は 16 進に揃える） */
 function sharedKey(kind: GlassKind, params: GlassParams, tier: QualityTier): string {
-  const c = (v: THREE.ColorRepresentation | undefined) => (v === undefined ? '' : new THREE.Color(v).getHexString());
+  const c = (v: THREE.ColorRepresentation | undefined) =>
+    v === undefined ? '' : new THREE.Color(v).getHexString();
   return [
     kind,
     tier,
@@ -549,12 +681,17 @@ export function sharedGlass(kind: GlassKind, params: GlassParams = {}, opts: Gla
  * 真鍮の細い枠（ゴンドラ、温室の鉄骨の飾り、街灯）。
  * 環境画像がない場面でも真っ黒にならないよう、反射方向の空と地面の色をごく薄く足す（環境画像があれば弱める）。
  */
-export function createBrass(params: { readonly color?: THREE.ColorRepresentation; readonly roughness?: number } = {}): THREE.Material {
+export function createBrass(
+  params: { readonly color?: THREE.ColorRepresentation; readonly roughness?: number } = {},
+): THREE.Material {
   const material = new THREE.MeshStandardNodeMaterial({
     color: params.color ?? 0xb08d57,
     roughness: params.roughness ?? 0.35,
     metalness: 1,
   });
-  material.emissiveNode = materialColor.rgb.mul(mix(uGround, uSky, smoothstep(-0.4, 0.5, reflectVector.y))).mul(0.14).mul(fakeScale);
+  material.emissiveNode = materialColor.rgb
+    .mul(mix(uGround, uSky, smoothstep(-0.4, 0.5, reflectVector.y)))
+    .mul(0.14)
+    .mul(fakeScale);
   return material;
 }
