@@ -6,17 +6,21 @@ import type { RidePose } from '../contracts/ride';
 import type { ScreenId } from '../contracts/ui';
 import { RIDE_DURATION } from '../config';
 import { createRide, generateRideData, streamingPlan } from '../ride';
-import { HOME_PLAN, planFor, sceneTimeFor } from './room-plan';
+import { HOME_PLAN, planFor, sceneScreenFor, sceneTimeFor } from './room-plan';
 
 const ride = createRide(generateRideData());
 
 describe('乗車の外では入口の部屋の計画', () => {
-  it('HOME_PLAN は待ち列・入口（lobby）と乗り場（platform）を見せ、最初の部屋（greenhouse）も読み込んでおく。凍結した定数', () => {
+  it('HOME_PLAN は待ち列・入口（lobby）と乗り場（platform）を見せて読み込む。温室は待ち列の間に読まない（初回の読み込み 10MB 以下。関門4。S-29）。凍結した定数', () => {
     expect([...HOME_PLAN.visible]).toEqual(['lobby', 'platform']);
-    expect(HOME_PLAN.keep).toEqual(expect.arrayContaining(['lobby', 'platform', 'greenhouse']));
+    expect([...HOME_PLAN.keep].sort()).toEqual(['lobby', 'platform']);
     expect(Object.isFrozen(HOME_PLAN)).toBe(true);
     expect(Object.isFrozen(HOME_PLAN.visible)).toBe(true);
     expect(Object.isFrozen(HOME_PLAN.keep)).toBe(true);
+  });
+
+  it('温室は乗車の頭から読み込み始める（膜の15秒前に描くまで45秒ある）', () => {
+    expect(planFor('riding', 0, ride).keep).toContain('greenhouse');
   });
 
   it('待ち列・入口・案内・棚・設定・乗り方・クレジットでは HOME_PLAN（時刻に依らず同じ参照。部屋の管理は参照で同じ計画かを比べる）', () => {
@@ -57,5 +61,21 @@ describe('ゴンドラの位置を決める時刻（降車の瞬間に回らな�
   it('ほかの画面（待ち列・入口・案内・棚・設定・乗り方・クレジット）は乗車の頭', () => {
     const screens: ScreenId[] = ['queue', 'home', 'guide', 'shelf', 'settings', 'howto', 'credits'];
     for (const s of screens) expect(sceneTimeFor(s, 300), s).toBe(0);
+  });
+});
+
+describe('小画面（棚・設定・乗り方・クレジット）は、開いた元の画面の景色のまま（S-25 レビュー2巡目 P3-1。S-29）', () => {
+  it('ライドフォトから開いた小画面は、ライドフォトの景色（降車の時刻と計画）', () => {
+    for (const sub of ['shelf', 'settings', 'howto', 'credits'] as const) {
+      expect(sceneScreenFor(sub, 'photo')).toBe('photo');
+      expect(sceneTimeFor(sceneScreenFor(sub, 'photo'), 0)).toBe(RIDE_DURATION);
+      expect(planFor(sceneScreenFor(sub, 'photo'), 0, ride)).toBe(planFor('photo', 0, ride));
+    }
+  });
+
+  it('入口から開いた小画面と、小画面でない画面は、その画面のまま', () => {
+    expect(sceneScreenFor('settings', 'home')).toBe('home');
+    expect(sceneScreenFor('settings', null)).toBe('settings');
+    for (const s of ['queue', 'home', 'guide', 'riding', 'pause', 'photo'] as const) expect(sceneScreenFor(s, 'photo')).toBe(s);
   });
 });
