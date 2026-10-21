@@ -93,6 +93,8 @@
 
 - **描画の文脈（RenderContexts）の鍵は、描画先の添付の形式と callDepth**。画面の描画は画面効果の scene pass の中（callDepth 1）、撮影は直接（callDepth 0）なので、同じ物でも別の文脈になり、シェーダを作り直す。撮影の下ごしらえ（compileAsync）は撮影と同じ描画先の条件で行う。
 - **RenderObject は「物・材質・描画先・照明」で引かれる**。撮影の間だけ `renderer.lighting` を撮影専用の Lighting に差し替え、画面の描画の状態と分ける（VR の両眼と撮影の単眼が状態を壊し合わない）。差し替えは three 自身（PassNode）も使う手。例外のときも finally で戻す。
-- **compileAsync は同期の部分で描画先と照明を取り込み**、ノードを組み立てる非同期の部分は元に戻した状態で走る。その中で `getOutputRenderTarget().multiview` を読むので、VR で multiview を有効にすると下ごしらえの鍵がずれる（いまは使っていない）。visible=false の物はコンパイルされない。
+- **compileAsync は同期の部分で描画先と照明を取り込み**、ノードを組み立てる非同期の部分は元に戻した状態で走る。その中で `getOutputRenderTarget().multiview` を読むので、VR で multiview を有効にすると下ごしらえの鍵がずれる（いまは使っていない）。visible=false の物はコンパイルされない（撮影の部屋の下は、下ごしらえの同期の部分の間だけ visible を立て frustumCulled を外して準備し、必ず戻す）。物ごとの compileAsync(obj, camera, scene) はその物自身の visible だけを見る。
 - **出力パス（トーンマップの変換の板）は描画先ごとに作り直され、1回目と2回目以降で別のコードになる**（uniform の宣言の順）。warmUpCapture を2回通す。
 - **霧（scene.fog）は物ごとに霧のノードを作る**。部屋の空気が変わるたびに Fog を作り直すと、見えている材質がすべて作り直される。霧の物は使い回し、色と距離だけを書き換える（S-30 レビュー1巡目）。
+- **compileAsync は window の rAF（yieldToMain）で主スレッドを返す**。immersive の間に window の rAF が止まる端末では作業が終わらず、撮影の列が詰まる。VR の間は `scheduler.yield` がない端末では下ごしらえをしない（src/app/app.ts の prepareShots）。
+- **霧を null と行き来すると、見えている材質がすべて作り直される**（霧のある部屋とない部屋の境目、480 秒・750 秒で WebGL2 2 秒前後。S-29 の先読みで扱う）。
