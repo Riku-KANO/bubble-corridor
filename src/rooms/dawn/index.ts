@@ -215,6 +215,8 @@ export function createDawnRoom(): RoomModule {
         mesh.material = glass.material;
         mesh.renderOrder = 3;
         mesh.userData.clearanceExempt = true;
+        // 天球の外殻（role=shell）と同じ通り抜ける面。ゴンドラが膜の所でこの面を抜けるのは 11:00 で、代役は 11:10 まで見えない（ADR-0013）
+        mesh.userData.passThrough = true;
         mesh.visible = false;
         standIn.push(mesh);
       }
@@ -323,7 +325,8 @@ export function createDawnRoom(): RoomModule {
       materials.push(proxyMat);
       proxy = new THREE.Mesh(proxyGeo, proxyMat);
       proxy.name = 'dawn:water-touch';
-      proxy.userData = { role: 'water_touch', clearanceExempt: true };
+      // 実質は水面（レールの下の水の高さの、触れる判定用の見えない板）。通り抜ける物として距離の確かめから除く（ADR-0013）
+      proxy.userData = { role: 'water_touch', clearanceExempt: true, passThrough: true };
       root.add(proxy);
       const proxyRef = proxy;
       waterTouch = {
