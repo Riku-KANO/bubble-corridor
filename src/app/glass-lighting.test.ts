@@ -25,6 +25,25 @@ describe('部屋ごとのガラスの擬似照明', () => {
     expect(Math.abs(hsl(green.sky).h - hsl('#9fd39a').h) * 360).toBeLessThan(40);
   });
 
+  it('地面は空気の色と琥珀の間で作り、緑を通らない（雨の灰青の地面が緑がかった灰にならない。レビュー1巡目 P2-1）', () => {
+    for (const bg of ['#5d6b78', '#5d6f86', '#6a7480', '#3c4a5a', '#2a3340']) {
+      const g = hsl(glassLightingFor(atm(bg)).ground);
+      const hue = g.h * 360;
+      expect(hue < 70 || hue > 180 || g.s < 0.08, `${bg} の地面の色相 ${hue.toFixed(0)}°`).toBe(true);
+    }
+  });
+
+  it('地面は空より暗い（線形の輝度で。暗い部屋でも）', () => {
+    const lum = (c: THREE.ColorRepresentation) => {
+      const x = new THREE.Color(c);
+      return 0.2126 * x.r + 0.7152 * x.g + 0.0722 * x.b;
+    };
+    for (const bg of ['#cfe6c8', '#5d6b78', '#0b1030', '#070a1c', '#1a1030', '#f2c9a0']) {
+      const l = glassLightingFor(atm(bg));
+      expect(lum(l.ground), bg).toBeLessThan(lum(l.sky));
+    }
+  });
+
   it('夜（暗い空気）ではハイライトを弱く、明るい部屋では強く', () => {
     const night = glassLightingFor(atm('#070a1c'));
     const day = glassLightingFor(atm('#dfeee0'));
