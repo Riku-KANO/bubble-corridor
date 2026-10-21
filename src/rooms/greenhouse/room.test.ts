@@ -4,6 +4,7 @@ import { INTERACTION, MOMENT_BARS, SEC_PER_BAR } from '../../config';
 import {
   backgroundHsl,
   clearanceViolations,
+  cues,
   drawStats,
   expectBlenderRoom,
   expectExitMembrane,
@@ -12,7 +13,9 @@ import {
   expectRoomContract,
   loadRoom,
   reachableFraction,
+  sectionTimes,
   shapeClearanceViolations,
+  timeDeterminismDiffs,
 } from '../testing';
 import { createGreenhouseRoom } from './index';
 
@@ -63,6 +66,35 @@ describe('第1室 朝露の温室', () => {
   it('朝の明るい空気（若葉の緑と白）', async () => {
     const { room } = await loadRoom(createGreenhouseRoom);
     expect(backgroundHsl(room).l).toBeGreaterThan(0.6);
+  });
+
+  it('柱「時刻から決める」: 通しで乗った絵と、その時刻から始めた絵が同じ（露の光の輪が凍って残らない。レビュー1巡目 P1-3）', async () => {
+    const dew = cues.find((c) => c.name === 'greenhouse.dewfall')!.t;
+    const { t0 } = sectionTimes('greenhouse');
+    for (const at of [t0 + 20, BLOOM - 3, BLOOM + 1, dew + 1, dew + 3, dew + 30]) {
+      expect(await timeDeterminismDiffs(createGreenhouseRoom, t0 - 5, at), `t=${at.toFixed(1)}`).toEqual([]);
+    }
+  });
+
+  it('光の強い場面（2:40 の花）の直前は少し暗くし、明るさの差で驚きを作る（レビュー1巡目 P1-4）', async () => {
+    const h = await loadRoom(createGreenhouseRoom);
+    const { t0 } = sectionTimes('greenhouse');
+    h.frame(t0 + 30);
+    const room = h.room.atmosphere.exposure;
+    h.frame(BLOOM - 2);
+    const before = h.room.atmosphere.exposure;
+    h.frame(BLOOM + 1);
+    const after = h.room.atmosphere.exposure;
+    expect(before, '直前は部屋より暗い').toBeLessThanOrEqual(room - 0.15);
+    expect(after, '花が開いたら戻る').toBeGreaterThanOrEqual(before + 0.15);
+  });
+
+  it('ガラスの擬似照明は空気で渡す（斜めに差し込む朝日。レビュー1巡目 P2-2）', async () => {
+    const h = await loadRoom(createGreenhouseRoom);
+    h.frame(120);
+    const l = h.room.atmosphere.glassLighting;
+    expect(l).toBeDefined();
+    expect(l!.keyDir, '朝日の向き').toBeDefined();
   });
 
   it('REN-3 描画の予算（描く物 120 以下、三角形 120万以下、low は high の6割以下）', async () => {

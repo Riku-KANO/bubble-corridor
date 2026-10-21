@@ -1,15 +1,21 @@
 // S-20 乗り場「泡の発着場」と降車（親が作成。実装担当は変更しない）
+import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
+import type { RidePose } from '../../contracts/ride';
+import { GONDOLA_DIAMETER, MOTION } from '../../config';
 import {
   backgroundHsl,
   clearanceViolations,
+  cues,
   drawStats,
   expectBlenderRoom,
   expectExitMembrane,
   expectRoomContract,
   loadRoom,
+  ride,
   sectionTimes,
   shapeClearanceViolations,
+  timeDeterminismDiffs,
 } from '../testing';
 import { createPlatformRoom } from './index';
 
@@ -53,6 +59,56 @@ describe('乗り場と降車', () => {
     expect(before.l).toBeLessThan(0.45);
     h.play(sectionTimes('departure').t0, sectionTimes('departure').t0 + 15, 0.5);
     expect(backgroundHsl(h.room).l).toBeGreaterThan(before.l + 0.15);
+  });
+
+  it('RIDE-8 触れた吊られた泡は、揺れてもゴンドラの表面から 0.5m 以上（押された向きへ振れる。レビュー1巡目 P1-1）', async () => {
+    const need = GONDOLA_DIAMETER / 2 + MOTION.clearanceMin;
+    const pose: RidePose = { x: 0, y: 0, z: 0, yaw: 0, speed: 0, s: 0, section: 'platform', sectionProgress: 0 };
+    const h = await loadRoom(createPlatformRoom);
+    const { t0, t1 } = sectionTimes('platform');
+    const bubbles = h.room.touchables.filter((t) => t.kind === 'hanging-bubble');
+    const center = new THREE.Vector3();
+    for (const b of bubbles) {
+      // ゴンドラがいちばん近づく時刻に触れる（最も危ない場合）
+      let best = t0;
+      let bestD = Infinity;
+      for (let t = t0; t <= t1; t += 0.5) {
+        ride.poseAt(t, 'standard', pose);
+        h.frame(t, 0.5);
+        h.room.root.updateMatrixWorld(true);
+        const d = b.object.getWorldPosition(center).distanceTo(new THREE.Vector3(pose.x, pose.y, pose.z));
+        if (d < bestD) [bestD, best] = [d, t];
+      }
+      h.frame(best - 0.1, 1 / 30);
+      ride.poseAt(best - 0.1, 'standard', pose);
+      b.onTouch({ t: best - 0.1, source: 'pointer', point: [pose.x, pose.y, pose.z] });
+      for (let t = best - 0.1; t <= best + 3; t += 1 / 30) {
+        h.frame(t, 1 / 30);
+        ride.poseAt(t, 'standard', pose);
+        // 泡は吊る点（親）ごと回るので、部屋全体の世界の行列を更新してから測る
+        h.room.root.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(b.object);
+        const d = box.distanceToPoint(new THREE.Vector3(pose.x, pose.y, pose.z));
+        expect(d, `${b.id} の t=${t.toFixed(2)} の距離`).toBeGreaterThanOrEqual(need);
+      }
+    }
+  });
+
+  it('柱「時刻から決める」: 通しで乗った絵と、その時刻から始めた絵が同じ', async () => {
+    for (const at of [20, 45, 58, 762, 775]) {
+      const from = at < 100 ? 0 : sectionTimes('departure').t0 - 5;
+      expect(await timeDeterminismDiffs(createPlatformRoom, from, at), `t=${at}`).toEqual([]);
+    }
+  });
+
+  it('ガラスの擬似照明は空気で渡す（夜明け前と降車の朝。レビュー1巡目 P2-2）', async () => {
+    const h = await loadRoom(createPlatformRoom);
+    h.frame(30);
+    expect(h.room.atmosphere.glassLighting, '夜明け前').toBeDefined();
+    const before = h.room.atmosphere.glassLighting;
+    h.play(sectionTimes('departure').t0, sectionTimes('departure').t0 + 15, 0.5);
+    expect(h.room.atmosphere.glassLighting, '降車の朝').toBeDefined();
+    expect(h.room.atmosphere.glassLighting).not.toBe(before);
   });
 
   it('REN-3 描画の予算（描く物 80 以下、三角形 60万以下）', async () => {

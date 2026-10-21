@@ -47,6 +47,10 @@ describe('ゴンドラ（泡）', () => {
     expect(drawStats(createGondola().root).triangles).toBeLessThanOrEqual(150_000);
   });
 
+  it('REN-3 乗車中ずっと毎フレーム描くので、描く物は 10 以下（動かない真鍮は色ごとにまとめる。VR では目ごとに倍。レビュー1巡目 P2-3）', () => {
+    expect(drawStats(createGondola().root).drawables).toBeLessThanOrEqual(10);
+  });
+
   it('dispose で形を解放する', () => {
     const g = createGondola();
     const geos: THREE.BufferGeometry[] = [];
