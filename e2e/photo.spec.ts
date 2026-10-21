@@ -82,3 +82,44 @@ test('撮影はキューの時刻どおりに描く（下ごしらえを待っ�
     expect(c, `${i + 1}枚目の撮影の時刻`).toBeLessThan(cues[i]! + 1);
   });
 });
+
+for (const [name, q] of [
+  ['WebGPU（あれば）', ''],
+  ['WebGL2（VR と同じ経路）', '&webgl'],
+] as const) {
+  test(`${name}: 温室の 2:40 の写真に白いヴェールが載らない（下ごしらえをして撮っても、しないで撮っても同じ明るさ。S-29 レビュー1巡目 P1-2）`, async ({ browser }) => {
+    test.setTimeout(150_000);
+    // 撮った写真（撮影の描き出し）の平均の明るさ。?debug の __utakata.lastCapture（撮影が描いた画像の Blob）から測る
+    const shoot = async (from: number) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await page.goto(`/?debug&t=${from}&rate=1${q}`);
+      await expect
+        .poll(() => page.evaluate(() => ((globalThis as unknown as { __utakata?: { captures?: number[] } }).__utakata?.captures ?? []).length), {
+          timeout: 60_000,
+          intervals: [250],
+        })
+        .toBeGreaterThanOrEqual(1);
+      await expect
+        .poll(() => page.evaluate(() => Boolean((globalThis as unknown as { __utakata?: { lastCapture?: Blob } }).__utakata?.lastCapture)), { timeout: 15_000 })
+        .toBe(true);
+      const mean = await page.evaluate(async () => {
+        const blob = (globalThis as unknown as { __utakata: { lastCapture: Blob } }).__utakata.lastCapture;
+        const bmp = await createImageBitmap(blob);
+        const w = 320;
+        const h = Math.round((bmp.height / bmp.width) * w);
+        const c = new OffscreenCanvas(w, h);
+        const g = c.getContext('2d')!;
+        g.drawImage(bmp, 0, 0, w, h);
+        const d = g.getImageData(0, 0, w, h).data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4) sum += 0.2126 * d[i]! + 0.7152 * d[i + 1]! + 0.0722 * d[i + 2]!;
+        return sum / (d.length / 4);
+      });
+      await page.close();
+      return mean;
+    };
+    const prepared = await shoot(146); // 撮影の 10 秒前から下ごしらえが走る
+    const plain = await shoot(158.5); // 下ごしらえが間に合わない（撮影が自分で組む）
+    expect(Math.abs(prepared - plain) / plain, `下ごしらえあり ${prepared.toFixed(1)} / なし ${plain.toFixed(1)}`).toBeLessThan(0.05);
+  });
+}

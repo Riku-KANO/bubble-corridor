@@ -1,6 +1,6 @@
 // S-29 部屋が初めて見える瞬間に画面が止まらない（親が作成。実装担当は変更しない）
 // 次の部屋は膜の15秒前から描く。そのとき初めてシェーダを組むと、WebGL2（VR と同じ経路）で万華鏡が 0.35 秒止まった（S-21 の報告）。
-// 前の部屋にいる間に先に組んでおく（renderer.compileAsync。three r186 の内部の挙動は ADR-0014）。膜の20秒前から膜の後まで、フレームの間隔を測る。
+// 前の部屋にいる間に先に組んでおく（renderer.compileAsync。three r186 の内部の挙動は ADR-0014）。膜の20秒前から膜の8秒後まで（膜の5秒後に始まる次の部屋の読み込みも含む）、フレームの間隔を測る。
 // 膜を通る瞬間の霧・環境画像・ライトマップの切り替えでの作り直しも含む（S-30 のレビュー: 霧と null の行き来で 480・750 秒に約2秒）。
 import { expect, test } from '@playwright/test';
 
@@ -13,7 +13,7 @@ for (const [room, membrane] of [
   ['夜明けの岸（降車の乗り場も遠くに描き始める）', 660],
   ['降車の乗り場（岸から。霧と環境画像の切り替え）', 750],
 ] as const) {
-  test(`WebGL2（VR と同じ経路）: ${room}が見え始めるとき（膜 ${membrane} 秒の 15 秒前）に、フレームの間隔が 100ms を超えない`, async ({ page }) => {
+  test(`WebGL2（VR と同じ経路）: ${room}が見え始めるとき（膜 ${membrane} 秒の 15 秒前）から膜の8秒後まで（次の部屋の読み込みも含む）、フレームの間隔が 100ms を超えない`, async ({ page }) => {
     test.setTimeout(120_000);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -25,7 +25,7 @@ for (const [room, membrane] of [
       while (g.__utakata.t < m - 20) await new Promise((r) => requestAnimationFrame(r));
       let last = performance.now();
       let w = 0;
-      while (g.__utakata.t < m + 2) {
+      while (g.__utakata.t < m + 8) {
         await new Promise((r) => requestAnimationFrame(r));
         const now = performance.now();
         w = Math.max(w, now - last);
