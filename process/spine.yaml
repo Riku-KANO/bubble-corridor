@@ -242,7 +242,7 @@ slices:
   milestone: M1
   requirements: [PHO-1, REN-3]
   depends_on: [S-21]
-  paths: [src/photo/**, dev/photo.html, src/dev/photo/**]
-  tests: []
-  status: todo
-  notes: 'S-21 レビュー2巡目: 5:10.5（photo.capture@93、雨粒が止まる見どころの最中）の撮影の描き出しで 467ms 止まる（2560×1440 の描き出し）。VR の 72fps では問題になる。撮影を数フレームに分ける、解像度の段を下げる、描き出しを見どころから少しずらす、VR では撮影の描き出しを止まらない形にする、などを検討。撮影の warmUpCapture は S-24 で入っている'
+  paths: [src/photo/**, src/app/**, e2e/photo.spec.ts, dev/photo.html, src/dev/photo/**]
+  tests: [e2e/photo.spec.ts]
+  status: red
+  notes: 'S-21 レビュー2巡目: 5:10.5（photo.capture@93、雨粒が止まる見どころの最中）の撮影の描き出しで 467ms 止まる（2560×1440 の描き出し）。VR の 72fps では問題になる。撮影を数フレームに分ける、解像度の段を下げる、描き出しを見どころから少しずらす、VR では撮影の描き出しを止まらない形にする、などを検討。撮影の warmUpCapture は S-24 で入っている 2026-10-21 親がテストを作成（e2e/photo.spec.ts: ?t=300 から通しで 5:10.5 の撮影の前後 7 秒のフレームの間隔、WebGPU と WebGL2（VR の経路）で 50ms 未満）。赤の証跡（本番のビルド）: WebGPU 89ms、WebGL2 95ms（開発サーバーの WebGL2 では 483ms）。app の撮影の呼び方も変えてよいよう paths に src/app を足した。実装 消費 0/3'
