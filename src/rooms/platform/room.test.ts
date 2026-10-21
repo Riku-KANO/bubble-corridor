@@ -6,7 +6,6 @@ import { GONDOLA_DIAMETER, MOTION } from '../../config';
 import {
   backgroundHsl,
   clearanceViolations,
-  cues,
   drawStats,
   expectBlenderRoom,
   expectExitMembrane,
