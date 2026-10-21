@@ -17,10 +17,10 @@ for (const [name, query, backend] of [
     });
     await page.goto(`/?debug&t=588&rate=0.1${query}`);
     await expect.poll(async () => (await read(page))?.section, { timeout: 30_000 }).toBe('celestial');
-    await page.waitForTimeout(1500);
+    // fps は温まってから（シェーダの準備や読み込みの直後の重さを除く）。負荷の高い端末でも、10 秒のうちに一度 5 を超えればよい
+    await expect.poll(async () => (await read(page))?.fps ?? 0, { timeout: 10_000, intervals: [500] }).toBeGreaterThan(5);
     const s = await read(page);
     expect(s?.backend).toMatch(backend);
-    expect(s?.fps ?? 0).toBeGreaterThan(5);
     const png = await page.screenshot({ clip: { x: 160, y: 120, width: 960, height: 480 } });
     expect(png.length).toBeGreaterThan(8000);
     expect(errors, errors.join('\n')).toEqual([]);

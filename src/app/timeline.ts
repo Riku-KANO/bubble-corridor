@@ -4,7 +4,7 @@
 import { CELESTIAL_BLACKOUT_SEC, FX_TIMELINE, TRANSITION_SEC } from '../config';
 import type { Cue } from '../contracts/events';
 import type { ComfortMode } from '../contracts/ids';
-import { smoothstep } from '../core/easing';
+import { easeGlass, smoothstep } from '../core/easing';
 
 /** 殻が閉じ始める乗車の秒（ゴンドラが浮かび上がった後）。閉じる音もこの時刻に鳴らす */
 export const BOARD_START_SEC = FX_TIMELINE.boardStartSec;
@@ -76,6 +76,12 @@ function timesOf(cues: readonly Cue[]): Times {
 /** smoothstep。始点が決まっていない（キューシートにその出来事がない）ときは 0（NaN を作らない） */
 const ramp = (from: number, to: number, t: number): number => (Number.isFinite(from) ? smoothstep(from, to, t) : 0);
 
+/**
+ * ガラスの曲線（ゆっくり始まって粘りながら止まる）で from〜to を 0〜1 に進める。始点がないときは 0。
+ * 動きの曲線は作品で1つ（ADR-0011）。殻の閉じ開きという「動き」はこれにする。明るさ・折り返し・ブルームの強さの移り変わりは smoothstep のまま
+ */
+const glassRamp = (from: number, to: number, t: number): number => (Number.isFinite(from) ? easeGlass((t - from) / (to - from)) : 0);
+
 /** 乗車の外（またはキューシートに何もないとき）の値 */
 function rest(out: FxTimeline): FxTimeline {
   out.bubble = 0;
@@ -101,9 +107,9 @@ export function fxAt(
   if (!options.riding) return out;
   const times = timesOf(cues);
 
-  // 泡の殻: 乗車の頭で下から上へ閉じ（2秒）、降車で上から下へ開く（2秒）
+  // 泡の殻: 乗車の頭で下から上へ閉じ（2秒）、降車で上から下へ開く（2秒）。閉じ開きの曲線はガラスの曲線（動きの曲線は1つ）
   const boarding = TRANSITION_SEC.boarding;
-  out.bubble = smoothstep(BOARD_START_SEC, BOARD_START_SEC + boarding, t) * (1 - ramp(times.open, times.open + boarding, t));
+  out.bubble = glassRamp(BOARD_START_SEC, BOARD_START_SEC + boarding, t) * (1 - glassRamp(times.open, times.open + boarding, t));
 
   // 膜: 通る瞬間に 1、前後に半分ずつ（0.6秒）で 0
   const half = TRANSITION_SEC.membrane / 2;

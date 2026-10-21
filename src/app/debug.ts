@@ -3,6 +3,8 @@ import type * as THREE from 'three/webgpu';
 
 export interface DebugSample {
   readonly frameMs: number;
+  /** このフレームの時刻（フレームの頭で読んだ performance.now()、ミリ秒）。t はこの時刻に読んだ乗車の時計 */
+  readonly frameAt: number;
   readonly t: number;
   readonly section: string;
   readonly info: THREE.Renderer['info'];
@@ -23,7 +25,7 @@ export function createDebugOverlay(root: HTMLElement, backend: string) {
   const TEXT_INTERVAL_MS = 250;
   let textAcc = TEXT_INTERVAL_MS;
   // e2e と snap が読むための値（window.__utakata）
-  const shared: Record<string, unknown> = { fps: 0, calls: 0, triangles: 0, t: 0, section: '', screen: '', backend };
+  const shared: Record<string, unknown> = { fps: 0, calls: 0, triangles: 0, t: 0, frameAt: 0, section: '', screen: '', backend };
   (globalThis as unknown as { __utakata?: typeof shared }).__utakata = shared;
   return {
     /** 操作の口と、読むたびに計算する値（関数はそのまま、getter にして出す） */
@@ -46,6 +48,7 @@ export function createDebugOverlay(root: HTMLElement, backend: string) {
       shared.calls = s.info.render.drawCalls;
       shared.triangles = s.info.render.triangles;
       shared.t = s.t;
+      shared.frameAt = s.frameAt;
       shared.section = s.section;
       shared.screen = s.screen;
       textAcc += s.frameMs;
