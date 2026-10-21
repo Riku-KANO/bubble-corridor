@@ -1,6 +1,6 @@
 // 扉の状態（rooms-b の実装担当のテスト。INT-8 の見た目の細部、ADR-0013 の表し方）
 import { describe, expect, it } from 'vitest';
-import { DOOR_DIM_SEC, DOOR_OPEN_SEC, DoorChoices, createDoorLook, type DoorSelection } from './doors';
+import { DOOR_DIM_SEC, DOOR_OPEN_SEC, DOOR_REPICK_SEC, DoorChoices, createDoorLook, type DoorSelection } from './doors';
 
 const APPEAR = 350;
 const DECIDE = 356.67;
@@ -67,5 +67,24 @@ describe('扉の状態', () => {
     d.pick('amber', 352);
     d.rewind(200);
     expect(d.selectedAt(355, sel()).door).toBeNull();
+  });
+});
+
+describe('扉の選び直しの間引き（光の明滅の上限）', () => {
+  it('別の扉への選び直しは 1 拍に 1 回まで。同じ扉にもう一度触れても選び直しではない', () => {
+    const d = new DoorChoices(APPEAR, DECIDE, 'lapis', null);
+    expect(d.pick('amber', 351)).toBe(true);
+    expect(d.pick('amber', 351.2)).toBe(false);
+    expect(d.pick('lapis', 351.3)).toBe(false);
+    expect(d.pick('lapis', 351 + DOOR_REPICK_SEC + 0.01)).toBe(true);
+    expect(d.selectedAt(353, sel()).door).toBe('lapis');
+  });
+
+  it('交互に触れ続けても、入れ替わりは 1 秒に 3 回未満', () => {
+    const d = new DoorChoices(APPEAR, DECIDE, 'lapis', null);
+    const changes: number[] = [];
+    for (let i = 0, t = 351; t < DECIDE; i++, t += 0.15) if (d.pick(i % 2 === 0 ? 'amber' : 'lapis', t)) changes.push(t);
+    expect(changes.length).toBeGreaterThanOrEqual(2);
+    for (const t of changes) expect(changes.filter((x) => x >= t && x < t + 1).length).toBeLessThan(3);
   });
 });

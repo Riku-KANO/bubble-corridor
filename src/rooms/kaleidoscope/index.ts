@@ -33,6 +33,13 @@ const HIDDEN = { ds: 52, angDeg: 214, rad: 3.6, r: 0.07 };
  * シェーダの式に埋め込まれるので、そろえると 1 つのシェーダで済む（初めて見えたときの組み立てが短い）。色・発光・不透明度は材質ごと
  */
 const COLOR_GLASS = { rim: 0.85, iridescence: 0.3 } as const;
+/**
+ * 扉が変わったとき、金と青の色を混ぜて替える秒（膜の 15 秒前から見えているので、一瞬で入れ替えない）。
+ * 混ぜは「扉が変わった時刻」からの時刻で決める（フレームの積み上げにしない）。部屋の空気は半ばで替える
+ */
+const DOOR_BLEND_SEC = 0.8;
+/** 出口の膜の向こう（天球の暗がり）が暗い緑の円に見えないよう、膜をかすかに部屋の光の色で光らせる強さ */
+const EXIT_GLOW = 0.22;
 /** 触れたガラス片がくるりと一回転する秒 */
 const SPIN_SEC = 0.8;
 
@@ -120,7 +127,14 @@ export function createKaleidoscopeRoom(): RoomModule {
   const uLight = uniform(new THREE.Color(PALETTES.lapis.light));
   const uGlow = floatUniform(2.2);
   let door: DoorChoice = DEFAULT_DOOR;
+  /** 混ぜの元の扉と、扉が変わった時刻（混ぜ終わっていれば -Infinity）、最後に当てた混ぜ具合 */
+  let fromDoor: DoorChoice = DEFAULT_DOOR;
+  let doorAt = -Infinity;
+  let appliedK = -1;
   let atmosphere: Atmosphere = PALETTES[door].atmosphere;
+  let exitGlass: GlassHandle | null = null;
+  const mixA = new THREE.Color();
+  const mixB = new THREE.Color();
   let prismGlass: GlassHandle | null = null;
   let panelMats: THREE.MeshStandardNodeMaterial[] = [];
   let ctxRef: RoomContext | null = null;
@@ -179,29 +193,43 @@ export function createKaleidoscopeRoom(): RoomModule {
     return out.copy(axisQ).multiply(tmpQ2.setFromAxisAngle(zAxis, ang));
   }
 
-  function applyPalette() {
-    const p = PALETTES[door];
-    atmosphere = p.atmosphere;
-    (uTint.value as THREE.Color).copy(p.tint);
-    (uLight.value as THREE.Color).set(p.light);
-    if (prismGlass) {
-      const m = prismGlass.material as THREE.MeshStandardMaterial;
-      m.color.set(p.light);
-      m.emissive.set(p.light);
-    }
-    for (const m of panelMats) m.color.set(p.panel);
-    for (const r of rosettes) {
-      setShardColor(r.petals, p.glass[r.index % p.glass.length]);
-      setShardColor(r.jewels, p.glass[(r.index + 3) % p.glass.length]);
-    }
-    for (let j = 0; j < shardColorHandles.length; j++) setShardColor(shardColorHandles[j], p.glass[(j * 2) % p.glass.length]);
-    for (const ts of touchShards) setShardColor(ts.glass, p.glass[ts.colorIdx % p.glass.length]);
+  /** 元の扉の色 a と今の扉の色 b を k で混ぜた色（out に書く。線形で混ぜる） */
+  function mixHex(a: number, b: number, k: number, out: THREE.Color): THREE.Color {
+    return out.set(a).lerp(mixB.set(b), k);
   }
 
-  function setShardColor(g: GlassHandle, color: number) {
+  /** 金と青の色を k（0: 元の扉、1: 今の扉）で混ぜて当てる。空気（背景・霧・ガラスの擬似照明）は半ばで替える */
+  function applyPalette(k: number) {
+    const a = PALETTES[fromDoor];
+    const p = PALETTES[door];
+    atmosphere = k < 0.5 ? a.atmosphere : p.atmosphere;
+    (uTint.value as THREE.Color).copy(a.tint).lerp(p.tint, k);
+    mixHex(a.light, p.light, k, uLight.value as THREE.Color);
+    if (prismGlass) {
+      const m = prismGlass.material as THREE.MeshStandardMaterial;
+      mixHex(a.light, p.light, k, m.color);
+      m.emissive.copy(m.color);
+    }
+    if (exitGlass) (exitGlass.material as THREE.MeshStandardMaterial).emissive.copy(uLight.value as THREE.Color);
+    for (const m of panelMats) mixHex(a.panel, p.panel, k, m.color);
+    for (const r of rosettes) {
+      setShardColor(r.petals, mixHex(a.glass[r.index % a.glass.length], p.glass[r.index % p.glass.length], k, mixA));
+      setShardColor(r.jewels, mixHex(a.glass[(r.index + 3) % a.glass.length], p.glass[(r.index + 3) % p.glass.length], k, mixA));
+    }
+    for (let j = 0; j < shardColorHandles.length; j++) setShardColor(shardColorHandles[j], mixHex(a.glass[(j * 2) % a.glass.length], p.glass[(j * 2) % p.glass.length], k, mixA));
+    for (const ts of touchShards) setShardColor(ts.glass, mixHex(a.glass[ts.colorIdx % a.glass.length], p.glass[ts.colorIdx % p.glass.length], k, mixA));
+    appliedK = k;
+  }
+
+  /** 時刻 t の混ぜ具合（扉が変わった時刻からの時刻だけで決まる） */
+  function blendAt(t: number): number {
+    return doorAt === -Infinity ? 1 : smooth(doorAt, doorAt + DOOR_BLEND_SEC, t);
+  }
+
+  function setShardColor(g: GlassHandle, color: THREE.Color) {
     const m = g.material as THREE.MeshStandardMaterial;
-    m.color.set(color);
-    m.emissive.set(color);
+    m.color.copy(color);
+    m.emissive.copy(color);
   }
 
   async function load(ctx: RoomContext) {
@@ -373,7 +401,7 @@ export function createKaleidoscopeRoom(): RoomModule {
           shard.touchAt = e.t;
           entry.colorIdx++;
           const color = PALETTES[door].glass[entry.colorIdx % PALETTES[door].glass.length];
-          setShardColor(glass, color);
+          setShardColor(glass, mixA.set(color));
           const c = worldToCyl(o.getWorldPosition(tmpP), { s: 0, ang: 0, rad: 0 });
           echoes.push({ t: e.t, s: c.s, color });
         },
@@ -385,8 +413,10 @@ export function createKaleidoscopeRoom(): RoomModule {
     // 膜（天球へ）
     const mem = findAll(scene, (ud) => ud.role === 'membrane')[0] as THREE.Mesh | undefined;
     if (mem) {
-      const h = createGlass('iridescent', { color: 0xf0f4ff, opacity: 0.04, iridescence: 1, face: 0.14, rim: 0.7, doubleSided: true });
+      // 正面の虹色は控えめに、部屋の光の色でかすかに光らせる（向こうの暗がりが暗い緑の円に見えない）
+      const h = createGlass('iridescent', { color: 0xf0f4ff, opacity: 0.04, iridescence: 1, face: 0.05, rim: 0.7, doubleSided: true, emissive: PALETTES.lapis.light, emissiveIntensity: EXIT_GLOW });
       handles.push(h);
+      exitGlass = h;
       mem.material = h.material;
       mem.renderOrder = 5;
     }
@@ -420,17 +450,23 @@ export function createKaleidoscopeRoom(): RoomModule {
       },
     });
 
-    applyPalette();
+    applyPalette(1);
     // 最初の配置（時刻 0 の姿。テストと最初の描画で同じ）
     placeShards(0, 'standard');
   }
 
   let shardColorHandles: GlassHandle[] = [];
 
+  /**
+   * 扉が変わった。乗車の途中なら、いまの時刻（最後のフレームの時刻）から DOOR_BLEND_SEC かけて混ぜる。
+   * まだフレームがない（読み込み直後、?t= の頭）なら、すぐに今の扉の色にする（途中から始めても同じ絵）。
+   */
   function setDoorChoice(d: DoorChoice) {
     if (d === door) return;
+    fromDoor = door;
     door = d;
-    applyPalette();
+    doorAt = Number.isFinite(lastT) ? lastT : -Infinity;
+    applyPalette(blendAt(lastT));
   }
 
   function placeShards(t: number, comfort: ComfortMode) {
@@ -473,6 +509,8 @@ export function createKaleidoscopeRoom(): RoomModule {
   }
 
   function rewind(t: number) {
+    // 時刻が戻ったら、扉の色の混ぜは済んだことにする（戻った先では、今の扉の色）
+    if (t < doorAt) doorAt = -Infinity;
     while (echoes.length > 0 && echoes[echoes.length - 1].t > t + 0.25) echoes.pop();
     for (const sh of shards) if (t < sh.touchAt - 0.25) sh.touchAt = -Infinity;
     if (hidden && t < hidden.foundAt - 0.25) hidden.foundAt = Infinity;
@@ -483,11 +521,15 @@ export function createKaleidoscopeRoom(): RoomModule {
     if (t < lastT - 0.5) rewind(t);
     lastT = t;
     for (const h of handles) h.setTime(t);
+    // 扉が変わった後の金と青の混ぜ（時刻から）
+    const k = blendAt(t);
+    if (k !== appliedK) applyPalette(k);
     // プリズムはごくゆっくり息をする（明滅ではない）
     uGlow.value = 2.2 * (1 + 0.04 * Math.sin(t * 0.5));
     if (prismGlass) (prismGlass.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.25 + 0.1 * Math.sin(t * 0.37);
 
     // ロゼット: 軸のまわりに互い違いに回る（穏やかモードでは止める。角度は時刻から）
+    const palA = PALETTES[fromDoor].glass;
     const pal = PALETTES[door].glass;
     for (const r of rosettes) {
       const ang = frame.comfort === 'standard' ? (t - sectionT0) * r.speed : 0;
@@ -495,9 +537,8 @@ export function createKaleidoscopeRoom(): RoomModule {
       // 触れた色のこだま: 拍の頭に、近い輪から順に届き、届いた色は残る。光は 1 拍に 1 回まで
       // （光の点滅を抑えるモードでは 2 拍に 1 回まで、弱く。折り返しで画面中に広がるため）
       echoAt(echoes, r.s, t, echoGrid(SEC_PER_BEAT, frame.reducedFlash), echoState);
-      const base = pal[r.index % pal.length];
       const pm = r.petals.material as THREE.MeshStandardMaterial;
-      pm.emissive.set(base);
+      mixHex(palA[r.index % palA.length], pal[r.index % pal.length], k, pm.emissive);
       if (echoState.color >= 0) pm.emissive.lerp(tmpColor.set(echoState.color), 0.65);
       pm.color.copy(pm.emissive);
       const flash = echoFlash(t, echoState.arrival) * (frame.reducedFlash ? 0.3 : 1);

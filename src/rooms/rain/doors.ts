@@ -4,7 +4,10 @@
 //   ・何もしなければ、決まる時刻にアプリの扉（setDoor。既定は瑠璃）が開く
 //   ・決まった後、選ばなかった扉は閉じて暗くなる（ADR-0013: 選んだ扉の光と色で膜が満たされ、その中を進む）
 //   ・2周目は前回と違う扉（suggestedDoor）が少し強く光る
+//   ・別の扉への選び直しは 1 拍（SEC_PER_BEAT）に 1 回まで。交互に触れ続けても、選んだ扉と膜の向こうの万華鏡の色の
+//     入れ替わりは 1 秒に 1.2 回まで（光の明滅は 1 秒に 3 回未満の決まり）。受け付けなかった触れ方にも光の応答は返す（部屋）
 // 毎フレーム呼ぶ look・selectedAt は、渡した入れ物に書く（確保しない）。選んだ記録の配列は出来事のときだけ変える。
+import { SEC_PER_BEAT } from '../../config';
 import type { DoorChoice } from '../../contracts/ids';
 
 export const DOOR_RISE_SEC = 2.8;
@@ -13,6 +16,8 @@ export const DOOR_CLOSE_SEC = 1.2;
 /** 決まった後に、選ばなかった扉の光が落ちきるまでの秒と、残る明るさの割合 */
 export const DOOR_DIM_SEC = 2;
 export const DOOR_DIM_TO = 0.12;
+/** 別の扉へ選び直せる最短の間隔（秒） */
+export const DOOR_REPICK_SEC = SEC_PER_BEAT;
 
 const DOORS: readonly DoorChoice[] = ['amber', 'lapis'];
 
@@ -63,11 +68,17 @@ export class DoorChoices {
     return t >= this.appearT;
   }
 
-  /** 選ぶ。受け付けたら true（doorChosen を出す） */
+  /**
+   * 選ぶ。受け付けたら true（doorChosen を出す）。いま選ばれている扉にもう一度触れても、選び直しではないので false。
+   * 別の扉への選び直しは、前に選んだ時刻から DOOR_REPICK_SEC 経つまで受け付けない。
+   */
   pick(door: DoorChoice, t: number): boolean {
     if (!(t >= this.appearT - 0.5) || t > this.decideT) return false;
     // 時刻が戻った（巻き戻し・新しい乗車）なら、それより後の記録は捨てる
-    this.picks = this.picks.filter((p) => p.t <= t);
+    if (this.picks.length > 0 && this.picks[this.picks.length - 1].t > t) this.picks = this.picks.filter((p) => p.t <= t);
+    const last = this.picks[this.picks.length - 1];
+    if (last && last.door === door) return false;
+    if (last && t - last.t < DOOR_REPICK_SEC) return false;
     this.picks.push({ door, t });
     return true;
   }

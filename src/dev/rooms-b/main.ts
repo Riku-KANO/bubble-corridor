@@ -9,7 +9,8 @@
 //   ?webgl          WebGL2 で描く
 //   ?q=low          品質（粒の数）
 //   ?panel=0        操作パネルを隠す
-//   ?pick=amber@352 その時刻に扉に触れる（扉が開く見た目の確認。shard-03@400 のようにガラス片にも触れられる）
+//   ?pick=amber@352 その時刻に扉に触れる（扉が開く見た目の確認。shard-03@400 のようにガラス片にも触れられる）。
+//                   amber@351,lapis@351.3,amber@351.6 のように並べると順に触れる（交互に選ぶ確認）
 //   ?look=shard-08  その触れられる物の方を向き続ける（触れた反応を真ん中で見る）。?fov=30 で視野角を狭める
 import * as THREE from 'three/webgpu';
 import { CAMERA, SECTIONS, SEC_PER_BAR } from '../../config';
@@ -111,14 +112,17 @@ touch.setEnabled(true);
 bus.on('touch', (e) => say(`touch ${e.touchableId}`));
 
 // 確認用の自動の「触れる」
-const pickRaw = q.get('pick');
-const pickMatch = pickRaw ? /^([a-z0-9-]+)@([0-9.]+)$/.exec(pickRaw) : null;
-let pick: { id: string; at: number } | null = pickMatch ? { id: pickMatch[1], at: Number(pickMatch[2]) } : null;
+const picks: { id: string; at: number }[] = (q.get('pick') ?? '')
+  .split(',')
+  .map((x) => /^([a-z0-9-]+)@([0-9.]+)$/.exec(x.trim()))
+  .filter((m): m is RegExpExecArray => m !== null)
+  .map((m) => ({ id: m[1], at: Number(m[2]) }))
+  .sort((a, b) => a.at - b.at);
 function autoPick() {
-  if (!pick || t < pick.at) return;
-  const { id, at } = pick;
+  while (picks.length > 0 && t >= picks[0].at) pickOne(picks.shift()!);
+}
+function pickOne({ id, at }: { id: string; at: number }) {
   const target = rooms.flatMap((r) => r.touchables).find((x) => x.id.endsWith(`/${id}`) || x.id.endsWith(`/door-${id}`));
-  pick = null;
   if (!target) return;
   const p = target.object.getWorldPosition(new THREE.Vector3());
   // 触れた時刻は指定の時刻（止めた時計でも、その後の見た目になる）
