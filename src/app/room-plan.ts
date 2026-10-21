@@ -6,7 +6,7 @@
 // 入口の背景が前の部屋の空気のままになり（lobby が解放されていて空気が取れない）、
 // 乗り場と待ち列の部屋も解放されたままなので、もう一度乗ると頭で部屋が空になる。
 import { RIDE_DURATION } from '../config';
-import type { RoomId } from '../contracts/ids';
+import { ROOM_OF_SECTION, type RoomId, type SectionId } from '../contracts/ids';
 import type { Ride } from '../contracts/ride';
 import type { ScreenId } from '../contracts/ui';
 import { streamingPlan, type StreamingPlan } from '../ride';
@@ -26,7 +26,7 @@ export const HOME_PLAN: RoomPlan = Object.freeze({
 /**
  * 画面と乗車の時刻から、部屋の計画を決める（純粋。戻り値は凍結した共有の物で、書き換えない）。
  *   乗車中・ポーズ: その時刻の streamingPlan
- *   ライドフォト:   降車の景色のまま（降車の乗り場が見える。時刻に依らず同じ参照）
+ *   ライドフォト:   降車の景色のまま（降車の乗り場が見える。時刻に依らず同じ参照）。入口の部屋も読み込んだままにする
  *   ほか:           HOME_PLAN
  */
 export function planFor(screen: ScreenId, t: number, ride: Ride): RoomPlan {
@@ -35,11 +35,54 @@ export function planFor(screen: ScreenId, t: number, ride: Ride): RoomPlan {
     case 'pause':
       return streamingPlan(t, ride);
     case 'photo':
-      // 降車の時刻の計画（最後の区間 = 乗り場、その前の夜明けの岸が遠くに見える）。streamingPlan は同じ入力に同じ参照を返す
-      return streamingPlan(RIDE_DURATION, ride);
+      return photoPlanOf(ride);
     default:
       return HOME_PLAN;
   }
+}
+
+/**
+ * ゴンドラ・部屋・画面効果の「場面の時刻」。乗車の外でも位置を決める（乗車の時計が止まっても場面が動かない）。
+ *   乗車中・ポーズ: 乗車の時刻
+ *   ライドフォト:   降車の時刻のまま（ここを 0 にすると、降車の瞬間にゴンドラが乗り場の向きへ回る。VR では世界が回る）
+ *   ほか:           乗車の頭（待ち列・入口・案内などは乗り場から見る）
+ */
+export function sceneTimeFor(screen: ScreenId, rideT: number): number {
+  switch (screen) {
+    case 'riding':
+    case 'pause':
+      return rideT;
+    case 'photo':
+      return RIDE_DURATION;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * 背景と擬似照明の元にする部屋の空気（どの部屋の atmosphere か）。ゴンドラのいる部屋。
+ * 乗車中・ポーズ・ライドフォトは今の区間の部屋（ライドフォトは降車の乗り場）、ほかは入口の部屋。
+ */
+export function atmosphereRoomFor(screen: ScreenId, section: SectionId): RoomId {
+  return screen === 'riding' || screen === 'pause' || screen === 'photo' ? ROOM_OF_SECTION[section] : 'lobby';
+}
+
+/**
+ * ライドフォトの計画: 降車の景色（降車の時刻の計画）を見せ、入口の部屋も読み込んだままにする。
+ * 「入口へ」「もう一度乗る」で、入口の部屋や最初の部屋が空にならない。降車の計画ごとに一度だけ作る（同じ参照を返す）
+ */
+const photoCache = new WeakMap<RoomPlan, RoomPlan>();
+
+function photoPlanOf(ride: Ride): RoomPlan {
+  const end = streamingPlan(RIDE_DURATION, ride);
+  let plan = photoCache.get(end);
+  if (!plan) {
+    const keep = [...end.keep];
+    for (const id of HOME_PLAN.keep) if (!keep.includes(id)) keep.push(id);
+    plan = Object.freeze({ visible: end.visible, keep: Object.freeze(keep) });
+    photoCache.set(end, plan);
+  }
+  return plan;
 }
 
 /** 入口で止まる確認用（?screen=home&t=）の計画。乗る時刻の部屋も読み込んだままにする（乗った直後に空の景色を見せない） */

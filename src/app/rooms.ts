@@ -45,6 +45,11 @@ export class RoomManager {
       attached: false,
       loading: module.load(this.ctx).then(
         () => {
+          // 読み込み中に計画から外れて、スロットはもう無い（解放のときは読み込みが終わっていなかったので dispose できなかった）。ここで解放する
+          if (this.slots.get(id) !== slot) {
+            module.dispose();
+            return;
+          }
           slot.ready = true;
           this.touchDirty = true;
           this.applyVisibility();

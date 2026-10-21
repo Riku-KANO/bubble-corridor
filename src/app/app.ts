@@ -32,7 +32,7 @@ import { glassLightingFor } from './glass-lighting';
 import { createIdleChimer } from './idle-chime';
 import { parseParams } from './params';
 import { createRiseSounder } from './rise-sound';
-import { HOME_PLAN, homePlanFor, planFor, type RoomPlan } from './room-plan';
+import { HOME_PLAN, atmosphereRoomFor, homePlanFor, planFor, sceneTimeFor, type RoomPlan } from './room-plan';
 import { RoomManager } from './rooms';
 import { loadRideData } from './ride-data';
 import { BOARD_START_SEC, fxAt, type FxTimeline, type FxTimelineOptions } from './timeline';
@@ -119,8 +119,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   let hintShown = false;
   /** 殻が閉じる音を鳴らしたか。時刻（BOARD_START_SEC）を越えたときに一度だけ。?t で越えた後から始めたら鳴らさない */
   let shellCloseSounded = true;
-  /** 水面からゴンドラが浮かぶ音。乗るたびに一度、案内の頭か乗車の頭（いつ鳴らすかは rise-sound.ts） */
-  const riseSound = createRiseSounder(() => audio.sfx('gondola.rise'));
+  /** 水面からゴンドラが浮かぶ音。乗るたびに一度、案内の頭（案内の画面が現れてから）か乗車の頭（いつ鳴らすかは rise-sound.ts） */
+  const riseSound = createRiseSounder(() => audio.sfx('gondola.rise'), TRANSITION_SEC.homeToGuide);
   /** 前のフレームの乗車の秒（dt を出す）。新しい乗車の最初のフレームで、?t の位置まで飛んだ長さを dt にしないよう beginRide で合わせる */
   let lastT = 0;
   const photoStore = createPhotoStore();
@@ -539,7 +539,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // 毎フレーム渡す入れ物（書き換えて使い回す。音と部屋は受け取った場でだけ読む）
   const listenerPose: Mutable<ListenerPose> = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
   const roomFrame: Mutable<RoomFrame> = { t: 0, dt: 0, pose, camera, comfort: settings.comfort, reducedFlash: settings.reducedFlash };
-  const debugSample: Mutable<DebugSample> = { frameMs: 0, t: 0, section: '', info: renderer.info, screen: '', scale: 1 };
+  const debugSample: Mutable<DebugSample> = { frameMs: 0, frameAt: 0, t: 0, section: '', info: renderer.info, screen: '', scale: 1 };
   /** キューシートに乗車の終わりがあれば、降車は cue が行う。なければ時刻が尽きたときに終える（起動時に一度だけ調べる） */
   const hasRideEndCue = cues.some((c) => c.name === 'ride.end');
   let lastNow = performance.now();
@@ -567,9 +567,12 @@ export async function startApp(root: HTMLElement): Promise<void> {
     const frameMs = nowMs - lastNow;
     lastNow = nowMs;
     const riding = flow.screen === 'riding' || flow.screen === 'pause';
-    const t = riding ? clock.time : 0;
-    const dt = riding ? Math.max(0, t - lastT) : 0;
-    lastT = t;
+    const rideT = riding ? clock.time : 0;
+    const dt = riding ? Math.max(0, rideT - lastT) : 0;
+    lastT = rideT;
+    // 場面の時刻: ゴンドラの位置・部屋・画面効果を決める。乗車の外でも、降車の後（ライドフォト）は降車の時刻のまま
+    // （0 にすると、降車の瞬間にゴンドラが乗り場の向きへ回る。VR では世界が回る）。待ち列・入口などは乗車の頭
+    const t = sceneTimeFor(flow.screen, rideT);
 
     ride.poseAt(t, settings.comfort, pose);
     gondola.root.position.set(pose.x, pose.y, pose.z);
@@ -617,7 +620,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
     // 部屋の空気（膜を通る瞬間に切り替える。部屋が時刻で差し替えたときも反映する）。ゴンドラのいる部屋の空気 = 今の区間の部屋。
     // 乗車の外は入口の部屋、ライドフォトは降車の乗り場。ガラスの擬似照明（縁の反射の色・ハイライト）も、空気が変わったときだけ部屋に合わせる
-    const roomId = riding ? ROOM_OF_SECTION[pose.section] : flow.screen === 'photo' ? 'platform' : 'lobby';
+    const roomId = atmosphereRoomFor(flow.screen, pose.section);
     const atmosphere = rooms.get(roomId)?.atmosphere ?? null;
     if (atmosphere && atmosphere !== currentAtmosphere) {
       currentAtmosphere = atmosphere;
@@ -668,6 +671,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     }
     if (debug) {
       debugSample.frameMs = frameMs;
+      debugSample.frameAt = nowMs;
       debugSample.t = t;
       debugSample.section = pose.section;
       debugSample.screen = flow.screen;
