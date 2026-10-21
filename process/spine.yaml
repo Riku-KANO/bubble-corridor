@@ -189,8 +189,8 @@ slices:
   depends_on: [S-11, S-12, S-13, S-18, S-24]
   paths: [src/app/**, src/main.ts, e2e/ride.spec.ts, e2e/smoke.spec.ts, scripts/dev/**]
   tests: [e2e/ride.spec.ts, src/app/room-plan.test.ts, src/app/glass-lighting.test.ts]
-  status: red
-  notes: '2026-10-21 2026-10-21 親がテストを作成: room-plan.test（HOME_PLAN と planFor）、glass-lighting.test（空気から作る擬似照明と部屋の指定。契約 Atmosphere.glassLighting を追加）、e2e/ride.spec（PC 幅・スマートフォン幅で ?rate=60 の13分の通し、写真3枚、音の時計の速さと滑らかさ）。赤の証跡: 単体2ファイルが読み込み失敗。e2e 3件はいまの main で緑（関門2の守り）。ほかに依頼: gondola.rise の音、殻の閉じ開きの曲線を glassEase に。関門の記録（docs/gates.md）は部屋が入ってから親が書く。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3 で緑（app 49件、check --quick ALL OK、e2e 10件。負荷平均約8のときに render-paths の fps と音の時計の飛びが1回ずつ落ち、単独の再実行では緑）。担当が足したテスト: rise-sound.test、room-plan-home.test。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes（P1 なし）: P2-1 雨の地面の色が緑に寄る・天球で地面が空より明るい、P2-2 降車の瞬間にゴンドラが90°回る（VR で世界が回る）、P2-3 暗い部屋で真鍮の縁が消えかける（コメントを直し S-26 へ）。e2e の不安定はテスト側（フレームの揺れを時計の飛びとみなす、fps を温まる前に1回だけ読む、並列の負荷）。親が P2-1・P2-2 をテストにし、e2e を直した（音の時計はフレームの時刻と比べる、fps は poll、workers 2）。実装 消費 2/3 2026-10-21 実装 2/3 で緑（app 全部、check --quick ALL OK、e2e 10/10、負荷平均6〜8でも緑）。雨の地面 #b18361（25°）、天球の地面は空より暗い。降車後の向きは sceneTimeFor で変わらない（画像 .snaps/photo-turn/sheet.png）。親が「扉の選択は後から読み込まれる部屋にも届く」をテストに（rooms-door.test.ts、赤。S-21 の申し送り）。実装 消費 3/3（最後）'
+  status: integrated
+  notes: '2026-10-21 2026-10-21 親がテストを作成: room-plan.test（HOME_PLAN と planFor）、glass-lighting.test（空気から作る擬似照明と部屋の指定。契約 Atmosphere.glassLighting を追加）、e2e/ride.spec（PC 幅・スマートフォン幅で ?rate=60 の13分の通し、写真3枚、音の時計の速さと滑らかさ）。赤の証跡: 単体2ファイルが読み込み失敗。e2e 3件はいまの main で緑（関門2の守り）。ほかに依頼: gondola.rise の音、殻の閉じ開きの曲線を glassEase に。関門の記録（docs/gates.md）は部屋が入ってから親が書く。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3 で緑（app 49件、check --quick ALL OK、e2e 10件。負荷平均約8のときに render-paths の fps と音の時計の飛びが1回ずつ落ち、単独の再実行では緑）。担当が足したテスト: rise-sound.test、room-plan-home.test。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes（P1 なし）: P2-1 雨の地面の色が緑に寄る・天球で地面が空より明るい、P2-2 降車の瞬間にゴンドラが90°回る（VR で世界が回る）、P2-3 暗い部屋で真鍮の縁が消えかける（コメントを直し S-26 へ）。e2e の不安定はテスト側（フレームの揺れを時計の飛びとみなす、fps を温まる前に1回だけ読む、並列の負荷）。親が P2-1・P2-2 をテストにし、e2e を直した（音の時計はフレームの時刻と比べる、fps は poll、workers 2）。実装 消費 2/3 2026-10-21 実装 2/3 で緑（app 全部、check --quick ALL OK、e2e 10/10、負荷平均6〜8でも緑）。雨の地面 #b18361（25°）、天球の地面は空より暗い。降車後の向きは sceneTimeFor で変わらない（画像 .snaps/photo-turn/sheet.png）。親が「扉の選択は後から読み込まれる部屋にも届く」をテストに（rooms-door.test.ts、赤。S-21 の申し送り）。実装 消費 3/3（最後） 2026-10-21 レビュー2巡目 approve（P1・P2 なし）。親が統合時に P3: ガラスの擬似照明のつまみを config の GLASS_LIGHTING へ、xr.spec のフレームの検査を poll に。main の check（ビルド・comfort・e2e 10件）ALL OK。関門2の機械の項目を docs/gates.md に記録（合格）。真鍮の縁は S-26（M1 の VR の確認より前に必須）。統合'
 - id: S-26
   title: 磨き・見た目（真鍮の縁の発光の下限、暗い部屋でも動かない基準が見える）
   wave: 3
@@ -201,7 +201,7 @@ slices:
   paths: [src/core/materials/**, src/core/README.md, src/core/CHANGELOG.md, src/core/VERSION, dev/core.html, src/dev/core/**]
   tests: []
   status: todo
-  notes: 'S-25 レビュー1巡目 P2-3 から: 暗い部屋（入口・乗り場・万華鏡・天球）では擬似照明の空の輝度が 0.18〜0.33 に下がり、createBrass の発光（空と地面を映す）が弱まって、座席から見下ろす縁がほぼ消える。設計書「視界の下側には常に縁」と ADR-0012（VR の暗転でも縁を残す）の基準が弱まる。真鍮に部屋の照明とは別の発光の下限を持たせる。core を変えるので版を上げる（0.5.1）。M1 の VR の確認より前に'
+  notes: 'S-25 レビュー1巡目 P2-3 から: 暗い部屋（入口・乗り場・万華鏡・天球）では擬似照明の空の輝度が 0.18〜0.33 に下がり、createBrass の発光（空と地面を映す）が弱まって、座席から見下ろす縁がほぼ消える。設計書「視界の下側には常に縁」と ADR-0012（VR の暗転でも縁を残す）の基準が弱まる。真鍮に部屋の照明とは別の発光の下限を持たせる。core を変えるので版を上げる（0.5.1）。M1 の VR の確認より前に 2026-10-21 S-25 レビュー2巡目: 地面を空の 0.6 倍にして天球の真鍮の発光は既定の約21%（ride/04-stars で縁がほぼ見えない）。M1 の VR の確認より前に必須'
 - id: S-27
   title: 磨き・画面（入れ子の opacity、快適モードの札、VR の初回の案内、viewMode の使い道）
   wave: 3
