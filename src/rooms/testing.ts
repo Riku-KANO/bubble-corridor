@@ -510,3 +510,57 @@ export function shapeClearanceViolations(
   }
   return [...worst.values()];
 }
+
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** 部屋の見た目の要約（描くか、位置・向き・大きさ、インスタンスの数と並び、材質の濃さと発光）。時刻から決まるかの比べに使う */
+function sceneSignature(root: THREE.Object3D): Map<string, string> {
+  const sig = new Map<string, string>();
+  let i = 0;
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    const key = `${i++}:${(o.userData.name as string | undefined) ?? o.name ?? o.type}`;
+    const parts: (string | number)[] = [o.visible ? 1 : 0];
+    if (o.visible) {
+      const e = o.matrixWorld.elements;
+      for (let k = 0; k < 16; k++) parts.push(r3(e[k]!));
+      const im = o as THREE.InstancedMesh;
+      if (im.isInstancedMesh) {
+        parts.push(im.count);
+        const a = im.instanceMatrix.array;
+        let sum = 0;
+        for (let k = 0; k < im.count * 16; k++) sum += Math.abs(a[k]!) * ((k % 7) + 1);
+        parts.push(r3(sum));
+      }
+      const mats = ([] as THREE.Material[]).concat(((o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined) ?? []);
+      for (const m of mats) {
+        const s = m as THREE.MeshStandardMaterial;
+        parts.push(r3(m.opacity), m.visible ? 1 : 0);
+        if (typeof s.emissiveIntensity === 'number') parts.push(r3(s.emissiveIntensity));
+      }
+    }
+    sig.set(key, parts.join(','));
+  });
+  return sig;
+}
+
+/**
+ * 柱「時刻から決める」: 区間の頭から通しで乗った絵と、その時刻から始めた絵（?t=）が同じか。
+ * 通しは出来事（キュー）も流しながら 0.25 秒刻みで進め、途中からはその時刻の1フレームだけ（アプリは ?t= で過去の出来事を流さない）。
+ * 触れた記録は含まない。違った物の名前を返す（同じなら空）。
+ */
+export async function timeDeterminismDiffs(factory: RoomFactory, from: number, at: number, opts: { tier?: QualityTier } = {}): Promise<string[]> {
+  const a = await loadRoom(factory, opts);
+  a.play(from, at, 0.25);
+  a.frame(at, 0.25);
+  const b = await loadRoom(factory, opts);
+  b.frame(at, 0.25);
+  const sa = sceneSignature(a.room.root);
+  const sb = sceneSignature(b.room.root);
+  const diffs: string[] = [];
+  for (const [k, v] of sa) if (sb.get(k) !== v) diffs.push(k);
+  for (const k of sb.keys()) if (!sa.has(k)) diffs.push(k);
+  a.room.dispose();
+  b.room.dispose();
+  return diffs;
+}
