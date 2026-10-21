@@ -231,10 +231,10 @@ slices:
   milestone: M1
   requirements: [REN-3, TRN-1]
   depends_on: [S-20, S-21, S-22]
-  paths: [src/app/**, src/main.ts, e2e/ride.spec.ts, e2e/smoke.spec.ts, scripts/dev/**]
-  tests: []
-  status: todo
-  notes: 'S-21・S-22 の申し送り: 次の部屋のシェーダを前の部屋にいる間に compileAsync で先読み（読み込み直後、部屋の最初の update の前。visible=false の物はコンパイルされない）。いまは膜を抜けるフレームで 2fps 前後まで落ちる。S-25 レビュー2巡目の P3: ライドフォトから小画面を開くと場面の時刻が 0 になる（returnTo に従わせる）、VR のまま入口へ戻ると xr.exit の数フレームが t=0。部屋の境目の取り決め（雨の突き当たりの壁 s1+0.5〜0.85 など、S-21）を decisions に。関門1の PC 60fps（天球の見どころ）を部屋の統合後に測って docs/gates.md に 2026-10-21 S-21 の申し送り: 縦持ちで視野角を広げる（設計書「縦持ちでは視野角を広げ」。75°のままでは 5:51 の扉が画面の端で切れる。90°で水平の半角 24.8°）。万華鏡が見え始める 5:45 に WebGL2 で 0.35 秒止まる（compileAsync の先読みで） 2026-10-21 関門4の見込み: 待ち列の間に lobby・platform・greenhouse を読むと約 14MB（上限 10MB）。温室を乗車の後に回す（乗車の頭から 45 秒あり、先読みの窓 15 秒で間に合う）か、温室の glb（4.2MB）を減らす。待ち列・入口の 3D の部屋（lobby の isLobbyRoom・lobbyViews・setLoadProgress・setTicketNumber・punchTicket）と画面（DOM）の背景の二重をどうするかもここで決める。乗り場が src/rooms/dawn/sky.ts を読む・万華鏡が ../rain を読む・岸が ../celestial/kit を読む → 部屋の共通の道具の置き場所（src/rooms/kit/ など）'
+  paths: [src/app/**, src/main.ts, e2e/ride.spec.ts, e2e/smoke.spec.ts, e2e/prewarm.spec.ts, scripts/dev/**]
+  tests: [src/app/room-plan.test.ts, src/app/view.test.ts, e2e/prewarm.spec.ts]
+  status: red
+  notes: 'S-21・S-22 の申し送り: 次の部屋のシェーダを前の部屋にいる間に compileAsync で先読み（読み込み直後、部屋の最初の update の前。visible=false の物はコンパイルされない）。いまは膜を抜けるフレームで 2fps 前後まで落ちる。S-25 レビュー2巡目の P3: ライドフォトから小画面を開くと場面の時刻が 0 になる（returnTo に従わせる）、VR のまま入口へ戻ると xr.exit の数フレームが t=0。部屋の境目の取り決め（雨の突き当たりの壁 s1+0.5〜0.85 など、S-21）を decisions に。関門1の PC 60fps（天球の見どころ）を部屋の統合後に測って docs/gates.md に 2026-10-21 S-21 の申し送り: 縦持ちで視野角を広げる（設計書「縦持ちでは視野角を広げ」。75°のままでは 5:51 の扉が画面の端で切れる。90°で水平の半角 24.8°）。万華鏡が見え始める 5:45 に WebGL2 で 0.35 秒止まる（compileAsync の先読みで） 2026-10-21 関門4の見込み: 待ち列の間に lobby・platform・greenhouse を読むと約 14MB（上限 10MB）。温室を乗車の後に回す（乗車の頭から 45 秒あり、先読みの窓 15 秒で間に合う）か、温室の glb（4.2MB）を減らす。待ち列・入口の 3D の部屋（lobby の isLobbyRoom・lobbyViews・setLoadProgress・setTicketNumber・punchTicket）と画面（DOM）の背景の二重をどうするかもここで決める。乗り場が src/rooms/dawn/sky.ts を読む・万華鏡が ../rain を読む・岸が ../celestial/kit を読む → 部屋の共通の道具の置き場所（src/rooms/kit/ など） 2026-10-21 親がテストを作成（room-plan: 待ち列の間は温室を読まない・小画面は開いた元の景色、view: 縦持ちの視野角、e2e/prewarm: 部屋が見え始める瞬間のフレームの間隔 100ms 未満）。赤の証跡: 本番のビルドの WebGL2 で万華鏡が見え始めるとき 2219ms、天球 3192ms 止まる。S-30（src/app を触る）の統合の後に実装を始める。実装 消費 0/3'
 - id: S-30
   title: 磨き・ライドフォト（撮影の描き出しで見どころの最中に止まらない）
   wave: 3
