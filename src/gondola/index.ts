@@ -115,7 +115,8 @@ export function createGondola(): Gondola {
   // 経線のリブ: 縁から底へ、殻の内側に沿う細い弧（明るい真鍮と暗い真鍮を交互に）
   const ribCount = 16;
   for (let i = 0; i < ribCount; i++) {
-    put(i % 2 === 0 ? brassParts : darkParts, ribGeometry(RIM_Y, FLOOR_Y - 0.03), { x: 0, y: 0, z: 0 }, tmpQ.setFromAxisAngle(UP, (i / ribCount) * Math.PI * 2));
+    // 半分ずらす: 真正面（-Z）にリブを置かない（縦持ちの画面の真ん中に縦線が立って見えるため）
+    put(i % 2 === 0 ? brassParts : darkParts, ribGeometry(RIM_Y, FLOOR_Y - 0.03), { x: 0, y: 0, z: 0 }, tmpQ.setFromAxisAngle(UP, ((i + 0.5) / ribCount) * Math.PI * 2));
   }
   // 手すりの支柱（手すりから下の輪へ）。正面のまん中は空ける（前を見る視界に縦の線を入れない）
   const postTop = RAIL_Y;

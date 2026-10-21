@@ -622,6 +622,8 @@ def build_greenhouse(rail: kit.Rail, fast: bool) -> None:
 def clip_plane(objs, p_three, n_three) -> None:
     """three.js の点 p と向き n の平面より先（n の側）の形を、面を正確に切って落とす"""
     from mathutils import Vector
+    # 原点を動かした物（花芯など）の matrix_world を最新にしてから切る（古いままだと平面が局所の座標でずれ、丸ごと消える）
+    bpy.context.view_layer.update()
     pb = Vector(kit.to_blender(np.asarray(p_three, dtype=np.float64)).tolist())
     nb = Vector(kit.to_blender(np.asarray(n_three, dtype=np.float64)).tolist()).normalized()
     for ob in objs:
@@ -729,15 +731,16 @@ def orient_up(verts, faces):
 
 
 def flower_layout(rail: kit.Rail, bloom_s: float) -> dict:
-    """大きな花の置き場所: 見どころの時刻の向きから 8° だけ左、25m 先、目より約 5m 上（見上げは浅く、写真の真ん中に。
-    縦持ちの画面でも切れない）。花はレールの上の空間に開き、ゴンドラはその下をくぐる。茎は左の池から弧を描いて伸びる"""
+    """大きな花の置き場所: 見どころの時刻の向きから 2° だけ左、25m 先、目より約 5m 上（見上げは浅く、写真の真ん中に。
+    開いた花は左右に約 ±12°。縦持ちの画面の横の視野 約 ±19° に収まるよう、ほぼ正面に置く）。
+    花はレールの上の空間に開き、ゴンドラはその下をくぐる。茎は左の池から弧を描いて伸びる"""
     p = rail.point(bloom_s)
     f = rail.forward(bloom_s)
-    yaw = math.radians(8.0)
+    yaw = math.radians(2.0)
     d = np.array([f[0] * math.cos(yaw) + f[2] * math.sin(yaw), 0.0, -f[0] * math.sin(yaw) + f[2] * math.cos(yaw)])
     head = np.array([p[0], 0.0, p[2]]) + d * 25.0 + np.array([0, 7.6, 0])
     left = np.array([f[2], 0.0, -f[0]])
-    base = np.array([head[0], 0.15, head[2]]) + left * 6.4 + d * 1.5
+    base = np.array([head[0], 0.15, head[2]]) + left * 7.0 + d * 1.5
     return {'head': head, 'base': base, 'pond': np.array([base[0], 0.0, base[2]]), 'forward': d}
 
 

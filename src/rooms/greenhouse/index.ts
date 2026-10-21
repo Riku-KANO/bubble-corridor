@@ -65,6 +65,12 @@ const OPEN_FROM = T_BLOOM - 2.6;
 const OPEN_TO = T_BLOOM + 0.6;
 /** 朝日の進む向き（greenhouse.py の SUN_DIR と同じ） */
 const SUN_DIR = new THREE.Vector3(-0.32, -0.4, 0.86).normalize();
+/** 空の太陽の弱まり: 花の直前の暗さから、露が落ち終わるまで（花の向こうの白い霞で花が沈まないように） */
+function skySunAt(t: number): number {
+  return 1 - 0.8 * smooth(T_LURE - 5, T_LURE - 1, t) * (1 - smooth(T_DEW + 4, T_DEW + 10, t));
+}
+/** 出口の手前の殻と妻壁の乳白（次の部屋の大きな板が硬い縁のまま透けて見えないように。膜の口だけ澄む） */
+const EXIT_MIST = { length: 18, max: 0.82, color: new THREE.Color(0xeef2ea) };
 /** 植物の 11 種（greenhouse.py の PLANTS と同じ名前） */
 const PLANTS = ['palm', 'treefern', 'banana', 'monstera', 'fern', 'calla', 'tulip', 'grass', 'succulent', 'vine', 'lilypad'] as const;
 /** 露の数の上限（高品質。品質で減らす） */
@@ -350,7 +356,11 @@ export function createGreenhouseRoom(): RoomModule {
       const tier = ctx.quality.tier;
       const g = await loadGlbRoom(ctx, 'greenhouse', res, {
         tier,
-        ownGlass: (o) => typeof own(o.userData, 'touch_kind') === 'string' || own(o.userData, 'role') === 'flower_core',
+        ownGlass: (o) =>
+          typeof own(o.userData, 'touch_kind') === 'string' ||
+          own(o.userData, 'role') === 'flower_core' ||
+          o.userData.name === 'greenhouse.shell' ||
+          o.userData.name === 'greenhouse.end_glass',
         // 花芯ははっきりした金（光を集めて輝く）
         glassOverride: (o, _kind, params) =>
           own(o.userData, 'role') === 'flower_core' ? { ...params, color: '#ffc25a', opacity: 0.8, emissive: '#ffa526', emissiveIntensity: 0.4 } : params,
@@ -615,6 +625,16 @@ export function createGreenhouseRoom(): RoomModule {
 
       // ── 雨の回廊への膜 ──
       const span = ctx.ride.sectionSpan('greenhouse');
+      // 出口の手前の殻と妻壁を乳白に（出口の面からの距離で）
+      {
+        const e = ctx.ride.pointAt(span.s1 + 0.9);
+        const b = ctx.ride.pointAt(span.s1 - 0.5);
+        const n = new THREE.Vector3(e.x - b.x, 0, e.z - b.z).normalize();
+        for (const name of ['greenhouse.shell', 'greenhouse.end_glass']) {
+          const h = g.byName.get(name)?.userData.glassHandle as GlassHandle | undefined;
+          if (h) misted(h.material as THREE.MeshStandardNodeMaterial, new THREE.Vector3(e.x, 0, e.z), n);
+        }
+      }
       membrane = createMembrane(ctx.ride, { s: span.s1, radius: 3.05, floorY: 0, tier });
       root.add(membrane.mesh);
 
@@ -634,6 +654,7 @@ export function createGreenhouseRoom(): RoomModule {
       // 光の筋はごくゆっくり息をする（明滅にならない速さと深さ）
       if (shaftLevel) shaftLevel.value = 0.13 * (0.85 + 0.15 * Math.sin(t * 0.21));
       uSun.value = frame.reducedFlash ? 0.6 : 1;
+      uSkySun.value = skySunAt(t);
       // 花の直前の暗さ（空気の露出と焼き込んだ光）
       const dim = dimAt(t);
       const level = Math.round(dim * DIM_STEPS);
@@ -691,6 +712,22 @@ function petalGeometry(length: number, width: number): THREE.BufferGeometry {
  * 朝の空（大きな球の内側）。天頂は淡い青、地平は暖かい白、正面の低い朝日のまわりが明るく光る。
  * 霧は使わない（遠くの空そのもの）。物との距離の検査からは外す。
  */
+/** 空の太陽の強さ（花の直前から露のあとまで弱める） */
+const uSkySun = uniform(1);
+
+/** 出口の手前を乳白に: 出口の面（点 e、向き n）からの距離で、ガラスの上に乳白の層を重ねる（premultiplied のまま） */
+function misted(m: THREE.MeshStandardNodeMaterial, e: THREE.Vector3, n: THREE.Vector3): void {
+  if (!m.opacityNode || !m.emissiveNode) return;
+  const d = dot(positionWorld.sub(vec3(e.x, e.y, e.z)), vec3(n.x, 0, n.z));
+  const k = smoothstep(float(-EXIT_MIST.length), float(-1), d).mul(EXIT_MIST.max);
+  const a = m.opacityNode as THREE.Node<'float'>;
+  const rgb = m.emissiveNode as THREE.Node<'vec3'>;
+  const milk = vec3(EXIT_MIST.color.r, EXIT_MIST.color.g, EXIT_MIST.color.b).mul(mix(float(0.82), float(1), normalWorld.y.mul(0.5).add(0.5)));
+  m.opacityNode = a.add(k.mul(float(1).sub(a)));
+  m.emissiveNode = rgb.mul(float(1).sub(k)).add(milk.mul(k));
+  m.needsUpdate = true;
+}
+
 function makeSky(res: Resources): THREE.Mesh {
   const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, fog: false });
   const dir = positionLocal.normalize();
@@ -701,7 +738,7 @@ function makeSky(res: Resources): THREE.Mesh {
   const ground = vec3(0.82, 0.8, 0.72);
   const skyCol = mix(mix(horizon, ground, smoothstep(0.0, -0.25, up)), zenith, smoothstep(0.02, 0.75, up));
   const d = max(dot(dir, toSun), float(0));
-  const sun = vec3(1.0, 0.9, 0.72).mul(pow(d, 900).mul(6).add(pow(d, 40).mul(0.7)).add(pow(d, 6).mul(0.25)));
+  const sun = vec3(1.0, 0.9, 0.72).mul(pow(d, 900).mul(6).add(pow(d, 40).mul(0.7)).add(pow(d, 6).mul(0.25))).mul(uSkySun);
   m.colorNode = vec4(skyCol.add(sun), float(1));
   const mesh = new THREE.Mesh(res.geo(new THREE.SphereGeometry(520, 48, 24)), res.mat(m));
   mesh.name = 'greenhouse.sky';

@@ -13,7 +13,11 @@ import {
   cameraPosition,
   color as colorNode,
   float,
+  length,
+  max,
+  mix,
   normalWorld,
+  output,
   positionWorld,
   pow,
   smoothstep,
@@ -115,10 +119,13 @@ export class Resources {
   }
 }
 
+/** 焼いた面の材質（照明なし × ライトマップ。霞を重ねるときはノードの材質） */
+export type BakedMaterial = THREE.MeshBasicMaterial | THREE.MeshBasicNodeMaterial;
+
 /** 焼き込んだ物（ライトマップの差し替えに使う） */
 export interface BakedMesh {
   readonly mesh: THREE.Mesh;
-  readonly material: THREE.MeshBasicMaterial;
+  readonly material: BakedMaterial;
   readonly scale: number;
   /** 別の光の状態（例: 朝）のライトマップと倍率 */
   readonly alt: Map<string, { texture: THREE.Texture; scale: number }>;
@@ -151,6 +158,31 @@ export interface LoadOptions {
   readonly ownGlass?: (o: THREE.Object3D) => boolean;
   /** ガラスの引数を部屋が上書きする */
   readonly glassOverride?: (o: THREE.Object3D, kind: GlassKind, params: GlassParams) => GlassParams;
+  /** 焼いた面に霞を重ねる（遠くから見る部屋。時刻の霞 level と、視点からの距離の霞 distance。色は color） */
+  readonly haze?: Haze;
+}
+
+/**
+ * 焼いた面に重ねる霞（朝靄）。level は時刻の霞（1 で向こうの空の色だけ = 見えない）、distance は遠さの霞の強さ。
+ * sky はその面の向こうの空の色（目からの向きの空。隣の部屋の空と同じ式で作る）
+ */
+export interface Haze {
+  readonly level: THREE.UniformNode<'float', number>;
+  readonly distance: THREE.UniformNode<'float', number>;
+  readonly sky: THREE.Node<'vec3'>;
+}
+
+export function createHaze(sky: THREE.Node<'vec3'>): Haze {
+  return { level: uniform(0), distance: uniform(0), sky };
+}
+
+/** 霞を重ねた、焼いた面の材質（照明なし × ライトマップ → 向こうの空の色へ混ぜる。霧と同じく色調の変換の前） */
+function hazedBaked(params: THREE.MeshBasicMaterialParameters, haze: Haze): THREE.MeshBasicNodeMaterial {
+  const m = new THREE.MeshBasicNodeMaterial(params);
+  const far = smoothstep(float(25), float(110), length(positionWorld.sub(cameraPosition))).mul(haze.distance);
+  const h = max(haze.level, far).clamp(0, 1);
+  m.outputNode = vec4(mix(output.rgb, haze.sky, h), output.a);
+  return m;
 }
 
 /** 物のメッシュ（材質が複数の物は GLTFLoader が Group の下に並べる） */
@@ -236,7 +268,7 @@ export async function loadGlbRoom(ctx: RoomContext, room: string, res: Resources
   const brass = res.mat(createBrass({ color: 0xbe9658, roughness: 0.32 }));
   const baked: BakedMesh[] = [];
   /** 同じ元の材質・同じライトマップ・同じ倍率の物は、複製した材質を共有する */
-  const bakedMats = new Map<string, THREE.MeshBasicMaterial>();
+  const bakedMats = new Map<string, BakedMaterial>();
   const gain = opts.lightmapGain ?? 1;
   const jobs: Promise<void>[] = [];
   for (const [, o] of byName) {
@@ -280,7 +312,8 @@ export async function loadGlbRoom(ctx: RoomContext, room: string, res: Resources
             if (!mat) {
               // 焼いた面は照明なしの材質（色 × ライトマップ）。アプリの光や環境画像に左右されず、VR でも軽い。
               // 焼いた値は放射輝度。three の lightMap は拡散反射に 1/π を掛けるので π を掛けて揃える（blender/README.md）
-              mat = res.mat(new THREE.MeshBasicMaterial({ color: src.color, side: src.side, lightMap: tex, lightMapIntensity: Math.PI * scale * gain }));
+              const params = { color: src.color, side: src.side, lightMap: tex, lightMapIntensity: Math.PI * scale * gain };
+              mat = res.mat(opts.haze ? hazedBaked(params, opts.haze) : new THREE.MeshBasicMaterial(params));
               mat.name = src.name;
               bakedMats.set(key, mat);
             }
@@ -303,8 +336,9 @@ export function setLightmapState(baked: readonly BakedMesh[], state: string | nu
     const tex = alt?.texture ?? b.texture;
     const scale = alt?.scale ?? b.scale;
     if (b.material.lightMap !== tex) {
+      // テクスチャの差し替えだけならシェーダは作り直さない（あるなしが変わるときだけ組み直す）
+      if (!b.material.lightMap !== !tex) b.material.needsUpdate = true;
       b.material.lightMap = tex;
-      b.material.needsUpdate = true;
     }
     b.material.lightMapIntensity = Math.PI * scale * gain;
   }

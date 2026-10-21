@@ -982,8 +982,7 @@ def finish_room(
             continue
         all_targets.extend(lst)
         hidden = [bpy.data.objects[n] for n in (hide_while_baking or {}).get(gname, []) if n in bpy.data.objects]
-        for ob in hidden:
-            ob.hide_render = True
+        hide_from_rays(hidden, True)
         for suffix, prepare in extra_bakes or []:
             restore = state_prepare.get(gname, {}).get(suffix, prepare)()
             res = bake_lightmaps(lst, OUT_DIR, size=gsize, samples=samples, name=f'{room}.{gname}_{suffix}', percentile=percentile)
@@ -997,8 +996,7 @@ def finish_room(
         res = bake_lightmaps(lst, OUT_DIR, size=gsize, samples=samples, name=f'{room}.{gname}', percentile=percentile, repack=not extra_bakes)
         if restore:
             restore()
-        for ob in hidden:
-            ob.hide_render = False
+        hide_from_rays(hidden, False)
         report[f'bake_{gname}_scale'] = res[0]['scale'] if res else None
     report['bake_seconds'] = round(time.time() - tb, 1)
     if webp:
@@ -1089,14 +1087,24 @@ class emission_clamped:
         return False
 
 
-def render_env(name: str, pos_three, size: tuple[int, int] = (512, 256), samples: int = 48, exposure: float = 0.0) -> str:
+def hide_from_rays(objs, hidden: bool) -> None:
+    """物を焼き込み・撮影の光線から隠す（描かれず、影も落とさず、光も出さない）"""
+    for ob in objs:
+        ob.hide_render = hidden
+        for k in ('visible_camera', 'visible_diffuse', 'visible_glossy', 'visible_transmission', 'visible_volume_scatter', 'visible_shadow'):
+            setattr(ob, k, not hidden)
+
+
+def render_env(name: str, pos_three, size: tuple[int, int] = (512, 256), samples: int = 48, exposure: float = 0.0, hide=()) -> str:
     """部屋の中の1点から、反射用の環境画像（正距円筒、8bit の sRGB PNG）を Cycles で撮る（設計書「焼き込み」）。
 
     three.js の正距円筒の反射（EquirectangularReflectionMapping）と向きを合わせる: 画像の中央が +X（three.js）、
     右へ行くと +Z（three.js）、上が上。カメラは Blender の +X を向け、上を +Z にする。
     戻り値は out_dir からの名前（例 platform.env.png）。読む側は flipY = true（画像の上が上）。
+    hide: 撮るあいだ隠す物（焼き込みだけの補助の光源など。環境画像に写ると、水面やガラスに実在しない光が映る）。
     """
     scene = bpy.context.scene
+    hide_from_rays(hide, True)
     keep = (scene.camera, scene.render.resolution_x, scene.render.resolution_y, scene.render.resolution_percentage, scene.render.engine,
             scene.view_settings.view_transform, scene.view_settings.exposure, scene.render.filepath)
     cam_data = bpy.data.cameras.new(f'{name}.cam')
@@ -1128,6 +1136,7 @@ def render_env(name: str, pos_three, size: tuple[int, int] = (512, 256), samples
          scene.view_settings.view_transform, scene.view_settings.exposure, scene.render.filepath) = keep
         bpy.data.objects.remove(cam)
         bpy.data.cameras.remove(cam_data)
+        hide_from_rays(hide, False)
     return os.path.basename(path)
 
 
@@ -1342,7 +1351,8 @@ def build_platform(rail: Rail, fast: bool) -> None:
     f = [tuple(reversed(x)) for x in f]
     keep = [opening_keep(v[list(x)], h, rail) for x in f]
     plaster_dark.add(v, [x for x, k in zip(f, keep) if k])
-    v, f = lathe([(r_in - 0.02, WALL_H - 0.9), (r_in - 0.35, WALL_H - 0.75), (r_in - 0.45, WALL_H - 0.45), (r_in - 0.8, WALL_H - 0.1), (r_in - 0.8, WALL_H + 0.05)], seg, (cx, 0, cz))
+    # 蛇腹の根元は壁に少し埋める（壁とのあいだに隙間があると、焼き込みで空の光が点線のように漏れる）
+    v, f = lathe([(r_in + 0.03, WALL_H - 0.9), (r_in - 0.35, WALL_H - 0.75), (r_in - 0.45, WALL_H - 0.45), (r_in - 0.8, WALL_H - 0.1), (r_in - 0.8, WALL_H + 0.05)], seg, (cx, 0, cz))
     plaster.add(v, [tuple(reversed(x)) for x in f])
 
     # ── 外壁（外向きの面）と外の蛇腹。夜明けの岸から遠くに見え、温室の頭から振り返ると見える ──
@@ -1351,6 +1361,17 @@ def build_platform(rail: Rail, fast: bool) -> None:
     for prof in ([(r_out - 0.02, WALL_H + 0.25), (r_out + 0.35, WALL_H + 0.35), (r_out + 0.5, WALL_H + 0.6), (r_out + 0.5, WALL_H + 0.78), (r_out + 0.2, WALL_H + 0.9)],
                  [(r_out + 0.06, WATER_Y - 0.4), (r_out + 0.28, WATER_Y - 0.2), (r_out + 0.28, DECK_Y + 0.9), (r_out + 0.02, DECK_Y + 1.05)]):
         v, f = lathe(prof, 160, (cx, 0, cz))
+        if prof[0][1] > WALL_H:
+            # 蛇腹は北の門の上で出を浅くする（温室の側の部屋の境目 s1 +1m を越えない。ADR-0013）
+            a_gate = hall_angle(h, north)
+            ang = np.arctan2(v[:, 2] - cz, v[:, 0] - cx)
+            da = (ang - a_gate + np.pi) % (2 * np.pi) - np.pi
+            k = 1.0 - 0.65 * np.exp(-(da / 0.22) ** 2)
+            rad = np.hypot(v[:, 0] - cx, v[:, 2] - cz)
+            new_rad = r_out + (rad - r_out) * k
+            v = v.copy()
+            v[:, 0] = cx + (v[:, 0] - cx) * new_rad / rad
+            v[:, 2] = cz + (v[:, 2] - cz) * new_rad / rad
         # 外の腰と蛇腹も、開口（南の入口・水路）の中は切る
         ext.add(v, [x for x in f if opening_keep(v[list(x)], h, rail)])
     # 高窓の見込み（壁の厚みの筒。窓の軸の方を向く）と、内と外の乳白のガラス
@@ -1690,6 +1711,11 @@ def build_platform(rail: Rail, fast: bool) -> None:
     vv = np.vstack([north, ring])
     ff = [(0, 1 + i, 1 + (i + 1) % 48) for i in range(48)]
     helpers.append(mesh_object('platform.bake_gate_light', vv, ff + [tuple(reversed(x)) for x in ff], emitter('platform.gate_light', '#d9e6ff', 2.2), coll, smooth=False))
+    # 焼き込みだけの光の蓋: 壁の上（蛇腹とドームの付け根のあいだ）を閉じる。内側を焼くときは外の殻を隠すので、
+    # ここが開いていると空の光が壁の上から漏れる（見えない面なので書き出さない）
+    v, f = lathe([(r_in - 0.79, WALL_H + 0.05), (r_out + 0.3, WALL_H + 0.05)], 160, (cx, 0, cz))
+    blockers = [mesh_object('platform.bake_wall_cap', v, f + [tuple(reversed(x)) for x in f], material('platform.bake_cap', '#3a4250', 0.9), coll, smooth=False)]
+    cut_region(blockers, bay.front, bay.d, bay.l, WALL_T, BAY_N + WALL_T)
     sp = door_c + door_out * (depth + 0.4)
     vv = np.array([sp - door_side * SOUTH_DOOR_HALF + [0, DECK_Y, 0], sp + door_side * SOUTH_DOOR_HALF + [0, DECK_Y, 0],
                    sp + door_side * SOUTH_DOOR_HALF + [0, SOUTH_DOOR_TOP, 0], sp - door_side * SOUTH_DOOR_HALF + [0, SOUTH_DOOR_TOP, 0]])
@@ -1700,10 +1726,12 @@ def build_platform(rail: Rail, fast: bool) -> None:
     lamp_mat = bpy.data.materials['platform.lamp_light']
 
     def morning():
-        # 降車の朝: 暖かい空の光（ドームのガラスの帯から）と低い朝日（高窓とガラスの帯から壁に金色の斑）
-        set_world('#f0dcc0', 4.4)
-        sun_ob = sun('platform.sun', MORNING_SUN_DIR, '#ffcf96', 13.0, 1.0)
-        lamp_mat.node_tree.nodes['Emission'].inputs['Strength'].default_value = 1.5
+        # 降車の朝（設計書「ホールは朝の光に変わっている」）: 東の高窓とドームのガラスの帯から朝日が差し、西の壁と水面に
+        # 金色の斑。暖かい空の光が帯から満ちる。灯りは消えかけの暖かい色で、影の側を少し持ち上げる
+        set_world('#f6d6a6', MORNING_SKY)
+        # 太陽の角の大きさを広げて、ガラスの帯の影の縁をやわらげる（帯の輪が壁にくっきり写ると目玉のように見える）
+        sun_ob = sun('platform.sun', INTERIOR_MORNING_SUN_DIR, '#ffbd78', MORNING_SUN, 7.0)
+        lamp_mat.node_tree.nodes['Emission'].inputs['Strength'].default_value = MORNING_LAMPS
         sc = bpy.data.materials['platform.sconce_light'].node_tree.nodes['Emission'].inputs['Strength']
         sc.default_value = 1.0
         gl = bpy.data.materials['platform.gate_light'].node_tree.nodes['Emission'].inputs['Strength']
@@ -1717,20 +1745,21 @@ def build_platform(rail: Rail, fast: bool) -> None:
             sc.default_value = 22.0
         return restore
 
-    # 反射用の環境画像（ホールの中ほど、レールの高さ）。夜明け前と朝
+    # 反射用の環境画像（ホールの中ほど、レールの高さ）。夜明け前と朝。焼き込みだけの補助の光源と外の殻は写さない
+    # （補助の光源は水面に実在しない白い円盤として映る。外の殻は内の焼き込みと同じく、ドームの帯の光を遮らない）
     env_at = np.array([cx, 4.5, cz])
-    holder['env'] = render_env('platform.env', env_at, samples=24 if fast else 96)
+    env_hide = helpers + [o for o in objs if o.type == 'MESH' and o.get('exterior') and o not in bake]
+    holder['env'] = render_env('platform.env', env_at, samples=24 if fast else 96, hide=env_hide)
     restore = morning()
-    holder['env_morning'] = render_env('platform.env_morning', env_at, samples=24 if fast else 96)
+    holder['env_morning'] = render_env('platform.env_morning', env_at, samples=24 if fast else 96, hide=env_hide)
     restore()
 
-    # 見えない面の削除の視点: 乗り場と降車（前後の余裕も）、夜明けの岸の朝日の誘導から先（遠くに乗り場が見える）、
+    # 見えない面の削除の視点: 乗り場と降車（前後の余裕も）、夜明けの岸の区間（遠くに乗り場が見える）、
     # 温室の頭の 12 秒（膜から振り返る）
-    sunrise_lure_t = MOMENT_DAWN_SUNRISE_BAR * SEC_PER_BAR - LURE_LEAD
     vp = np.vstack([
         rail.samples(*rail.span('platform', after=25.0), 0.5),
         rail.samples(*rail.span('departure', before=30.0), 0.5),
-        rail.samples(rail.s_at(sunrise_lure_t), rail.sections['dawn'][1], 1.0),
+        rail.samples(*rail.sections['dawn'], 1.0),
         rail.samples(rail.sections['greenhouse'][0], rail.s_at(rail.time_of(rail.sections['greenhouse'][0]) + 12.0), 0.5),
     ])
     cp = np.vstack([rail.samples(*rail.sections['platform'], 0.25), rail.samples(*rail.sections['departure'], 0.25)])
@@ -1763,19 +1792,21 @@ def build_platform(rail: Rail, fast: bool) -> None:
     finish_room('platform', rail, objs, vp, cp, bake, size=2048, samples=samples, extra_bakes=[('morning', morning)], webp=90,
                 more_bakes=[('lightmap_exterior', bake_ext, 1024, greenhouse_day, {'morning': shore_morning})],
                 hide_while_baking={'lightmap': [o.name for o in objs if o.get('exterior') and o not in bake]})
-    for ob in helpers:
+    for ob in helpers + blockers:
         bpy.data.objects.remove(ob)
     save_blend('platform')
 
 
 #: 温室の日の光の進む向き（blender/scripts/rooms/greenhouse.py の SUN_DIR の写し）
 GREENHOUSE_SUN_DIR = (-0.32, -0.40, 0.86)
+#: 降車のホールの中の朝日の進む向き（three.js の座標）。設計書「東の高窓から朝日が差す」: 東から西へ、高さ約 27°
+INTERIOR_MORNING_SUN_DIR = (-0.80, -0.45, 0.40)
+#: 降車の朝の焼き込みの空・朝日・灯りの強さ
+MORNING_SKY = 9.0
+MORNING_SUN = 16.0
+MORNING_LAMPS = 6.0
 #: 朝の光の進む向き（three.js の座標）。夜明けの岸と同じ朝日（src/rooms/dawn/sky.ts の方位 30°、高さ約 15°）から来る光
 MORNING_SUN_DIR = (0.837, -0.259, 0.483)
-#: 夜明けの岸の朝日の小節と、誘導の秒（src/config.ts の MOMENT_BARS.dawnSunrise と LURE_LEAD_SEC の写し）
-MOMENT_DAWN_SUNRISE_BAR = 213
-SEC_PER_BAR = 10.0 / 3.0
-LURE_LEAD = 3.0
 #: 水門の湾の北の幅（レールから、m）
 BAY_N = 6.4
 #: 水門の館の正面は、降車の区間の始まりからこの距離だけホールの側。正面から岸の側へ出る飾り（蛇腹 0.5m・腰・額縁）も
