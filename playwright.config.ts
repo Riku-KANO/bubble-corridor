@@ -8,6 +8,8 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 90_000,
   fullyParallel: false,
+  // 時間に敏感な検査（fps・音の時計）と重い通し（13分×2、高解像度の撮影）が同時に走りすぎないよう、並列は2まで
+  workers: 2,
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${port}`,
