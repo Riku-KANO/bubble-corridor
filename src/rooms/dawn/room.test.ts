@@ -1,4 +1,5 @@
 // S-22 第5室「夜明けの岸」（親が作成。実装担当は変更しない）
+import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 import { MOMENT_BARS, SEC_PER_BAR } from '../../config';
 import {
@@ -52,6 +53,19 @@ describe('第5室 夜明けの岸', () => {
     const after = backgroundHsl(h.room);
     expect(after.l).toBeGreaterThan(before.l + 0.1);
     expect(after.h <= 60 || after.h >= 320).toBe(true);
+  });
+
+  it('朝日の光の向きと色は空気（atmosphere.glassLighting）で渡す: 日が昇るにつれて光が上から、暖かく（レビュー1巡目 P1）', async () => {
+    const h = await loadRoom(createDawnRoom);
+    h.play(sectionTimes('dawn').t0, SUNRISE - 10, 0.5);
+    const before = h.room.atmosphere.glassLighting;
+    h.play(SUNRISE - 10, SUNRISE + 5, 0.5);
+    const after = h.room.atmosphere.glassLighting;
+    expect(before?.keyDir, '日の出の前の光の向き').toBeDefined();
+    expect(after?.keyDir, '日の出の後の光の向き').toBeDefined();
+    expect(after!.keyDir!.y).toBeGreaterThan(before!.keyDir!.y);
+    const c = new THREE.Color(after!.keyColor ?? '#ffffff');
+    expect(c.r).toBeGreaterThan(c.b);
   });
 
   it('INT-6 隠れた小さな泡', async () => {

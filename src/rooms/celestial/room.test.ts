@@ -123,6 +123,39 @@ describe('第4室 星の天球', () => {
     expect(c.h).toBeLessThanOrEqual(260);
   });
 
+  it('星のガラス玉の内側の光だけ: 擬似照明のハイライトは殻にほとんど乗らない（atmosphere.glassLighting。レビュー1巡目 P2-1）', async () => {
+    const h = await loadRoom(createCelestialRoom);
+    for (const t of [492, 560, CONSTELLATION]) {
+      h.frame(t);
+      const l = h.room.atmosphere.glassLighting;
+      expect(l, `t=${t} の glassLighting`).toBeDefined();
+      expect(l!.keyIntensity ?? 1, `t=${t} の keyIntensity`).toBeLessThanOrEqual(0.05);
+    }
+  });
+
+  it('REN-3 low では殻を片面で描く（透明の両面は2回に分けて描かれ、全画面を何枚も塗るため。レビュー1巡目 P2-4）', async () => {
+    const h = await loadRoom(createCelestialRoom, { tier: 'low' });
+    for (const t of [500, 560, CONSTELLATION]) {
+      h.frame(t);
+      for (const s of findByRole(h.room.root, 'shell')) {
+        s.traverse((o) => {
+          const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+          for (const x of ([] as THREE.Material[]).concat(m ?? [])) expect(x.side, `t=${t} の殻の材質`).not.toBe(THREE.DoubleSide);
+        });
+      }
+    }
+  });
+
+  it('材質の種類は少なく（膜を抜けるフレームに組み立てとコンパイルが集まらない。触れる星のガラスは共有。レビュー1巡目 P2-5）', async () => {
+    const { room } = await loadRoom(createCelestialRoom);
+    const mats = new Set<THREE.Material>();
+    room.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      for (const x of ([] as THREE.Material[]).concat(m ?? [])) mats.add(x);
+    });
+    expect(mats.size).toBeLessThanOrEqual(20);
+  });
+
   it('REN-3 描画の予算（描く物 120 以下、三角形 high 150万以下・low 50万以下）', async () => {
     const high = drawStats((await loadRoom(createCelestialRoom, { tier: 'high' })).room.root);
     const low = drawStats((await loadRoom(createCelestialRoom, { tier: 'low' })).room.root);
