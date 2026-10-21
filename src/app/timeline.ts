@@ -1,26 +1,26 @@
 // 画面効果と殻を、乗車の時刻から決める（純粋）。
 // 柱「時刻から決める」: ?t= で途中から始めても、巻き戻しても、同じ時刻なら同じ絵になる。フレームの積み上げで状態を作らない。
 // 時刻は config とキューシートから読む（膜・見どころ・降車の時刻をここに書き写さない）。
-import { CELESTIAL_BLACKOUT_SEC, TRANSITION_SEC } from '../config';
+import { CELESTIAL_BLACKOUT_SEC, FX_TIMELINE, TRANSITION_SEC } from '../config';
 import type { Cue } from '../contracts/events';
 import type { ComfortMode } from '../contracts/ids';
 import { smoothstep } from '../core/easing';
 
 /** 殻が閉じ始める乗車の秒（ゴンドラが浮かび上がった後）。閉じる音もこの時刻に鳴らす */
-export const BOARD_START_SEC = 0.5;
+export const BOARD_START_SEC = FX_TIMELINE.boardStartSec;
 /** 暗転の入りにかける秒（唯一の黒でも、入りは急な明るさの変化にしない。膜を通る瞬間とそろえる短さ） */
-export const BLACKOUT_ENTER_SEC = 0.25;
+export const BLACKOUT_ENTER_SEC = FX_TIMELINE.blackoutEnterSec;
 /** 暗転のあとの点灯にかける秒。光の点滅を抑えるモードではもっとゆっくり（急な明るさの変化を避ける） */
-export const BLACKOUT_RAMP_SEC = 2.5;
-export const BLACKOUT_RAMP_REDUCED_SEC = 6;
+export const BLACKOUT_RAMP_SEC = FX_TIMELINE.blackoutRampSec;
+export const BLACKOUT_RAMP_REDUCED_SEC = FX_TIMELINE.blackoutRampReducedSec;
 /** 万華鏡の折り返しが満ちるまでの秒と、天球の頭に向けて引くまでの秒 */
-export const KALEIDOSCOPE_FADE_IN_SEC = 6;
-export const KALEIDOSCOPE_FADE_OUT_SEC = 8;
+export const KALEIDOSCOPE_FADE_IN_SEC = FX_TIMELINE.kaleidoscopeFadeInSec;
+export const KALEIDOSCOPE_FADE_OUT_SEC = FX_TIMELINE.kaleidoscopeFadeOutSec;
 /** 万華鏡の模様の回転の速さ（ラジアン/秒）。穏やかモードでは止める */
-export const KALEIDOSCOPE_SPIN_RAD_PER_SEC = 0.15;
+export const KALEIDOSCOPE_SPIN_RAD_PER_SEC = FX_TIMELINE.kaleidoscopeSpinRadPerSec;
 /** 見どころの前後でブルームが強まる幅（秒、頂点から片側）と頂点の強さ（0〜1）。設計書に値がないので仮 */
-export const BLOOM_HALF_SEC = 6;
-export const BLOOM_PEAK = 0.6;
+export const BLOOM_HALF_SEC = FX_TIMELINE.bloomHalfSec;
+export const BLOOM_PEAK = FX_TIMELINE.bloomPeak;
 
 /** ブルームが頂点になる見どころ（花・模様・星座・朝日） */
 const BLOOM_CUES: readonly Cue['name'][] = ['greenhouse.bloom', 'kaleidoscope.flower', 'celestial.constellation', 'dawn.sunrise'];

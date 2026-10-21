@@ -74,7 +74,13 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const presetOf = (setting: QualitySetting): QualityPreset => presetFor(setting === 'auto' ? detectTier(hints) : setting, hints);
   let appliedQuality = wantedQuality();
   let quality: QualityPreset = presetOf(appliedQuality);
-  let dynRes = new DynamicResolution(quality);
+  // 画面（2D のウィンドウ）の動的な解像度は、画面の目標の fps で動かす。一体型のヘッドセットの preset は VR の 72fps だが、
+  // 2D のブラウザが 60Hz だと届かずに倍率が最小まで下がり続ける（VR の間は動的な解像度を止める）
+  const screenDynRes = (q: QualityPreset): DynamicResolution =>
+    new DynamicResolution(hints.isXR ? { ...q, targetFps: presetFor(q.tier, { ...hints, isXR: false }).targetFps } : q);
+  let dynRes = screenDynRes(quality);
+  // ガラスの既定の品質は、最初の材質（ゴンドラの殻）を作る前に決める
+  setDefaultGlassTier(quality.tier);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x14181f);
@@ -305,7 +311,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
       appliedQuality = wanted;
       quality = presetOf(wanted);
       roomCtx.quality = quality;
-      dynRes = new DynamicResolution(quality);
+      dynRes = screenDynRes(quality);
       applyFxEnabled();
       onResize();
     }
