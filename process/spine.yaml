@@ -46,8 +46,8 @@ slices:
   depends_on: [S-00]
   paths: [src/core/sound/**, src/audio/**, dev/audio.html, src/dev/audio/**]
   tests: [src/core/sound/sound.test.ts, src/audio/audio.test.ts]
-  status: green
-  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 実装 1/3 で緑（sound 14・audio 21、全体58件、check --quick ALL OK、テスト無変更）。OfflineAudioContext で乗車全体を測定: 5:10 は -55dB、9:50 前後が最大 -14dB、ピーク 0.82。ポーズは suspend ではなく門で止める（UI の音を鳴らすため）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 吊られた泡（bowl）の音が鳴っている途中で切れる（出口を外す時刻が短い）。P2 chime が触れた音の枠を使う、見どころの効果音が cue の1フレーム後＋負の dt、映像の時計が currentTime の塊で進み出力遅延を補正しない、先読み0.2秒が短い、頂点で同時約305音源、unlock の同期が重い、見どころの間の触れた音を控えめに。core の VERSION は統合で親が上げる。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。bowl は 5.1s 以降も鳴り続ける（旧は無音）、時計のずれの標準偏差 1.7〜2.0ms → 0.08ms、頂点の同時音源 226（予算150で193）、乗車全体の描画 109.8s → 52.9s、unlock の同期 340〜424ms → 134〜157ms（AudioContext の生成が下限）。レビュー 消費 2/2 2026-10-20 レビュー2巡目 approve（P1なし）。P2 3件（最初の door.open が鳴らない、時計が大きくずれたとき止まる・飛ぶ、先読みの予約まで数える予算でリズムが散らばって抜ける）を最後の3試行目で直す。実装 消費 3/3'
+  status: integrated
+  notes: '2026-10-20 親がテスト（sound 14、audio 26）を作成。赤の証跡: sound 11 failed（STUB）、audio.test は ./clock・./conductor・./score・./touch が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 実装 1/3 で緑（sound 14・audio 21、全体58件、check --quick ALL OK、テスト無変更）。OfflineAudioContext で乗車全体を測定: 5:10 は -55dB、9:50 前後が最大 -14dB、ピーク 0.82。ポーズは suspend ではなく門で止める（UI の音を鳴らすため）。レビュー 消費 1/2 2026-10-20 レビュー1巡目 request_changes: P1 吊られた泡（bowl）の音が鳴っている途中で切れる（出口を外す時刻が短い）。P2 chime が触れた音の枠を使う、見どころの効果音が cue の1フレーム後＋負の dt、映像の時計が currentTime の塊で進み出力遅延を補正しない、先読み0.2秒が短い、頂点で同時約305音源、unlock の同期が重い、見どころの間の触れた音を控えめに。core の VERSION は統合で親が上げる。実装 消費 2/3 2026-10-20 実装 2/3 で緑（check --quick ALL OK）。bowl は 5.1s 以降も鳴り続ける（旧は無音）、時計のずれの標準偏差 1.7〜2.0ms → 0.08ms、頂点の同時音源 226（予算150で193）、乗車全体の描画 109.8s → 52.9s、unlock の同期 340〜424ms → 134〜157ms（AudioContext の生成が下限）。レビュー 消費 2/2 2026-10-20 レビュー2巡目 approve（P1なし）。P2 3件（最初の door.open が鳴らない、時計が大きくずれたとき止まる・飛ぶ、先読みの予約まで数える予算でリズムが散らばって抜ける）を最後の3試行目で直す。実装 消費 3/3 2026-10-20 2026-10-21 実装 3/3 で緑（sound・audio 35件、check --quick ALL OK）。最初の door.open は unlock の同期で配線を作って鳴る（音源 0→17）。聞こえている位置の時計は歩み 0.5〜1.25 倍・変化 0.1/秒で追いかけ、8場面のシミュレーションで止まり0・巻き戻り0。予算は4小節の楽句ごとに level を楽曲の予定から決め、散らばり0。レビューは 2/2 消費済み（2巡目 approve）のため親が差分とテストで確認。core の CHANGELOG は S-12 と同じ「未リリース」にまとめた（0.1.1 は付けない。版は S-18 で 0.4.0）。統合'
 - id: S-12
   title: 共通部品（ガラスの材質ライブラリ、曇りと指の文字、品質プリセットと動的な解像度）
   wave: 1
@@ -121,10 +121,10 @@ slices:
   milestone: M0
   requirements: [CORE-1, CORE-2, CORE-5]
   depends_on: [S-11, S-12]
-  paths: [src/core/**, src/app/**, src/contracts/room.ts, src/rooms/testing.ts, src/input/look.ts, src/gondola/**, src/rooms/placeholder.ts, scripts/check-core.ts]
-  tests: [scripts/core-union.test.ts]
-  status: todo
-  notes: '2026-10-21 発案者の判断「和集合で統合」。案1のセッションが並行で src/core を 0.3.0（glass/、perf/、transition/、renderer・bench・params・scene・quality）まで作っていた。こちらのリポジトリだけを触る'
+  paths: [src/core/**, src/app/**, src/contracts/room.ts, src/rooms/testing.ts, src/input/look.ts, src/rooms/placeholder.ts, src/dev/core/**, scripts/check-core.ts]
+  tests: [scripts/core-union.test.ts, src/core/quality-tier.test.ts]
+  status: integrated
+  notes: '2026-10-21 発案者の判断「和集合で統合」。案1のセッションが並行で src/core を 0.3.0（glass/、perf/、transition/、renderer・bench・params・scene・quality）まで作っていた。こちらのリポジトリだけを触る 2026-10-20 2026-10-21 親がテストを作成（scripts/core-union.test.ts: 案1 8aa3a5c の src/core 0.3.0 の30ファイルを git の blob の SHA で照合、版 0.4.0、変更記録、quality と quality-tier、easeGlass = glassEase、core の境界）。こちらの quality のテストを quality-tier.test.ts へ移した（中身は同じ）。赤の証跡: 35 failed / 1 passed。親の試し: 案1の 0.3.0 はこちらの tsc・eslint をそのまま通り、テスト 120件も緑。ぶつかるのは quality の利用側（app・rooms/testing・contracts/room・dev/core・materials/glass）だけ。gondola は和集合で触らないので paths から外し、dev/core を足した。実装 消費 0/3 2026-10-20 2026-10-21 実装 1/3 で緑（案1 8aa3a5c との和集合 0.4.0、200件、check --quick ALL OK、build 通る）。ただし core:sync で「同じ版で中身が違う」: 案1が並行で 0.4.0（b88d317）に進んでいた。親がテストの基準を b88d317（53ファイル）に取り直し、版を 0.5.0 に（ADR-0011、CORE-5 を更新）。1回目の判断（TierPreset、look の戻しは easeInOutSine、check-core でテストも検査）は採る。実装 消費 2/3 2026-10-20 2026-10-21 実装 2/3 で緑（core 25ファイル 303件、build 通る、core:sync の表示は こちら 0.5.0 / 相手 0.4.0 で止まらない、案1 は無変更）。lint は案1から取り込んだ perf/gpu-span.test.ts の no-this-alias だけ赤 → 親が eslint.config.js に src/core/**/*.test.ts に限る上書きを足して ALL OK。レビュー1巡目へ 2026-10-20 2026-10-21 レビュー1巡目 request_changes（P1 なし）: P2-1 案1が受け取ると案1の検査が赤（noUncheckedIndexedAccess で37件、condensation.test の jsdom）。親が tsconfig.core.json を typecheck に足し、jsdom の禁止をテストにし、親のテストの添字を直した（赤: 実装29件の型エラー、condensation 8件）。申し送り: S-24 は quality-tier・TierPreset へ（統合で親）、CSS の --ease-glass を glassEase の 0.2 に（統合で親）、3D の遷移の smoothstep と glassEase の関係は S-25。実装 消費 3/3（最後） 2026-10-21 2026-10-21 実装 3/3 で緑（core 304件、check --quick ALL OK は tsconfig.core.json 込み、build 通る、案1は無変更）。親が親のテスト3つを案1の biome の書式に、main（S-24）を取り込み app.ts と device.ts を quality-tier・TierPreset に、--ease-glass を GLASS_EASE_CSS に。レビュー2巡目へ 2026-10-21 2026-10-21 レビュー2巡目 approve（P1・P2 なし）。案1の tsc・vitest・biome を写した場所で core 66ファイルが型エラー0・247件緑・書式差分0。書式の差分はトークン単位で振る舞いを変えない。親が統合時に P3: tsconfig.core.json を案1に寄せる（webxr・.ts の import を外す）、CHANGELOG の訂正。残し: voices.ts とテストの ! が案1の biome で警告22件（急がない）。main の check（ビルド・e2e 込み）を確認。統合'
 - id: S-20
   title: 部屋A（待ち列と入口、乗り場と降車、朝露の温室、ゴンドラ）を Blender で造形・焼き込みし、完成品質で
   wave: 2
@@ -133,9 +133,9 @@ slices:
   requirements: [INT-1, INT-3, INT-4, INT-6, TRN-1, RIDE-8, BLD-4, BLD-5, BLD-6, BLD-7]
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/lobby/**, src/rooms/platform/**, src/rooms/greenhouse/**, src/gondola/**, dev/rooms-a.html, src/dev/rooms-a/**, blender/scripts/rooms/lobby.py, blender/scenes/lobby.blend, public/assets/rooms/lobby*, blender/scripts/rooms/platform.py, blender/scenes/platform.blend, public/assets/rooms/platform*, blender/scripts/rooms/greenhouse.py, blender/scenes/greenhouse.blend, public/assets/rooms/greenhouse*, blender/scripts/rooms/gondola.py, blender/scenes/gondola.blend, public/assets/rooms/gondola*]
-  tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts]
-  status: todo
-  notes: ''
+  tests: [src/rooms/lobby/room.test.ts, src/rooms/platform/room.test.ts, src/rooms/greenhouse/room.test.ts, src/gondola/gondola.test.ts]
+  status: red
+  notes: '2026-10-20 2026-10-21 親がテストを作成（lobby・platform・greenhouse・gondola。BLD-4〜7 は expectBlenderRoom で glb とライトマップの付け方まで確かめる）。赤の証跡: 4 files 20 failed / 8 passed。ゴンドラはコードで作ってよい（同期の createGondola のため。glb は任意）。実装 消費 0/3'
 - id: S-21
   title: 部屋B（雨の回廊と扉の分岐、万華鏡の間の金と青）を Blender で造形・焼き込み
   wave: 2
@@ -145,8 +145,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/rain/**, src/rooms/kaleidoscope/**, dev/rooms-b.html, src/dev/rooms-b/**, blender/scripts/rooms/rain.py, blender/scenes/rain.blend, public/assets/rooms/rain*, blender/scripts/rooms/kaleidoscope.py, blender/scenes/kaleidoscope.blend, public/assets/rooms/kaleidoscope*]
   tests: [src/rooms/rain/room.test.ts, src/rooms/kaleidoscope/room.test.ts]
-  status: todo
-  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境）'
+  status: red
+  notes: '2026-10-20 万華鏡は一直線で長さ約105m（平均0.8 以上のため）。「中」の広さに収めるなら長い多面体の筒。部屋の物は視点から約2m より遠く（S-16 の折り返しの境） 2026-10-20 2026-10-21 親がテストを作成（rain・kaleidoscope、expectBlenderRoom 込み）。赤の証跡: 2 files 15 failed / 5 passed。実装 消費 0/3 2026-10-21 実装 1/3（Opus）で緑（rain 10・kaleidoscope 10・担当のテスト10、check --quick ALL OK）。雨 3.2MB・万華鏡 4.6MB、60fps（WebGPU・WebGL2）。連続した壁と鏡の板は clearance_exempt にして、本当の三角形で 1.7m 以上を Blender と TS で確かめる、という判断をレビューで厳しく見る。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 触れたガラス片の回転を毎フレーム積み上げる（時刻から決まらない）、色のこだまが 3.3Hz で光る（明滅の上限を超える）。P2 exempt の距離の検査が自分の区間だけ（実測 1.838m で足りている）、黒い街と床の映り込み、隠した物のシェーダの組み立て、部屋から setGlassLighting、扉の解釈（ADR-0013 で仮、発案者に確認中）。exempt の判断は実測で RIDE-8 を弱めていない。親が testing.ts に shapeClearanceViolations と rules.test を足し（main）、P1-1 と本当の形の距離をテストにした（赤 2件）。実装 消費 2/3'
 - id: S-22
   title: 部屋C（星の天球の多層の殻と星座、夜明けの岸）を Blender で造形・焼き込み
   wave: 2
@@ -156,8 +156,8 @@ slices:
   depends_on: [S-10, S-12, S-17]
   paths: [src/rooms/celestial/**, src/rooms/dawn/**, dev/rooms-c.html, src/dev/rooms-c/**, blender/scripts/rooms/celestial.py, blender/scenes/celestial.blend, public/assets/rooms/celestial*, blender/scripts/rooms/dawn.py, blender/scenes/dawn.blend, public/assets/rooms/dawn*]
   tests: [src/rooms/celestial/room.test.ts, src/rooms/dawn/room.test.ts]
-  status: todo
-  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒'
+  status: red
+  notes: '2026-10-20 ADR-0009: 天球の外殻は中心から約60m 以内（入口の膜まで85m、出口まで62m）。前半は星の海の中で球を外から見て近づき、後半に殻を抜けて中心へ。万華鏡（S-21）は一直線120秒で長さ約105m の長い多面体の筒 2026-10-20 2026-10-21 親がテストを作成（celestial・dawn、expectBlenderRoom 込み。ADR-0009: 外殻 62m 以内、暗転が明けたとき殻の外で、球の縁が正面から 30° 以内）。赤の証跡: 2 files 16 failed / 5 passed。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3（Opus）で緑（celestial 12・dawn 9・担当のテスト9、check --quick ALL OK、render-paths 2/2）。天球 2.79MB・岸 2.15MB、60fps（WebGPU・WebGL2）、mobile low 58〜60fps。親が最新の main を取り込み（30件緑）。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes: P1 部屋が setGlassLighting を直接呼ぶ（S-25 と重なると岸で照明が 4Hz で明滅、単独でも区間を出た後に照明が残る）→ Atmosphere.glassLighting に寄せる（S-25 の統合の後に main を取り込んで直す）。P2 殻に擬似光源の白いにじみ（keyIntensity 0〜0.05）、振り返ると 11:10 に天球が消える（岸に安い代役）、殻を抜ける光の輪が目の位置から始まる（数 m 先から）、low の殻が両面で重い（片面）、膜のフレームで材質約50の組み立て（触れる星を sharedGlass、app で compileAsync）。実装 消費 1/3 2026-10-21 親が最新の main（S-25）を取り込み、指摘をテストにした（rules.test: 部屋は setGlassLighting を呼ばない、天球の glassLighting の keyIntensity ≤ 0.05、low の殻は片面、材質 ≤ 20、岸の朝日の glassLighting。赤 5件）。app の compileAsync は S-29。実装 消費 2/3'
 - id: S-23
   title: VR（immersive-vr、座る/立つ、指先とコントローラーで触れる、外周の暗さ、曇りガラスのメニュー）と描画経路の検証
   wave: 1
@@ -178,8 +178,8 @@ slices:
   depends_on: [S-10, S-14, S-15, S-16, S-23]
   paths: [src/app/**, src/main.ts, src/contracts/xr.ts, src/contracts/ui.ts, scripts/dev/**]
   tests: [src/app/timeline.test.ts, src/app/idle-chime.test.ts]
-  status: red
-  notes: '2026-10-20 親がテスト（timeline 7件、idle-chime 3件）を作成。赤の証跡: ./timeline・./idle-chime が未実装で読み込み失敗。実装 消費 1/3'
+  status: integrated
+  notes: '2026-10-20 親がテスト（timeline 7件、idle-chime 3件）を作成。赤の証跡: ./timeline・./idle-chime が未実装で読み込み失敗。実装 消費 1/3 2026-10-20 2026-10-21 実装 1/3 で緑（app 23件、e2e 7件）。親が最新の main を取り込み、UiState.viewMode を省略できる形に（S-13 の UI・確認ページの型を壊さない）。check --quick ALL OK。レビュー1巡目へ 2026-10-20 2026-10-21 レビュー1巡目 request_changes（P1 なし）: P2 VR の暗転なし、一体型のヘッドセットで isXR が偽、毎フレームの確保2か所、setDefaultGlassTier・setGlassFlashScale の配線なし。親が P2 の2件をテストにした（xr-darkness.test.ts、device.test.ts、赤）。S-25 へ: gondola.rise、降車後の入口の部屋の計画、部屋ごとの setGlassLighting。実装 消費 2/3 2026-10-20 2026-10-21 実装 2/3 で緑（app 32件、check --quick ALL OK、e2e 7件）。VR の暗転は IWER の画像で、完全な黒の中にゴンドラの真鍮の縁と手の点だけが見える（.snaps/s24/vrdark-c-dark.png）。レビュー2巡目へ 2026-10-21 2026-10-21 レビュー2巡目 request_changes（P1 なし、P2 2件）: ゴンドラの殻のガラスが品質より先に作られ tier が効かない、一体型のヘッドセットで画面の動的な解像度の目標が 72fps で倍率が最小まで下がる。レビューは 2/2 消費済みのため親が直した（setDefaultGlassTier を先に、画面の動的な解像度は画面の目標 fps、暗転の球の描画順 8500、仮の定数を config の FX_TIMELINE・XR.darknessMargin へ）。IWER の Quest 3 で VR を出入りしても倍率 0.90 のまま、e2e 7件、check --quick ALL OK。ADR-0012（VR の暗転は縁を残す）。S-25 へ: gondola.rise、降車後の入口の部屋の計画、部屋ごとの setGlassLighting、3D の遷移の曲線（smoothstep と glassEase）。統合'
 - id: S-25
   title: 統合・後半（部屋ごとのガラスの擬似照明、UiState の viewMode、音の時計と映像の確認、13分の通しの e2e、関門1・2の計測）
   wave: 3
@@ -187,7 +187,51 @@ slices:
   milestone: M1
   requirements: [INT-5, TRN-3, REN-3, UI-2]
   depends_on: [S-11, S-12, S-13, S-18, S-24]
-  paths: [src/app/**, src/main.ts, e2e/**, scripts/dev/**, docs/gates.md]
-  tests: [e2e/ride.spec.ts]
+  paths: [src/app/**, src/main.ts, e2e/ride.spec.ts, e2e/smoke.spec.ts, scripts/dev/**]
+  tests: [e2e/ride.spec.ts, src/app/room-plan.test.ts, src/app/glass-lighting.test.ts]
+  status: integrated
+  notes: '2026-10-21 2026-10-21 親がテストを作成: room-plan.test（HOME_PLAN と planFor）、glass-lighting.test（空気から作る擬似照明と部屋の指定。契約 Atmosphere.glassLighting を追加）、e2e/ride.spec（PC 幅・スマートフォン幅で ?rate=60 の13分の通し、写真3枚、音の時計の速さと滑らかさ）。赤の証跡: 単体2ファイルが読み込み失敗。e2e 3件はいまの main で緑（関門2の守り）。ほかに依頼: gondola.rise の音、殻の閉じ開きの曲線を glassEase に。関門の記録（docs/gates.md）は部屋が入ってから親が書く。実装 消費 0/3 2026-10-21 2026-10-21 実装 1/3 で緑（app 49件、check --quick ALL OK、e2e 10件。負荷平均約8のときに render-paths の fps と音の時計の飛びが1回ずつ落ち、単独の再実行では緑）。担当が足したテスト: rise-sound.test、room-plan-home.test。レビュー1巡目へ 2026-10-21 レビュー1巡目 request_changes（P1 なし）: P2-1 雨の地面の色が緑に寄る・天球で地面が空より明るい、P2-2 降車の瞬間にゴンドラが90°回る（VR で世界が回る）、P2-3 暗い部屋で真鍮の縁が消えかける（コメントを直し S-26 へ）。e2e の不安定はテスト側（フレームの揺れを時計の飛びとみなす、fps を温まる前に1回だけ読む、並列の負荷）。親が P2-1・P2-2 をテストにし、e2e を直した（音の時計はフレームの時刻と比べる、fps は poll、workers 2）。実装 消費 2/3 2026-10-21 実装 2/3 で緑（app 全部、check --quick ALL OK、e2e 10/10、負荷平均6〜8でも緑）。雨の地面 #b18361（25°）、天球の地面は空より暗い。降車後の向きは sceneTimeFor で変わらない（画像 .snaps/photo-turn/sheet.png）。親が「扉の選択は後から読み込まれる部屋にも届く」をテストに（rooms-door.test.ts、赤。S-21 の申し送り）。実装 消費 3/3（最後） 2026-10-21 レビュー2巡目 approve（P1・P2 なし）。親が統合時に P3: ガラスの擬似照明のつまみを config の GLASS_LIGHTING へ、xr.spec のフレームの検査を poll に。main の check（ビルド・comfort・e2e 10件）ALL OK。関門2の機械の項目を docs/gates.md に記録（合格）。真鍮の縁は S-26（M1 の VR の確認より前に必須）。統合'
+- id: S-26
+  title: 磨き・見た目（真鍮の縁の発光の下限、暗い部屋でも動かない基準が見える）
+  wave: 3
+  lane: core-visual
+  milestone: M1
+  requirements: [CORE-3, CAM-3]
+  depends_on: [S-18, S-25]
+  paths: [src/core/materials/**, src/core/README.md, src/core/CHANGELOG.md, src/core/VERSION, dev/core.html, src/dev/core/**]
+  tests: [src/core/materials/brass.test.ts]
+  status: green
+  notes: 'S-25 レビュー1巡目 P2-3 から: 暗い部屋（入口・乗り場・万華鏡・天球）では擬似照明の空の輝度が 0.18〜0.33 に下がり、createBrass の発光（空と地面を映す）が弱まって、座席から見下ろす縁がほぼ消える。設計書「視界の下側には常に縁」と ADR-0012（VR の暗転でも縁を残す）の基準が弱まる。真鍮に部屋の照明とは別の発光の下限を持たせる。core を変えるので版を上げる（0.5.1）。M1 の VR の確認より前に 2026-10-21 S-25 レビュー2巡目: 地面を空の 0.6 倍にして天球の真鍮の発光は既定の約21%（ride/04-stars で縁がほぼ見えない）。M1 の VR の確認より前に必須 2026-10-21 親がテストを作成（brass.test: brassGlow がシェーダと同じ式の CPU の写し。暗い部屋でも既定の6割以上、明るい部屋で 1.6 倍まで、暖かい色）。赤の証跡: brassGlow がない（4 failed）。実装 消費 0/3 2026-10-21 実装 1/3 で緑（core 251件、check --quick ALL OK、版 0.5.1）。下限 BRASS_FLOOR=0.5（灰）を max で、縁の明るさは暗い部屋で既定の 0.76 倍（天球 0.23→0.77）、白い空で 1.52。レビュー1巡目へ'
+- id: S-27
+  title: 磨き・画面（入れ子の opacity、快適モードの札、VR の初回の案内、viewMode の使い道）
+  wave: 3
+  lane: ui
+  milestone: M1
+  requirements: [UI-1, UI-3, UI-5]
+  depends_on: [S-25]
+  paths: [src/ui/**, src/styles/**, dev/ui.html, src/dev/ui/**]
+  tests: []
   status: todo
-  notes: ''
+  notes: 'S-13 レビュー2巡目の残し: 入れ子の opacity の掛け算（screens.css:53。深い文字ほど遅れて急に現れ、写真の画面で合成のレイヤーが約50）、快適モードの札の中央寄せ（screens.css:608）、ポーズの遷移の途中の撮り直し。S-25 の申し送り: VR で初回に乗ると案内（DOM）の6秒が頭の中では見えない（VR では案内を飛ばすか、3D の案内板にするかの判断。flow.ts の ride も関わる）、UiState.viewMode の使い道'
+- id: S-28
+  title: 磨き・VR（白い霧の曲線を glassEase に、XRSystemExtras の重複、殻を抜ける音の口）
+  wave: 3
+  lane: xr
+  milestone: M1
+  requirements: [CAM-3, TRN-2]
+  depends_on: [S-25]
+  paths: [src/xr/**, e2e/xr.spec.ts, dev/xr.html, src/dev/xr/**]
+  tests: []
+  status: todo
+  notes: 'S-18・S-25 のレビューから: VR の白い霧（src/xr/logic.ts:220）は smoothstep のまま（動きの曲線は1つ。ADR-0011）、XRSystemExtras.setGazeDwell が契約と重複（S-24）。S-22 の申し送り: 天球の殻を抜けるたびの音の口がない（契約のキューか音の担当への口。xr ではなく audio・契約の判断かもしれない）'
+- id: S-29
+  title: 統合・磨き（部屋のシェーダの先読み、小画面からの戻り先、部屋の境目の取り決め、関門1の計測）
+  wave: 3
+  lane: main
+  milestone: M1
+  requirements: [REN-3, TRN-1]
+  depends_on: [S-20, S-21, S-22]
+  paths: [src/app/**, src/main.ts, e2e/ride.spec.ts, e2e/smoke.spec.ts, scripts/dev/**]
+  tests: []
+  status: todo
+  notes: 'S-21・S-22 の申し送り: 次の部屋のシェーダを前の部屋にいる間に compileAsync で先読み（読み込み直後、部屋の最初の update の前。visible=false の物はコンパイルされない）。いまは膜を抜けるフレームで 2fps 前後まで落ちる。S-25 レビュー2巡目の P3: ライドフォトから小画面を開くと場面の時刻が 0 になる（returnTo に従わせる）、VR のまま入口へ戻ると xr.exit の数フレームが t=0。部屋の境目の取り決め（雨の突き当たりの壁 s1+0.5〜0.85 など、S-21）を decisions に。関門1の PC 60fps（天球の見どころ）を部屋の統合後に測って docs/gates.md に'

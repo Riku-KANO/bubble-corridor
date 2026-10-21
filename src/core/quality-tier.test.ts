@@ -1,8 +1,15 @@
 // S-12 REN-2 品質プリセットと自動判定、動的な解像度（親が作成。実装担当は変更しない）
+// S-18 で quality.ts から quality-tier.ts へ移した（quality.ts は案1の QUALITY_PRESETS。CORE-5）
 import { describe, expect, it } from 'vitest';
-import { DynamicResolution, detectTier, presetFor, type DeviceHints, type QualityTier } from './quality';
+import { type DeviceHints, DynamicResolution, detectTier, presetFor, type QualityTier } from './quality-tier';
 
-const desktop = (extra: Partial<DeviceHints> = {}): DeviceHints => ({ isMobile: false, isXR: false, hardwareConcurrency: 8, deviceMemoryGB: 8, ...extra });
+const desktop = (extra: Partial<DeviceHints> = {}): DeviceHints => ({
+  isMobile: false,
+  isXR: false,
+  hardwareConcurrency: 8,
+  deviceMemoryGB: 8,
+  ...extra,
+});
 
 describe('REN-2 自動判定', () => {
   it('スマートフォンと VR は low（速さを優先）', () => {
@@ -11,16 +18,30 @@ describe('REN-2 自動判定', () => {
   });
 
   it('PC: 単体 GPU や Apple の M シリーズは high、内蔵 GPU と不明は medium', () => {
-    expect(detectTier(desktop({ gpu: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0)' }))).toBe('high');
-    expect(detectTier(desktop({ gpu: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)' }))).toBe('high');
-    expect(detectTier(desktop({ gpu: 'ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0)' }))).toBe('high');
-    expect(detectTier(desktop({ gpu: 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)' }))).toBe('medium');
-    expect(detectTier(desktop({ gpu: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0)' }))).toBe('medium');
+    expect(
+      detectTier(desktop({ gpu: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0)' })),
+    ).toBe('high');
+    expect(
+      detectTier(desktop({ gpu: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)' })),
+    ).toBe('high');
+    expect(detectTier(desktop({ gpu: 'ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0)' }))).toBe(
+      'high',
+    );
+    expect(
+      detectTier(desktop({ gpu: 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)' })),
+    ).toBe('medium');
+    expect(
+      detectTier(desktop({ gpu: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0)' })),
+    ).toBe('medium');
     expect(detectTier(desktop())).toBe('medium');
   });
 
   it('ソフトウェア描画・少ないコア・少ないメモリは low', () => {
-    expect(detectTier(desktop({ gpu: 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)' }))).toBe('low');
+    expect(
+      detectTier(
+        desktop({ gpu: 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)' }),
+      ),
+    ).toBe('low');
     expect(detectTier(desktop({ gpu: 'llvmpipe (LLVM 15.0.7, 256 bits)' }))).toBe('low');
     expect(detectTier(desktop({ hardwareConcurrency: 2 }))).toBe('low');
     expect(detectTier(desktop({ deviceMemoryGB: 2 }))).toBe('low');
@@ -45,8 +66,8 @@ describe('REN-2 プリセット', () => {
   it('品質が上がるほど粒子・環境画像が増え、倍率は範囲内', () => {
     const p = tiers.map((t) => presetFor(t, desktop()));
     for (let i = 1; i < p.length; i++) {
-      expect(p[i].particleScale).toBeGreaterThanOrEqual(p[i - 1].particleScale);
-      expect(p[i].envMapSize).toBeGreaterThanOrEqual(p[i - 1].envMapSize);
+      expect(p[i]!.particleScale).toBeGreaterThanOrEqual(p[i - 1]!.particleScale);
+      expect(p[i]!.envMapSize).toBeGreaterThanOrEqual(p[i - 1]!.envMapSize);
     }
     for (const x of p) {
       expect(x.particleScale).toBeGreaterThan(0);
@@ -58,7 +79,8 @@ describe('REN-2 プリセット', () => {
   });
 
   it('スマートフォンは画素比の上限を 2 以下にする（発熱を抑える）', () => {
-    for (const t of tiers) expect(presetFor(t, { isMobile: true, isXR: false }).maxPixelRatio).toBeLessThanOrEqual(2);
+    for (const t of tiers)
+      expect(presetFor(t, { isMobile: true, isXR: false }).maxPixelRatio).toBeLessThanOrEqual(2);
   });
 });
 

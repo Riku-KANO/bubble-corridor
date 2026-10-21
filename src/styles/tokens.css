@@ -23,8 +23,8 @@
   /* 泡の膜: 虹色の薄膜 */
   --film-flat: linear-gradient(115deg, #8fe3ff 0%, #b9a7ff 24%, #ffb8dd 48%, #ffe3a3 72%, #b6ffd8 100%);
   --film-ring: conic-gradient(from var(--rim-angle), #8fe3ff, #b9a7ff, #ffb8dd, #ffe3a3, #b6ffd8, #8fe3ff);
-  /* ゆっくり始まって粘りながら止まる曲線（core/easing の easeGlass に合わせる） */
-  --ease-glass: cubic-bezier(0.55, 0, 0.1, 1);
+  /* ゆっくり始まって粘りながら止まる曲線。動きの曲線は1つ（core/transition/curve の GLASS_EASE_CSS = easeGlass と同じ。ADR-0011） */
+  --ease-glass: cubic-bezier(0.55, 0, 0.2, 1);
   /* 入力から 0.1 秒以内に動きで応える */
   --quick: 90ms;
 

@@ -24,6 +24,8 @@ export interface XRSystem {
   recenter(): void;
   /** 移動中に外周を暗くする強さ（0〜1） */
   setVignette(strength: number): void;
+  /** 見つめて触れるまでの秒（設定の 0.8 / 1.2 / 2.0）。既定は INTERACTION.gazeDwellSec */
+  setGazeDwell(sec: number): void;
   /** VR のメニュー（曇りガラスの板）を手を伸ばした先に出す */
   showMenu(items: readonly { readonly id: string; readonly label: string }[], onSelect: (id: string) => void): void;
   hideMenu(): void;

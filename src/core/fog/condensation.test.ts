@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
 // S-12 CORE-4 曇りと指の文字（親が作成。実装担当は変更しない）
 // 見た目は dev/core.html と snap で確かめる。ここは時間の進み方と約束（Promise）の決まりだけ。
-// jsdom には 2D の描画がない（getContext が null）。それでも例外を出さずに時間だけ進むこと。
+// DOM のない環境（node。案1の vitest は jsdom を持たないので、共通部品のテストは node で走る。S-18）でも、
+// 例外を出さずに時間だけ進み、canvas の大きさの決まりも保つこと。
 import { describe, expect, it } from 'vitest';
 import { createCondensation } from './condensation';
 
