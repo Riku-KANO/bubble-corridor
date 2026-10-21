@@ -708,8 +708,10 @@ export function createBrass(
     roughness: params.roughness ?? 0.35,
     metalness: 1,
   });
-  const lit = mix(uGround, uSky, smoothstep(-0.4, 0.5, reflectVector.y)).mul(fakeScale);
-  material.emissiveNode = materialColor.rgb.mul(max(lit, vec3(BRASS_FLOOR))).mul(BRASS_GAIN);
+  const up = smoothstep(-0.4, 0.5, reflectVector.y);
+  const lit = mix(uGround, uSky, up).mul(fakeScale);
+  // 下限にも反射の向きで弱い勾配をつける（暗い部屋で縁が1色の平板にならず、管の陰影が残る）。上の面（up = 1）は下限のまま
+  material.emissiveNode = materialColor.rgb.mul(max(lit, vec3(BRASS_FLOOR).mul(mix(0.8, 1, up)))).mul(BRASS_GAIN);
   return material;
 }
 
