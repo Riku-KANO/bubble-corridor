@@ -125,6 +125,9 @@ export const CAMERA = {
   recenterMaxDegPerSec: 60,
   /** 座席の目の高さ（ゴンドラの中心からの高さ、m） */
   seatEyeHeight: 0.15,
+  /** 縦持ちで保ちたい水平の半角（度）と、縦の視野角の上限（度）。設計書「縦持ちでは視野角を広げ」に値がないので仮（S-29） */
+  portraitMinHorizontalHalfDeg: 25,
+  portraitMaxVerticalFovDeg: 110,
 } as const;
 
 /** ゴンドラ（泡）の直径（m） */

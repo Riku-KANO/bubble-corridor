@@ -5,7 +5,7 @@
 // なぜ乗車の外でも計画を渡すのか: 降車して入口へ戻ったとき、最後の乗車の計画が残ると、
 // 入口の背景が前の部屋の空気のままになり（lobby が解放されていて空気が取れない）、
 // 乗り場と待ち列の部屋も解放されたままなので、もう一度乗ると頭で部屋が空になる。
-import { RIDE_DURATION } from '../config';
+import { RIDE_DURATION, STREAMING } from '../config';
 import { ROOM_OF_SECTION, type RoomId, type SectionId } from '../contracts/ids';
 import type { Ride } from '../contracts/ride';
 import type { ScreenId } from '../contracts/ui';
@@ -15,12 +15,14 @@ import { streamingPlan, type StreamingPlan } from '../ride';
 export type RoomPlan = StreamingPlan;
 
 /**
- * 待ち列・入口・案内などの計画。待ち列・入口（lobby）と乗り場（platform）を見せ、最初の部屋（greenhouse）も読み込んでおく
- * （乗った直後に温室が空にならない）。起動時に読み込む部屋の一覧もこれから取る。
+ * 待ち列・入口・案内などの計画。待ち列・入口（lobby）と乗り場（platform）を見せ、読み込むのもこの2つだけ。
+ * 起動時に読み込む部屋の一覧と、待ち列の灯りの進みもこれから取る。
+ * 温室（約5MB）は待ち列の間に読まない: 初回の読み込みを 10MB 以下に収める（関門4）。乗車の頭（streamingPlan の最初）から読み始めても、
+ * 温室の膜の15秒前に描き始めるまで45秒ある。
  */
 export const HOME_PLAN: RoomPlan = Object.freeze({
   visible: Object.freeze<RoomId[]>(['lobby', 'platform']),
-  keep: Object.freeze<RoomId[]>(['lobby', 'platform', 'greenhouse']),
+  keep: Object.freeze<RoomId[]>(['lobby', 'platform']),
 });
 
 /**
@@ -57,6 +59,17 @@ export function sceneTimeFor(screen: ScreenId, rideT: number): number {
     default:
       return 0;
   }
+}
+
+/** 小画面（開いた元の画面の景色の上に重なる画面） */
+const SUB_SCREENS: readonly ScreenId[] = ['shelf', 'settings', 'howto', 'credits'];
+
+/**
+ * 場面（ゴンドラの位置・部屋の計画・空気の部屋）を決める画面。小画面（棚・設定・乗り方・クレジット）は開いた元（returnTo）の画面の景色のまま、
+ * ほかはその画面そのもの。小画面で景色を入口に切り替えると、ライドフォト（降車の乗り場）から設定を開いたときに背景が入口の部屋へ跳ぶ。
+ */
+export function sceneScreenFor(screen: ScreenId, returnTo: ScreenId | null): ScreenId {
+  return SUB_SCREENS.includes(screen) && returnTo !== null ? returnTo : screen;
 }
 
 /**
@@ -103,4 +116,49 @@ export function homePlanFor(startSec: number | null, ride: Ride): RoomPlan {
     aheadCache.set(ahead, plan);
   }
   return plan;
+}
+
+/**
+ * 乗車中に、先の時刻の計画で描く部屋を、いまの計画の読み込みへ足すために先を見る秒数。次の部屋を描き始める窓（STREAMING.aheadSec）に、
+ * 読み込みと先読みが終わる余裕を足す。岸の区間（660 秒）は降車の乗り場を区間の頭から描くので、天球の間に先に読んでおかないと、
+ * 岸の頭で読み込みの終わった部屋がそのまま場面に足され、先読みなしで初めて描かれる（S-29 レビュー1巡目 P1-1）
+ */
+export const LOOKAHEAD_SEC = STREAMING.aheadSec + 10;
+
+const lookaheadCache = new WeakMap<RoomPlan, WeakMap<RoomPlan, RoomPlan>>();
+
+/**
+ * いまの計画に、先の計画で描く部屋の読み込みを足す（見せる部屋はいまの計画のまま。持つ部屋 keep だけ増える）。
+ * 先の計画の部屋がすべてもう keep にあれば、いまの計画をそのまま返す。同じ組には同じ参照を返す（RoomManager は参照で同じ計画かを比べる）。
+ * 戻り値は凍結した共有の物で、書き換えない。
+ */
+export function withLookahead(plan: RoomPlan, ahead: RoomPlan): RoomPlan {
+  // 毎フレーム呼ばれるので、先に作り済みの組を引き、足す部屋があるかは確保しないループで確かめる
+  const cached = lookaheadCache.get(plan)?.get(ahead);
+  if (cached) return cached;
+  let missing = false;
+  for (const id of ahead.visible) {
+    if (!plan.keep.includes(id)) {
+      missing = true;
+      break;
+    }
+  }
+  if (!missing) return plan;
+  let inner = lookaheadCache.get(plan);
+  if (!inner) {
+    inner = new WeakMap();
+    lookaheadCache.set(plan, inner);
+  }
+  const extra = ahead.visible.filter((id) => !plan.keep.includes(id));
+  const merged: RoomPlan = Object.freeze({ visible: plan.visible, keep: Object.freeze([...plan.keep, ...extra]) });
+  inner.set(ahead, merged);
+  return merged;
+}
+
+/**
+ * VR を出る途中か（入口へ戻る操作の後、VR のセッションが終わるまでの数フレーム）。この間は画面が入口でも、場面（時刻・部屋）を直前のまま保つ。
+ * 入口の場面（乗車の頭、入口の部屋）へ切り替えると、VR の中で世界が跳ぶ（S-29 レビュー1巡目 P2-4）。
+ */
+export function holdsSceneForVrExit(xrActive: boolean, screen: ScreenId): boolean {
+  return xrActive && screen === 'home';
 }
