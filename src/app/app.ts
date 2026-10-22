@@ -9,7 +9,7 @@ import type { RideClock } from '../contracts/clock';
 import type { RidePose } from '../contracts/ride';
 import type { RoomContext, RoomFrame, RoomModule } from '../contracts/room';
 import type { PhotoRecord } from '../contracts/photo';
-import type { Progress, QualitySetting, Settings, UiCommands, UiState } from '../contracts/ui';
+import type { Progress, QualitySetting, ScreenId, Settings, UiCommands, UiState } from '../contracts/ui';
 import { CAMERA, HIDDEN_BUBBLE_SECTIONS, PHOTO, RIDE_DURATION, TRANSITION_SEC, UI } from '../config';
 import { createBus } from '../core/events';
 import { easeGlass, lerp } from '../core/easing';
@@ -36,7 +36,7 @@ import { parseParams } from './params';
 import { createPrewarmer } from './prewarm';
 import { inMembraneQuiet } from './prewarm-schedule';
 import { createRiseSounder } from './rise-sound';
-import { HOME_PLAN, atmosphereRoomFor, homePlanFor, planFor, sceneScreenFor, sceneTimeFor, type RoomPlan } from './room-plan';
+import { HOME_PLAN, LOOKAHEAD_SEC, atmosphereRoomFor, holdsSceneForVrExit, homePlanFor, planFor, sceneScreenFor, sceneTimeFor, withLookahead, type RoomPlan } from './room-plan';
 import { RoomManager } from './rooms';
 import { loadRideData } from './ride-data';
 import { BOARD_START_SEC, fxAt, type FxTimeline, type FxTimelineOptions } from './timeline';
@@ -150,9 +150,10 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // ── 部屋 ──
   // quality は設定で変わるので書き換えられる型にしておく。作り直さず差し替えるだけなので、読み込み済みの部屋は前の品質のまま、
   // 次に読み込む部屋から新しい品質が効く（部屋は load の時点で品質を読む）
+  const assets = createAssetLoader();
   const roomCtx: Mutable<RoomContext> = {
     ride,
-    assets: createAssetLoader(),
+    assets,
     events: bus,
     quality,
     comfort: () => settings.comfort,
@@ -165,18 +166,41 @@ export async function startApp(root: HTMLElement): Promise<void> {
   // 膜の前後は、先読みの新しい一歩を始めない（膜の効果・部屋の入れ替えと重ねない）。乗車の外は静かなので、いつでもよい
   const membraneStarts = SECTION_IDS.map((id) => ride.sectionTime(id).t0);
   const prewarmQuiet = () => !(flow.screen === 'riding' || flow.screen === 'pause') || !inMembraneQuiet(frameT, membraneStarts);
-  const prewarmer = createPrewarmer({ renderer, scene, camera, fxActive: () => fxWanted(), xrActive: () => xr.active });
+  const prewarmer = createPrewarmer({ renderer, scene, camera, fxActive: () => fxWanted(), xrActive: () => xr.active, debug: params.debug });
   const prepareEnvironmentOf = (m: RoomModule): void => environment.prepare(m.atmosphere.environment);
+  /** 先読み中の部屋を、描く計画に入っていても場面に足さずに待つ最大の秒（乗車の時刻。膜の静かな窓の長さ 7 秒に少し足す） */
+  const PRELOAD_HOLD_MAX_SEC = 8;
+  const heldSince = new WeakMap<RoomModule, number>();
   const rooms = new RoomManager(ROOM_FACTORIES, roomCtx, scene, {
     // 次の部屋の読み込みも、膜の前後には始めない（部屋の読み込みは主スレッドを 50〜120ms 占める。区間が変わる瞬間に重ねない）
     mayStartPreload: prewarmQuiet,
     onPreload(module, alive) {
-      prepareEnvironmentOf(module); // 反射用の画像を、描画の外で先に作る
+      // 反射用の画像（PMREM）は、読み込みの終わりと別のタスクで、描画の外で先に作る（読み込みの続きと主スレッドを分ける）
+      setTimeout(() => {
+        if (alive()) prepareEnvironmentOf(module);
+      }, 0);
       // VR の間は、scheduler.yield がない端末では先読みをしない。three の compileAsync は window の rAF で主スレッドを返すので、
       // immersive の間に window の rAF が止まる端末では作業が終わらない（ADR-0014。撮影の下ごしらえと同じ）
       if (xr.active && !hasSchedulerYield()) return;
       prewarmedFor = prewarmContext();
-      void prewarmer.prepare(module.root, alive, prewarmQuiet);
+      // 部屋の画像（ライトマップの差し替え先、環境画像など）を、組む前に GPU へ転送しておく。2048 角の画像の転送は 1 回で 60〜95ms
+      // 主スレッドを占めるので、組む作業と別のフレームに分け、差し替えた最初のフレームにも残さない
+      void prewarmer.uploadTextures(assets.loadedTextures(`rooms/${module.id}.`), alive, prewarmQuiet);
+      return prewarmer.prepare(module.root, alive, prewarmQuiet);
+    },
+    // 描く計画に入っているのに先読みが終わっていない部屋（読み込みが遅れた、または岸の乗り場のように先に読めなかった部屋）は、
+    // 先読みなしで初めて描かない。いま走っている区間の部屋は待たない（空の景色より、少し止まるほうがよい）。待つのは最大 8 秒
+    holdAttach(module) {
+      if (!(flow.screen === 'riding' || flow.screen === 'pause') || ROOM_OF_SECTION[frameSection] === module.id) return false;
+      let since = heldSince.get(module);
+      if (since === undefined) {
+        since = frameT;
+        heldSince.set(module, since);
+      }
+      return frameT - since < PRELOAD_HOLD_MAX_SEC;
+    },
+    onRelease(module) {
+      prewarmer.forget(module.root);
     },
   });
 
@@ -584,6 +608,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
   /** 直近のフレームで描いた場面の乗車の秒（撮影が描いた場面の確認用。?debug の captures に足す） */
   let frameT = 0;
+  /** 直近のフレームの区間（先読み中の部屋を待たせるか決めるのに使う。いま走っている区間の部屋は待たせない） */
+  let frameSection: SectionId = 'platform';
   const noteCapture = () => debug?.recordCapture(frameT);
 
   async function takeShot(shot: ShotId) {
@@ -596,6 +622,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
         },
       });
       shots.push({ shot, image });
+      debug?.setLastCapture(image);
       bus.emit('photoCaptured', { shot });
     } catch (err) {
       console.error('[photo] 撮影に失敗', err);
@@ -611,7 +638,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
   const homePlan = homePlanFor(stopAtHome ? params.t : null, ride);
   const planOf = (screen: FlowState['screen'], t: number): RoomPlan => {
     const plan = planFor(screen, t, ride);
-    return plan === HOME_PLAN ? homePlan : plan;
+    if (plan === HOME_PLAN) return homePlan;
+    // 乗車中は、先の時刻に描く部屋の読み込みも足す（岸の区間は降車の乗り場を頭から描くので、天球の間に読んでおく）
+    return screen === 'riding' || screen === 'pause' ? withLookahead(plan, planFor(screen, Math.min(RIDE_DURATION, t + LOOKAHEAD_SEC), ride)) : plan;
   };
   // 起動時に読み込む部屋 = 入口の計画の部屋
   const initialRooms = HOME_PLAN.keep;
@@ -680,6 +709,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   addEventListener('resize', onResize);
   onResize();
 
+  let lastSceneScreen: ScreenId = 'home';
+  let lastSceneT = 0;
   renderer.setAnimationLoop(() => {
     const nowMs = performance.now();
     const frameMs = nowMs - lastNow;
@@ -691,8 +722,12 @@ export async function startApp(root: HTMLElement): Promise<void> {
     // 場面の時刻: ゴンドラの位置・部屋・画面効果を決める。乗車の外でも、降車の後（ライドフォト）は降車の時刻のまま
     // （0 にすると、降車の瞬間にゴンドラが乗り場の向きへ回る。VR では世界が回る）。待ち列・入口などは乗車の頭
     // 小画面（棚・設定・乗り方・クレジット）は、開いた元の画面の景色のまま（ライドフォトから開いたとき、背景が入口の部屋へ跳ばない）
-    const sceneScreen = sceneScreenFor(flow.screen, flow.returnTo);
-    const t = sceneTimeFor(sceneScreen, rideT);
+    // VR を出る数フレーム（入口へ戻る操作の後、セッションが終わるまで）は、場面を直前のまま（時刻 0・入口の部屋へ跳ばない。VR では世界が跳ぶ）
+    const vrLeaving = holdsSceneForVrExit(xr.active, flow.screen);
+    const sceneScreen = vrLeaving ? lastSceneScreen : sceneScreenFor(flow.screen, flow.returnTo);
+    const t = vrLeaving ? lastSceneT : sceneTimeFor(sceneScreen, rideT);
+    lastSceneScreen = sceneScreen;
+    lastSceneT = t;
     frameT = t;
 
     ride.poseAt(t, settings.comfort, pose);
@@ -701,6 +736,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     gondolaPos[0] = pose.x;
     gondolaPos[1] = pose.y;
     gondolaPos[2] = pose.z;
+    frameSection = pose.section;
 
     // 殻と画面効果はすべて乗車の時刻から決める（乗車の頭で殻が下から上へ閉じ、降車で上から下へ開く）
     fxOptions.comfort = settings.comfort;

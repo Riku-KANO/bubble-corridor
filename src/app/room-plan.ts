@@ -5,7 +5,7 @@
 // なぜ乗車の外でも計画を渡すのか: 降車して入口へ戻ったとき、最後の乗車の計画が残ると、
 // 入口の背景が前の部屋の空気のままになり（lobby が解放されていて空気が取れない）、
 // 乗り場と待ち列の部屋も解放されたままなので、もう一度乗ると頭で部屋が空になる。
-import { RIDE_DURATION } from '../config';
+import { RIDE_DURATION, STREAMING } from '../config';
 import { ROOM_OF_SECTION, type RoomId, type SectionId } from '../contracts/ids';
 import type { Ride } from '../contracts/ride';
 import type { ScreenId } from '../contracts/ui';
@@ -116,4 +116,42 @@ export function homePlanFor(startSec: number | null, ride: Ride): RoomPlan {
     aheadCache.set(ahead, plan);
   }
   return plan;
+}
+
+/**
+ * 乗車中に、先の時刻の計画で描く部屋を、いまの計画の読み込みへ足すために先を見る秒数。次の部屋を描き始める窓（STREAMING.aheadSec）に、
+ * 読み込みと先読みが終わる余裕を足す。岸の区間（660 秒）は降車の乗り場を区間の頭から描くので、天球の間に先に読んでおかないと、
+ * 岸の頭で読み込みの終わった部屋がそのまま場面に足され、先読みなしで初めて描かれる（S-29 レビュー1巡目 P1-1）
+ */
+export const LOOKAHEAD_SEC = STREAMING.aheadSec + 10;
+
+const lookaheadCache = new WeakMap<RoomPlan, WeakMap<RoomPlan, RoomPlan>>();
+
+/**
+ * いまの計画に、先の計画で描く部屋の読み込みを足す（見せる部屋はいまの計画のまま。持つ部屋 keep だけ増える）。
+ * 先の計画の部屋がすべてもう keep にあれば、いまの計画をそのまま返す。同じ組には同じ参照を返す（RoomManager は参照で同じ計画かを比べる）。
+ * 戻り値は凍結した共有の物で、書き換えない。
+ */
+export function withLookahead(plan: RoomPlan, ahead: RoomPlan): RoomPlan {
+  const extra = ahead.visible.filter((id) => !plan.keep.includes(id));
+  if (extra.length === 0) return plan;
+  let inner = lookaheadCache.get(plan);
+  if (!inner) {
+    inner = new WeakMap();
+    lookaheadCache.set(plan, inner);
+  }
+  let merged = inner.get(ahead);
+  if (!merged) {
+    merged = Object.freeze({ visible: plan.visible, keep: Object.freeze([...plan.keep, ...extra]) });
+    inner.set(ahead, merged);
+  }
+  return merged;
+}
+
+/**
+ * VR を出る途中か（入口へ戻る操作の後、VR のセッションが終わるまでの数フレーム）。この間は画面が入口でも、場面（時刻・部屋）を直前のまま保つ。
+ * 入口の場面（乗車の頭、入口の部屋）へ切り替えると、VR の中で世界が跳ぶ（S-29 レビュー1巡目 P2-4）。
+ */
+export function holdsSceneForVrExit(xrActive: boolean, screen: ScreenId): boolean {
+  return xrActive && screen === 'home';
 }

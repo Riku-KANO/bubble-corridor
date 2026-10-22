@@ -34,6 +34,10 @@ export function createDebugOverlay(root: HTMLElement, backend: string) {
     recordCapture(t: number) {
       captures.push(t);
     },
+    /** 撮影が描いた画像（撮るたびに差し替える。写真の明るさなどを e2e が測る。?debug のときだけ） */
+    setLastCapture(image: Blob) {
+      shared.lastCapture = image;
+    },
     /** 乗り直し: 撮影の時刻の記録を空にする */
     clearCaptures() {
       captures.length = 0;

@@ -43,8 +43,16 @@ export function createEnvironmentSlot(scene: THREE.Scene, renderer: THREE.WebGPU
       made.set(source, target);
       const onDispose = (): void => {
         source.removeEventListener('dispose', onDispose);
-        made.get(source)?.dispose();
+        const rt = made.get(source);
         made.delete(source);
+        if (!rt) return;
+        // 部屋の解放で元の画像が捨てられた。ノードが捨てる反射用の画像を指したままにならないよう、入れ物の画像へ戻してから捨てる
+        if (node.value === rt.texture) {
+          node.value = placeholderPmrem;
+          scene.environmentIntensity = 0;
+          if (current === source) current = null;
+        }
+        rt.dispose();
       };
       source.addEventListener('dispose', onDispose);
       return target.texture;
@@ -55,7 +63,8 @@ export function createEnvironmentSlot(scene: THREE.Scene, renderer: THREE.WebGPU
   }
 
   const initial = placeholder();
-  const node = pmremTexture(pmremOf(initial) ?? initial);
+  const placeholderPmrem: THREE.Texture = pmremOf(initial) ?? initial;
+  const node = pmremTexture(placeholderPmrem);
   // scene.environment は使わない（null のまま）。three は scene.environmentNode があればそれを環境として使う
   (scene as THREE.Scene & { environmentNode: unknown }).environmentNode = node;
   scene.environment = null;

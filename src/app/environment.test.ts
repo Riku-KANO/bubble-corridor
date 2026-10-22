@@ -97,4 +97,22 @@ describe('環境画像の入れ物', () => {
     a.dispose();
     expect(disposed).toHaveBeenCalledTimes(1);
   });
+
+  it('使っている画像が解放されたら、ノードは入れ物の画像へ戻り、反射の強さは 0（解放済みの画像を指したままにならない）', () => {
+    vi.spyOn(THREE.PMREMGenerator.prototype, 'fromEquirectangular').mockImplementation(() => fakePmrem());
+    const scene = new THREE.Scene();
+    const slot = createEnvironmentSlot(scene, {} as THREE.WebGPURenderer);
+    const node = (scene as THREE.Scene & { environmentNode: { value: THREE.Texture } }).environmentNode;
+    const placeholderPmrem = node.value;
+    const a = equirect('a');
+    slot.apply(a);
+    expect(node.value).not.toBe(placeholderPmrem);
+    a.dispose();
+    expect(node.value).toBe(placeholderPmrem);
+    expect(scene.environmentIntensity).toBe(0);
+    // 同じ画像をもう一度渡すと、作り直して使える
+    const b = equirect('b');
+    slot.apply(b);
+    expect(scene.environmentIntensity).toBe(1);
+  });
 });

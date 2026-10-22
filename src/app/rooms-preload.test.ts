@@ -41,7 +41,9 @@ function setup(fail = false, mayStart: { current: boolean } = { current: true })
   ) as Record<RoomId, RoomFactory>;
   const scene = new THREE.Scene();
   const rooms = new RoomManager(factories, {} as RoomContext, scene, {
-    onPreload: (module, alive) => calls.push({ module, alive }),
+    onPreload: (module, alive) => {
+      calls.push({ module, alive });
+    },
     mayStartPreload: () => mayStart.current,
   });
   return { rooms, scene, finish, calls, made };
@@ -122,5 +124,112 @@ describe('次の部屋の読み込みを始める時（膜の前後を避ける�
     mayStart.current = false;
     rooms.sync(plan(['platform'], ['lobby', 'platform']));
     expect(made).toEqual(['lobby', 'platform']);
+  });
+});
+
+describe('先読み中の部屋を場面に足さない（読み込みが終わった時点ですでに描く計画にある部屋）', () => {
+  function holdSetup() {
+    const finishers = new Map<RoomId, () => void>();
+    const roots = new Map<RoomId, THREE.Object3D>();
+    let release: () => void = () => {};
+    const held = { current: true };
+    const released: RoomId[] = [];
+    const ids: RoomId[] = ['lobby', 'platform', 'greenhouse', 'rain', 'kaleidoscope', 'celestial', 'dawn'];
+    const factories = Object.fromEntries(
+      ids.map((id): [RoomId, RoomFactory] => [
+        id,
+        () => {
+          const m = fakeRoom(id, finishers);
+          roots.set(id, m.root);
+          return m;
+        },
+      ]),
+    ) as Record<RoomId, RoomFactory>;
+    const scene = new THREE.Scene();
+    const rooms = new RoomManager(factories, {} as RoomContext, scene, {
+      onPreload: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      holdAttach: () => held.current,
+      onRelease: (m) => released.push(m.id),
+    });
+    return { rooms, scene, finishers, roots, held, released, release: () => release() };
+  }
+
+  it('先読みが終わるまで場面に足さず、終わったら足す', async () => {
+    const { rooms, scene, finishers, roots, release } = holdSetup();
+    rooms.sync(plan(['lobby'], ['lobby']));
+    finishers.get('lobby')!();
+    await rooms.ensure('lobby');
+    expect(scene.children).not.toContain(roots.get('lobby'));
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(scene.children).toContain(roots.get('lobby'));
+  });
+
+  it('待たせてよい間（holdAttach）が終われば、先読み中でも毎フレームの sync が足す', async () => {
+    const { rooms, scene, finishers, roots, held } = holdSetup();
+    const p = plan(['lobby'], ['lobby']);
+    rooms.sync(p);
+    finishers.get('lobby')!();
+    await rooms.ensure('lobby');
+    rooms.sync(p);
+    expect(scene.children).not.toContain(roots.get('lobby'));
+    held.current = false;
+    rooms.sync(p);
+    expect(scene.children).toContain(roots.get('lobby'));
+  });
+
+  it('足し終えた部屋は、先読み中でも外さない。まだ描かない部屋は待たされても関係ない', async () => {
+    const { rooms, scene, finishers, roots, held } = holdSetup();
+    rooms.sync(plan(['lobby'], ['lobby', 'platform']));
+    finishers.get('platform')!();
+    await rooms.ensure('platform');
+    expect(scene.children).not.toContain(roots.get('platform')); // 描く計画にない
+    held.current = false;
+    finishers.get('lobby')!();
+    await rooms.ensure('lobby');
+    expect(scene.children).toContain(roots.get('lobby'));
+    held.current = true;
+    rooms.sync(plan(['lobby'], ['lobby', 'platform']));
+    expect(scene.children).toContain(roots.get('lobby'));
+  });
+
+  it('解放するとき（計画から外れる・dispose）に onRelease を呼ぶ。読み込み中の部屋には呼ばない', async () => {
+    const { rooms, finishers, released } = holdSetup();
+    rooms.sync(plan(['lobby'], ['lobby', 'platform']));
+    finishers.get('lobby')!();
+    await rooms.ensure('lobby');
+    rooms.sync(plan([], [])); // lobby は解放、platform は読み込み中のまま外れる
+    expect(released).toEqual(['lobby']);
+  });
+
+  it('onPreload が例外を出しても、部屋は表示される', async () => {
+    const finishers = new Map<RoomId, () => void>();
+    const roots = new Map<RoomId, THREE.Object3D>();
+    const factories = {
+      lobby: () => {
+        const m = fakeRoom('lobby', finishers);
+        roots.set('lobby', m.root);
+        return m;
+      },
+    } as unknown as Record<RoomId, RoomFactory>;
+    const scene = new THREE.Scene();
+    const rooms = new RoomManager(factories, {} as RoomContext, scene, {
+      onPreload: () => {
+        throw new Error('prewarm failed');
+      },
+    });
+    const error = console.error;
+    console.error = () => {};
+    try {
+      rooms.sync(plan(['lobby'], ['lobby']));
+      finishers.get('lobby')!();
+      await rooms.ensure('lobby');
+    } finally {
+      console.error = error;
+    }
+    expect(scene.children).toContain(roots.get('lobby'));
   });
 });

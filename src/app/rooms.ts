@@ -10,6 +10,8 @@ interface Slot {
   ready: boolean;
   readonly loading: Promise<void>;
   attached: boolean;
+  /** 先読み（onPreload が返した約束）が終わっていないか */
+  preparing: boolean;
 }
 
 /** 部屋の並びが同じか（確保なしで比べる） */
@@ -24,9 +26,17 @@ function sameRooms(a: readonly RoomId[], b: readonly RoomId[]): boolean {
 export interface RoomHooks {
   /**
    * 読み込みが終わった部屋に呼ぶ。描き始める前に、シェーダーを先に組むために使う（S-29）。
-   * alive は、部屋がまだ管理の中にあるか（計画から外れて解放されたら偽。先読みを打ち切る）
+   * alive は、部屋がまだ管理の中にあるか（計画から外れて解放されたら偽。先読みを打ち切る）。
+   * 約束を返したら、それが終わるまでが「先読み中」（holdAttach の対象）。例外を出しても部屋の表示は止めない
    */
-  readonly onPreload?: (module: RoomModule, alive: () => boolean) => void;
+  readonly onPreload?: (module: RoomModule, alive: () => boolean) => Promise<void> | void;
+  /**
+   * 先読み中の部屋を、いま場面に足さずに待つか（描く計画に入っているのに、先読みが終わっていない部屋。毎フレーム見直す）。
+   * 読み込みが終わった時点ですでに描く計画にある部屋を、先読みなしで初めて描かない（S-29）。省略は常に false
+   */
+  readonly holdAttach?: (module: RoomModule) => boolean;
+  /** 部屋を解放するとき（dispose の前）に呼ぶ。先読みの記録を捨てるのに使う */
+  readonly onRelease?: (module: RoomModule) => void;
   /**
    * いま、まだ描かない部屋（次の部屋）の読み込みを始めてよいか（偽の間は待つ）。部屋の読み込みは主スレッドを 50〜120ms 占めるので、
    * 区間が変わる膜の前後には始めない（S-29）。いま描く部屋は待たずに読む。省略は常に true
@@ -43,6 +53,8 @@ export class RoomManager {
   private door: DoorChoice | null = null;
   /** 読み込みを始めるのを待っている部屋（まだ描かない部屋。膜の前後を避ける）。同じ計画のまま毎フレーム sync が見直す */
   private readonly deferred = new Set<RoomId>();
+  /** 先読み中のために場面へ足すのを待たせている部屋があるか。同じ計画のまま毎フレーム sync が見直す */
+  private holding = false;
   private touchCache: Touchable[] = [];
   private touchDirty = true;
 
@@ -62,6 +74,7 @@ export class RoomManager {
       module,
       ready: false,
       attached: false,
+      preparing: false,
       loading: module.load(this.ctx).then(
         () => {
           // 読み込み中に計画から外れて、スロットはもう無い（解放のときは読み込みが終わっていなかったので dispose できなかった）。ここで解放する
@@ -73,7 +86,19 @@ export class RoomManager {
           if (this.door !== null) module.setDoor?.(this.door);
           this.touchDirty = true;
           // 描き始める前（描き始めても視野の外の物は描かれない）に、シェーダーを組んでおく
-          this.hooks.onPreload?.(module, () => this.slots.get(id) === slot);
+          try {
+            const prepared = this.hooks.onPreload?.(module, () => this.slots.get(id) === slot);
+            if (prepared) {
+              slot.preparing = true;
+              const done = (): void => {
+                slot.preparing = false;
+                this.applyVisibility();
+              };
+              prepared.then(done, done);
+            }
+          } catch (err) {
+            console.error(`[rooms] ${id} の先読みに失敗`, err);
+          }
           this.applyVisibility();
         },
         (err) => {
@@ -93,6 +118,7 @@ export class RoomManager {
   sync(plan: { readonly visible: readonly RoomId[]; readonly keep: readonly RoomId[] }): void {
     if (plan === this.lastPlan) {
       this.startDeferred();
+      if (this.holding) this.applyVisibility();
       return;
     }
     this.lastPlan = plan;
@@ -105,7 +131,7 @@ export class RoomManager {
     for (const [id, slot] of this.slots) {
       if (plan.keep.includes(id)) continue;
       if (slot.attached) this.scene.remove(slot.module.root);
-      if (slot.ready) slot.module.dispose();
+      this.release(slot);
       this.slots.delete(id);
       this.touchDirty = true;
     }
@@ -124,9 +150,24 @@ export class RoomManager {
     this.deferred.clear();
   }
 
+  /** 読み込み済みの部屋を解放する（先読みの記録も捨てる） */
+  private release(slot: Slot): void {
+    if (!slot.ready) return;
+    try {
+      this.hooks.onRelease?.(slot.module);
+    } catch (err) {
+      console.error(`[rooms] ${slot.module.id} の解放の通知に失敗`, err);
+    }
+    slot.module.dispose();
+  }
+
   private applyVisibility(): void {
+    this.holding = false;
     for (const [id, slot] of this.slots) {
-      const show = slot.ready && this.visible.includes(id);
+      // 先読み中の部屋は、描く計画に入っていても、先読みが終わるまで（holdAttach が許す間）足さない
+      const hold = slot.ready && slot.preparing && this.visible.includes(id) && !slot.attached && this.hooks.holdAttach?.(slot.module) === true;
+      if (hold) this.holding = true;
+      const show = slot.ready && this.visible.includes(id) && !hold;
       if (show && !slot.attached) {
         this.scene.add(slot.module.root);
         slot.attached = true;
@@ -191,7 +232,7 @@ export class RoomManager {
   dispose(): void {
     for (const slot of this.slots.values()) {
       if (slot.attached) this.scene.remove(slot.module.root);
-      if (slot.ready) slot.module.dispose();
+      this.release(slot);
     }
     this.slots.clear();
   }

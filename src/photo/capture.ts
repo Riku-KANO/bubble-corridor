@@ -219,8 +219,119 @@ function isInScene(scene: THREE.Scene, o: THREE.Object3D): boolean {
 }
 
 /**
+ * 2回に分けて描く材質か（透明で両面。three は透明な両面の物を、裏面だけ・表面だけの2回に分けて描く）。
+ * compileAsync はこの2回の描き分けのとき材質の side を一時的に変えるが、物の組み立ては非同期で後から走り、そのときには side が
+ * 両面に戻っているので、描くときと違う両面用のシェーダーが作られ、撮影がそれを使ってしまう（ゴンドラの殻の写真に白いヴェールが載った）。
+ * この材質の物は compileAsync で組まない（撮影の描き出しが、側面ごとに描き分けて正しく自分で組む）。
+ */
+export function isDoublePass(obj: THREE.Object3D): boolean {
+  const material = (obj as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+  for (const m of Array.isArray(material) ? material : material ? [material] : []) {
+    if (m.transparent === true && m.side === THREE.DoubleSide && (m as THREE.Material & { forceSinglePass?: boolean }).forceSinglePass !== true) return true;
+  }
+  return false;
+}
+
+/** 透明で両面の材質 → 裏面だけ・表面だけにした、組む専用の写し（物は描かない。元の材質が捨てられたら一緒に捨てる） */
+const doublePassVariants = new WeakMap<THREE.Material, readonly [THREE.Material, THREE.Material]>();
+
+function variantsOf(material: THREE.Material): readonly [THREE.Material, THREE.Material] {
+  let pair = doublePassVariants.get(material);
+  if (!pair) {
+    const make = (side: THREE.Side): THREE.Material => {
+      // 材質の写し。Material.clone() は、子の材質が足した設定（ガラスの centerSpecular など）を写さないので、全部の設定を浅く写す
+      const copy = Object.assign(Object.create(Object.getPrototypeOf(material) as object) as THREE.Material, material);
+      (copy as unknown as { _listeners?: unknown })._listeners = undefined; // 元の材質と捨てるときの連絡の表を共有しない
+      copy.side = side;
+      return copy;
+    };
+    pair = [make(THREE.BackSide), make(THREE.FrontSide)];
+    doublePassVariants.set(material, pair);
+    material.addEventListener('dispose', () => {
+      for (const v of pair!) v.dispose();
+      doublePassVariants.delete(material);
+    });
+  }
+  return pair;
+}
+
+/**
+ * 透明で両面の材質の物を、compileAsync で正しく組む（非同期のリンクで。主スレッドを止めない）。compileAsync は裏面だけ・表面だけの
+ * 2回を列に入れるが、組み立て（非同期）が走るときには材質の side が両面に戻っているので、両面用のシェーダーになってしまう。
+ * そこで、その物の材質を「裏面だけ」「表面だけ」にした写しに一時的に替えて、普通の透明な物として組む。
+ * 組んだシェーダーとプログラムは、材質の設定が同じなら、描くときの裏面・表面の描き分けがそのまま使う（three は設定が同じ材質で組み立てを共有する）。
+ * 物の材質は同期の部分の間だけ替える（run は compileAsync を呼ぶ関数。同期の部分で列に入れる）。複数の材質（配列）の物は対象外（false）
+ */
+export async function compileDoublePassVariants(obj: THREE.Object3D, run: () => Promise<void>): Promise<boolean> {
+  const mesh = obj as THREE.Mesh;
+  const original = mesh.material;
+  if (!original || Array.isArray(original)) return false;
+  for (const variant of variantsOf(original)) {
+    mesh.material = variant;
+    let pending: Promise<void>;
+    try {
+      pending = run();
+    } finally {
+      mesh.material = original;
+    }
+    await pending;
+  }
+  return true;
+}
+
+/** 透明で両面の物を試しに描くときの、カメラの層（その物と光源だけを、この層に一時的に入れる） */
+const WARM_LAYER = 31;
+
+/**
+ * 透明で両面の物を、撮影の状態で小さな描画先に1回描いて、シェーダーを組む（compileAsync では組めない。isDoublePass）。
+ * renderer.render は裏面・表面の2回に分けて、材質の side を合わせたまま正しく組む。描く物以外は層で除き、
+ * 親が隠れていても描くよう親の visible を一時的に立てる。終わったら必ず戻す。描画先の画素は捨てる。
+ */
+function warmDoublePass(
+  renderer: THREE.WebGPURenderer,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  target: THREE.RenderTarget,
+  aspect: number,
+  obj: THREE.Object3D,
+): void {
+  const saved: [THREE.Object3D, boolean][] = [];
+  for (let p: THREE.Object3D | null = obj; p && p !== scene; p = p.parent) {
+    saved.push([p, p.visible]);
+    p.visible = true;
+  }
+  const culled = obj.frustumCulled;
+  const layerMask = obj.layers.mask;
+  obj.frustumCulled = false;
+  obj.layers.enable(WARM_LAYER);
+  // 光源は描く物ではないが、カメラの層に入れておく（入れないと、光源のない場面として別の材質ができる）
+  const lights: [THREE.Object3D, number][] = [];
+  for (const child of scene.children) {
+    if ((child as THREE.Light).isLight) {
+      lights.push([child, child.layers.mask]);
+      child.layers.enable(WARM_LAYER);
+    }
+  }
+  const warmCamera = new THREE.PerspectiveCamera();
+  warmCamera.layers.set(WARM_LAYER);
+  camera.getWorldPosition(warmCamera.position);
+  camera.getWorldQuaternion(warmCamera.quaternion);
+  warmCamera.updateMatrixWorld();
+  try {
+    inCaptureState(renderer, warmCamera, target, aspect, () => renderer.render(scene, warmCamera));
+  } finally {
+    for (const [light, mask] of lights) light.layers.mask = mask;
+    obj.layers.mask = layerMask;
+    obj.frustumCulled = culled;
+    for (const [p, v] of saved) p.visible = v;
+  }
+}
+
+/**
  * 物 1 つのシェーダーとパイプラインを作る（compileAsync の同期の部分だけ、撮影の状態で）。
  * 隠れた物も作るので visible を立て、見えている範囲に関わらず作るので視錐台の判定を外し、終わったら必ず戻す。
+ * compileAsync は子もまとめて組むが、子は別の物として列にある（透明で両面の子は組まない）ので、この物だけ組むよう、
+ * 同期の部分の間だけ子を隠す。
  * compileAsync が描く物の一覧を作る同期の部分は、戻ってきた時点で終わっているので、戻してよい（続きは一覧に沿って進む）。
  */
 function compileOne(
@@ -233,13 +344,17 @@ function compileOne(
 ): Promise<void> {
   const visible = obj.visible;
   const culled = obj.frustumCulled;
+  const children = obj.children;
+  const childVisible = children.map((c) => c.visible);
   obj.visible = true;
   obj.frustumCulled = false;
+  for (const c of children) c.visible = false;
   try {
     return inCaptureState(renderer, camera, target, aspect, () => renderer.compileAsync(obj, camera, scene));
   } finally {
     obj.visible = visible;
     obj.frustumCulled = culled;
+    children.forEach((c, i) => (c.visible = childVisible[i]!));
   }
 }
 
@@ -283,7 +398,11 @@ export async function prepareCapture(
       await exclusively(async () => {
         if (job.cancelled || !isInScene(scene, obj)) return;
         try {
-          await compileOne(renderer, scene, camera, t, aspect, obj);
+          if (isDoublePass(obj)) {
+            // まず、材質の写しで compileAsync（非同期のリンク）。そのあと小さな描画先に描いて、描画の状態（パイプライン）まで作る
+            await compileDoublePassVariants(obj, () => compileOne(renderer, scene, camera, t, aspect, obj));
+            warmDoublePass(renderer, scene, camera, t, aspect, obj);
+          } else await compileOne(renderer, scene, camera, t, aspect, obj);
         } catch {
           // 物1つの失敗で残りの下ごしらえを止めない（撮影のときにその物だけ作られる）
         }

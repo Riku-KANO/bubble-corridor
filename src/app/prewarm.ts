@@ -24,6 +24,7 @@
 // drawBuffers の警告）。実機で確かめられるまでは、組むだけにしている。
 // 失敗しても体験は止めない（描くときに自分で作られる）。
 import * as THREE from 'three/webgpu';
+import { compileDoublePassVariants } from '../photo/capture';
 
 export interface PrewarmEnv {
   readonly renderer: THREE.WebGPURenderer;
@@ -33,6 +34,8 @@ export interface PrewarmEnv {
   fxActive(): boolean;
   /** VR の提示中か */
   xrActive(): boolean;
+  /** 確認用（?debug）。three の非公開の内部の形が想定と違うとき、起動時に警告を出す */
+  readonly debug?: boolean;
 }
 
 export interface Prewarmer {
@@ -47,12 +50,22 @@ export interface Prewarmer {
    * 組み終えたとき（または打ち切ったとき）に resolve。部屋が増えて文脈（水面の映り込み）が増えたときは、先に組んだ部屋の足りない分も組む
    */
   prepare(root: THREE.Object3D, alive: () => boolean, canRun?: () => boolean): Promise<void>;
+  /** 部屋を解放するとき、その部屋の記録（部屋の物への参照）を捨てる */
+  forget(root: THREE.Object3D): void;
+  /**
+   * 画像を GPU へ転送しておく（1 つずつ、間を空けて）。部屋は読み込みの後で材質の画像を差し替える（乗り場の朝のライトマップ、
+   * 雨の回廊の扉の環境画像など）。差し替えた最初のフレームで 2048 角の画像の転送（約 95ms）が走らないよう、先に済ませる。
+   * 転送済みなら何もしない。alive が偽になったら打ち切る。canRun が偽の間は新しい一歩を始めない
+   */
+  uploadTextures(textures: readonly THREE.Texture[], alive: () => boolean, canRun?: () => boolean): Promise<void>;
 }
 
 /** 組む作業を主スレッドで続けてよい時間（ms）。これを超えたら次のタスクへ回す */
 const SLICE_MS = 3;
 /** 先読みを始めてよくなるのを待つ間隔（ms） */
 const GATE_POLL_MS = 100;
+/** 部屋の先読みを始める前に空ける時間（ms）。部屋の読み込みの終わりの続き（材質の組み立てなど）と同じ時間帯に並べない */
+const JOB_START_DELAY_MS = 250;
 /** 試しに描いた次の物まで空ける時間（ms）。1 フレームぶん。GPU 側のパイプライン作りを散らす */
 const DRAW_GAP_MS = 16;
 /** 試しに描くカメラの層。描く物だけをこの層に一時的に入れる（光源も、材質の鍵を同じにするため入れる） */
@@ -75,7 +88,9 @@ function isRenderable(o: THREE.Object3D): boolean {
  * 裏面と表面を2回に分けて描く材質か（透明で両面。three は透明な両面の物を、裏面だけ・表面だけの2回に分けて描く）。
  * compileAsync はこの2回の描き分けのとき材質の side を一時的に変えるが、物の組み立ては非同期で後から走り、そのときには side が
  * 両面に戻っているので、両面用の（描くときと違う）シェーダーが作られ、そのまま使われてしまう（ゴンドラの殻に白いヴェールが載った）。
- * この材質の物は compileAsync で組まず、試しに描く（renderer.render は側面ごとに描き分けて正しく組む）だけにする。
+ * この物は、そのままの compileAsync では組まない。材質を「裏面だけ」「表面だけ」にした写しで組み（compileDoublePassVariants。
+ * 設定が同じ材質は組み立てを共有するので、描くときの裏面・表面の描き分けがそのまま使う）、そのあと、試しに描いて描画の状態まで作る
+ * （renderer.render は側面ごとに描き分けて正しく組む）。
  */
 export function isDoublePass(obj: THREE.Object3D): boolean {
   return isDoublePassMaterial((obj as THREE.Mesh).material);
@@ -153,6 +168,8 @@ interface Job {
   readonly root: THREE.Object3D;
   readonly alive: () => boolean;
   readonly canRun: () => boolean;
+  /** 組み始めたか（最初の一歩の前に、少し間を空ける） */
+  started: boolean;
   /** 材質を調べて水面の映り込みを見つけたか */
   scanned: boolean;
   reflectSamples: number[];
@@ -246,23 +263,32 @@ export function createPrewarmer(env: PrewarmEnv): Prewarmer {
       if (patched) contexts.get = (renderTarget, mrt) => original.call(contexts, renderTarget, mrt, depth);
       return draw();
     } finally {
-      if (patched) contexts.get = original;
+      // 自前のプロパティを消して、元の口（RenderContexts.prototype.get）に戻す
+      if (patched) delete (contexts as { get?: unknown }).get;
       renderer.setMRT(prevMRT);
       renderer.setRenderTarget(prevTarget);
     }
   }
 
-  /** 物 1 つのシェーダーとパイプラインを組む。隠れた物も組むので visible を立て、視錐台の判定を外し、必ず戻す */
+  /**
+   * 物 1 つのシェーダーとパイプラインを組む。隠れた物も組むので visible を立て、視錐台の判定を外し、必ず戻す。
+   * compileAsync は子もまとめて組むが、子は別の物として一覧にある。まとめて組むと、子が親の数だけ重ねて組まれ、
+   * 透明で両面の子は両面用の（描くときと違う）シェーダーで組まれてしまう。この物だけ組むよう、同期の部分の間だけ子を隠す
+   */
   function compileOne(obj: THREE.Object3D, ctx: Context): Promise<void> {
     const visible = obj.visible;
     const culled = obj.frustumCulled;
+    const children = obj.children;
+    const childVisible = children.map((c) => c.visible);
     obj.visible = true;
     obj.frustumCulled = false;
+    for (const c of children) c.visible = false;
     try {
       return inContext(ctx, () => renderer.compileAsync(obj, camera, scene));
     } finally {
       obj.visible = visible;
       obj.frustumCulled = culled;
+      children.forEach((c, i) => (c.visible = childVisible[i]!));
     }
   }
 
@@ -270,6 +296,11 @@ export function createPrewarmer(env: PrewarmEnv): Prewarmer {
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
   const jobs: Job[] = [];
+
+  // three の非公開の内部（描画の文脈の入れ物）の形を確かめる。無ければ組む文脈が合わない（組む作業そのものは続ける）
+  if (env.debug && typeof (renderer as unknown as { _renderContexts?: RenderContextsLike })._renderContexts?.get !== 'function') {
+    console.warn('[prewarm] renderer._renderContexts.get がありません（three の版が変わった）。先読みは画面の描画と別の文脈で組まれ、効かない可能性があります');
+  }
 
   /** 動いている部屋の文脈の一覧: 場面の描画と、動いている部屋にある水面の映り込みの描画先の形ごと */
   function contexts(): Context[] {
@@ -358,6 +389,11 @@ export function createPrewarmer(env: PrewarmEnv): Prewarmer {
 
   /** 1 つの部屋の1つの文脈を、物ごとに組み、描く。続けられなくなったら（解放された）false */
   async function compileJob(job: Job, ctx: Context): Promise<boolean> {
+    if (!job.started) {
+      job.started = true;
+      await wait(JOB_START_DELAY_MS);
+      if (!job.alive()) return false;
+    }
     const objects: THREE.Object3D[] = [];
     job.root.traverse((o) => {
       if (isRenderable(o)) objects.push(o);
@@ -375,6 +411,8 @@ export function createPrewarmer(env: PrewarmEnv): Prewarmer {
       }
       try {
         if (!isDoublePass(obj)) await compileOne(obj, ctx);
+        // 透明で両面の物は、材質の写し（裏面だけ・表面だけ）で組む。組めなければ（材質が配列など）、下の試しに描く経路が組む
+        else await compileDoublePassVariants(obj, () => compileOne(obj, ctx));
         // 読み込み直後の材質から差し替えられていれば、そちらも組む（差し替えは同期の部分の間だけ。続きは一覧に沿って進む）
         const first = job.initialMaterials.get(obj);
         const now = (obj as THREE.Mesh).material;
@@ -456,14 +494,38 @@ export function createPrewarmer(env: PrewarmEnv): Prewarmer {
       queue = run;
       return run;
     },
+    uploadTextures(textures, alive, canRun = () => true) {
+      const run = queue
+        .then(async () => {
+          for (const texture of textures) {
+            while (alive() && !canRun()) await wait(GATE_POLL_MS);
+            if (!alive()) return;
+            // 画像が無い（捨てられた）・VR の間は転送しない（VR の描画の状態と混ざらないよう、組む作業と同じ扱い）
+            if (!(texture as { image?: unknown }).image) continue;
+            try {
+              renderer.initTexture(texture);
+            } catch {
+              // 転送できなくても体験は止めない（使うときに自分で転送される）
+            }
+            await wait(DRAW_GAP_MS);
+          }
+        })
+        .catch(() => undefined);
+      queue = run;
+      return run;
+    },
+    forget(root) {
+      for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i]!.root === root) jobs.splice(i, 1);
+    },
     prepare(root, alive, canRun = () => true) {
+      for (let i = jobs.length - 1; i >= 0; i--) if (!jobs[i]!.alive()) jobs.splice(i, 1); // 解放された部屋の記録を捨てる
       // 読み込み直後の材質を、ここで同期に控える（部屋が最初の update で差し替える前）。調べるのは組む作業の中
       const initialMaterials = new Map<THREE.Object3D, THREE.Material | THREE.Material[]>();
       root.traverse((o) => {
         const material = (o as THREE.Mesh).material;
         if (isRenderable(o) && material) initialMaterials.set(o, material);
       });
-      jobs.push({ root, alive, canRun, scanned: false, reflectSamples: [], mirrorMaterials: new Set(), initialMaterials, done: new Set() });
+      jobs.push({ root, alive, canRun, started: false, scanned: false, reflectSamples: [], mirrorMaterials: new Set(), initialMaterials, done: new Set() });
       const run = queue.then(drain).catch(() => undefined);
       queue = run;
       return run;
