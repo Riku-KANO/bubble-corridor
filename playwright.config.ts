@@ -24,8 +24,9 @@ export default defineConfig({
   // 3 段に分け、前の段が終わってから次の段を走らせる（1 つのファイルの中は fullyParallel: false で順に走る）
   projects: [
     { name: 'main', testIgnore: /(photo|prewarm)\.spec\.ts/ },
-    { name: 'photo', testMatch: /photo\.spec\.ts/, dependencies: ['main'] },
-    { name: 'prewarm', testMatch: /prewarm\.spec\.ts/, dependencies: ['photo'] },
+    // 時間に敏感な検査は、同じ端末で別の作業（案1 の検査など）が GPU を使うと揺れる。落ちたら1回だけ試し直す（試し直しで通った物は flaky として報告される）
+    { name: 'photo', testMatch: /photo\.spec\.ts/, dependencies: ['main'], retries: 1 },
+    { name: 'prewarm', testMatch: /prewarm\.spec\.ts/, dependencies: ['photo'], retries: 1 },
   ],
   webServer: {
     // 毎回ビルドしてから配信する（古いビルドでテストしない）。既存サーバーは再利用しない

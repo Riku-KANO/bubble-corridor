@@ -133,18 +133,25 @@ const lookaheadCache = new WeakMap<RoomPlan, WeakMap<RoomPlan, RoomPlan>>();
  * 戻り値は凍結した共有の物で、書き換えない。
  */
 export function withLookahead(plan: RoomPlan, ahead: RoomPlan): RoomPlan {
-  const extra = ahead.visible.filter((id) => !plan.keep.includes(id));
-  if (extra.length === 0) return plan;
+  // 毎フレーム呼ばれるので、先に作り済みの組を引き、足す部屋があるかは確保しないループで確かめる
+  const cached = lookaheadCache.get(plan)?.get(ahead);
+  if (cached) return cached;
+  let missing = false;
+  for (const id of ahead.visible) {
+    if (!plan.keep.includes(id)) {
+      missing = true;
+      break;
+    }
+  }
+  if (!missing) return plan;
   let inner = lookaheadCache.get(plan);
   if (!inner) {
     inner = new WeakMap();
     lookaheadCache.set(plan, inner);
   }
-  let merged = inner.get(ahead);
-  if (!merged) {
-    merged = Object.freeze({ visible: plan.visible, keep: Object.freeze([...plan.keep, ...extra]) });
-    inner.set(ahead, merged);
-  }
+  const extra = ahead.visible.filter((id) => !plan.keep.includes(id));
+  const merged: RoomPlan = Object.freeze({ visible: plan.visible, keep: Object.freeze([...plan.keep, ...extra]) });
+  inner.set(ahead, merged);
   return merged;
 }
 

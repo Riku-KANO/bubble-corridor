@@ -4,10 +4,11 @@
 // 画面（PC・スマートフォン）の描画と見回しだけで使う。VR は頭の向きとヘッドセットの視野をそのまま使う。
 // 撮影（ライドフォト）は 16:9 の決まった大きさなので使わない。
 
-/** 縦持ちで保ちたい水平の半角（度）。設計書に値がないので仮 */
-const MIN_HORIZONTAL_HALF_DEG = 25;
-/** 縦の視野角の上限（度）。これ以上は魚眼のような歪みが目立ち、酔いやすい。設計書に値がないので仮 */
-const MAX_VERTICAL_FOV_DEG = 110;
+import { CAMERA } from '../config';
+
+/** 縦持ちで保ちたい水平の半角（度）と、縦の視野角の上限（度。これ以上は魚眼のような歪みが目立ち、酔いやすい）。値は config の CAMERA */
+const MIN_HORIZONTAL_HALF_DEG = CAMERA.portraitMinHorizontalHalfDeg;
+const MAX_VERTICAL_FOV_DEG = CAMERA.portraitMaxVerticalFovDeg;
 
 /**
  * 縦の視野角。横長（左右の半角が足りている縦横比）は設定のまま、縦持ちは左右の半角が MIN_HORIZONTAL_HALF_DEG になるまで広げる。
